@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "files": [
+    "StoryStudio.pyw",
+    "storysound.py",
+    "ss_core.py",
+    "ss_premiere.py",
+    "ss_prwrite.py",
+    "ss_media.py",
+    "ss_sounds.py",
+    "ss_claude.py",
+    "ss_mmaudio_worker.py",
+    "ss_mix.py",
+    "ss_pick_worker.py",
+    "ss_sao_worker.py",
+    "ss_server.py",
+    "ss_ui.html",
+    "ss_karaoke.py",
+    "ss_karaoke_worker.py",
+    "ss_feedback.py",
+    "ss_gpt.py",
+    "ss_script.py",
+    "ss_styles.json",
+    "ss_style_pics.json",
+    "ss_update.py",
+    "storysound.ico"
+  ],
+  "notes": "Auto-update, script builder, edit feedback, karaoke and ChatGPT support."
+}

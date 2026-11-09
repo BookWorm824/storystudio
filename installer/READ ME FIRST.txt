@@ -1,0 +1,37 @@
+StoryStudio – your AI editing helper for stories, movies and music videos
+==========================================================================
+
+What it does
+  - Script builder: turns song lyrics or a story into a shot list, with a picture prompt
+    (ChatGPT / Nano Banana) and a MiniMax video prompt for every shot, character prompts,
+    Suno music prompts, a thumbnail prompt and a title image prompt. No Premiere needed.
+  - Add sound effects: reads your story and Premiere timeline, looks at the movie, and makes
+    every sound lined up with the picture at the right levels.
+  - Fix the audio: cleans up and evens out narration, balances music and effects.
+  - Karaoke lyrics: paste the lyrics; every word lights up as it's sung.
+  - Edit feedback: checks every cut, the sound and the beat, then watches the movie and
+    leaves friendly notes as coloured markers on your timeline.
+
+  Anything that changes a Premiere project is saved as a COPY. Your original is never changed.
+
+Installing (no admin rights needed)
+  1. Unzip this whole folder somewhere (for example your Desktop).
+  2. Double-click "Install StoryStudio.bat" and leave the window open until it says
+     "StoryStudio is installed". The first time takes a while (about 15 GB of downloads:
+     Python, the AI engines and models). It works best with an NVIDIA graphics card.
+  3. Open StoryStudio from the Desktop or Start Menu.
+
+  If the internet drops during installing, just run "Install StoryStudio.bat" again; it picks
+  up where it stopped. A log is saved in your StoryStudio folder (install_log.txt).
+
+Updates
+  StoryStudio keeps itself up to date. When it opens it checks for a new version and installs
+  it; while it's open it checks every 30 minutes and shows "Update now".
+
+You need
+  - Windows 10 or 11 and an internet connection.
+  - Claude OR ChatGPT, for the script builder, planning sounds and edit feedback. StoryStudio
+    uses your own plan, no extra cost. If you only have ChatGPT: open StoryStudio, click the
+    gear (Settings), choose "Set up ChatGPT", then "Sign in to ChatGPT".
+    Karaoke and "Fix the audio" work without either.
+  - Adobe Premiere Pro, only for the Premiere tasks (sounds, audio, karaoke, feedback).

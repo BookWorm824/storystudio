@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StoryStudio</title>
+<link rel="icon" href="/icon.ico">
+<style>
+:root{
+  --bg:#0e1015; --bg2:#12151c; --card:#171b23; --card2:#1d222c; --line:#272d39;
+  --text:#eef0f4; --soft:#9aa3b2; --faint:#6b7383;
+  --accent:#ffb347; --accent2:#ff7a59; --good:#4cd6a0; --warn:#ffcc66; --bad:#ff6b6b;
+  --grad:linear-gradient(135deg,#ffb347 0%,#ff7a59 100%);
+  --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font:15px/1.5 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+input,select,textarea{font:inherit;color:var(--text)}
+a{color:var(--accent)}
+.app{display:flex;flex-direction:column;height:100%}
+header{display:flex;align-items:center;gap:14px;padding:18px 28px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#141821,#10131a)}
+.logo{width:36px;height:36px;border-radius:10px;background:var(--grad);display:grid;place-items:center;box-shadow:0 6px 18px rgba(255,122,89,.35)}
+.logo svg{width:22px;height:22px}
+.brand{font:600 19px "Segoe UI Variable Display","Segoe UI",sans-serif;letter-spacing:.2px}
+.brand small{display:block;font:400 12.5px "Segoe UI",sans-serif;color:var(--soft);letter-spacing:0}
+header .grow{flex:1}
+.iconbtn{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--soft)}
+.iconbtn:hover{background:var(--card2);color:var(--text)}
+main{flex:1;overflow:auto;padding:28px}
+.wrap{max-width:1120px;margin:0 auto}
+h1{font:600 28px "Segoe UI Variable Display","Segoe UI",sans-serif;margin:0 0 6px}
+h2{font:600 18px "Segoe UI Variable Display","Segoe UI",sans-serif;margin:0 0 12px}
+.sub{color:var(--soft);margin:0 0 22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px}
+.row{display:flex;gap:16px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:11px;background:var(--card2);
+  border:1px solid var(--line);font-weight:500;transition:.15s}
+.btn:hover{border-color:#3a4252;background:#232937}
+.btn.primary{background:var(--grad);border:0;color:#1b1206;font-weight:600;box-shadow:0 8px 22px rgba(255,122,89,.28)}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.big{padding:14px 22px;font-size:16px;border-radius:13px}
+.btn.ghost{background:none;border-color:transparent;color:var(--soft)}
+.btn.ghost:hover{color:var(--text);background:var(--card2)}
+.btn:disabled{opacity:.45;cursor:default;filter:none}
+.btn svg{width:18px;height:18px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--card2);
+  border:1px solid var(--line);color:var(--soft);font-size:13px}
+.chip.good{color:var(--good);border-color:rgba(76,214,160,.3);background:rgba(76,214,160,.08)}
+.chip.warn{color:var(--warn);border-color:rgba(255,204,102,.3);background:rgba(255,204,102,.08)}
+.hidden{display:none!important}
+/* home */
+.hero{display:grid;grid-template-columns:1.2fr 1fr;gap:22px}
+.drop{border:1.5px dashed #3a4252;border-radius:20px;padding:44px;text-align:center;background:
+  radial-gradient(600px 220px at 50% 0%,rgba(255,179,71,.08),transparent),var(--card)}
+.drop svg{width:54px;height:54px;color:var(--accent);margin-bottom:10px}
+.recent{display:flex;flex-direction:column;gap:8px}
+.recent button{display:flex;align-items:center;gap:12px;text-align:left;padding:12px 14px;border-radius:12px;background:var(--card2);border:1px solid var(--line)}
+.recent button:hover{border-color:#3a4252}
+.recent .ic{width:34px;height:34px;border-radius:9px;background:#2a2142;display:grid;place-items:center;color:#c9a7ff;font-weight:700;font-size:12px}
+.recent small{color:var(--faint)}
+.project{display:grid;grid-template-columns:300px 1fr;gap:22px;align-items:stretch}
+.thumb{border-radius:14px;background:#0b0d12 center/cover no-repeat;min-height:170px;border:1px solid var(--line);position:relative;overflow:hidden}
+.thumb .len{position:absolute;right:10px;bottom:10px;background:rgba(0,0,0,.65);padding:2px 8px;border-radius:7px;font-size:13px}
+.pname{font:600 22px "Segoe UI Variable Display","Segoe UI",sans-serif;margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px}
+.saved{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:11px;background:rgba(76,214,160,.07);
+  border:1px solid rgba(76,214,160,.22);color:#bdf0db;font-size:14px}
+.saved svg{flex:none;width:18px;height:18px;color:var(--good);margin-top:2px}
+.field{display:flex;align-items:center;gap:10px;margin-top:12px;color:var(--soft);font-size:14px}
+.field b{color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:520px}
+select{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px}
+.tasks{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;margin-top:26px}
+.task{position:relative;text-align:left;padding:20px;border-radius:16px;background:var(--card);border:1px solid var(--line);transition:.18s;min-height:150px}
+.task:hover:not(.soon){transform:translateY(-2px);border-color:#46506a;box-shadow:var(--shadow)}
+.task .ti{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;margin-bottom:14px}
+.task .ti svg{width:24px;height:24px}
+.task b{display:block;font-size:16.5px;margin-bottom:4px}
+.task span{color:var(--soft);font-size:14px}
+.task.soon{opacity:.55;cursor:default}
+.badge{position:absolute;top:14px;right:14px;font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--card2);border:1px solid var(--line);color:var(--soft)}
+/* setup panel */
+.panel{margin-top:20px}
+.opt{display:grid;grid-template-columns:200px 1fr;gap:18px;padding:14px 0;border-top:1px solid var(--line);align-items:center}
+.opt:first-of-type{border-top:0}
+.opt label.t{font-weight:500}
+.opt .hint{color:var(--faint);font-size:13px;margin-top:4px}
+.seg{display:inline-flex;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+.seg button{padding:8px 14px;border-radius:9px;color:var(--soft)}
+.seg button.on{background:var(--card2);color:var(--text);box-shadow:inset 0 0 0 1px #3a4252}
+.switch{position:relative;width:46px;height:26px;flex:none;border-radius:999px;background:#2b3240;transition:.2s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#cfd5df;transition:.2s}
+.switch.on{background:var(--grad)}
+.switch.on::after{left:23px;background:#fff}
+.swrow{display:flex;align-items:center;gap:12px}
+.keyin{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;width:280px}
+.est{display:flex;align-items:center;gap:10px;color:var(--soft)}
+.est b{color:var(--text)}
+.footerbar{display:flex;justify-content:space-between;align-items:center;margin-top:18px;gap:16px}
+/* working */
+.working{max-width:720px;margin:6vh auto 0}
+.bar{height:12px;border-radius:999px;background:#232937;overflow:hidden;margin:22px 0 10px}
+.bar i{display:block;height:100%;width:0;background:var(--grad);border-radius:999px;transition:width .6s ease}
+.left{font:600 20px "Segoe UI Variable Display","Segoe UI",sans-serif}
+.steps{list-style:none;padding:0;margin:22px 0 0}
+.steps li{display:flex;gap:12px;align-items:center;padding:7px 0;color:var(--soft)}
+.steps li.now{color:var(--text)}
+.dot{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:none;background:#232937}
+.steps li.ok .dot{background:rgba(76,214,160,.15);color:var(--good)}
+.steps li.now .dot{border:2px solid var(--accent);border-top-color:transparent;animation:spin 1s linear infinite;background:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* review */
+.rhead{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:16px}
+.banner{padding:12px 14px;border-radius:12px;background:var(--card);border:1px solid var(--line);color:var(--soft);font-size:14px;margin-bottom:14px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+.filters .chip{cursor:pointer}
+.filters .chip.on{color:#1b1206;background:var(--grad);border-color:transparent;font-weight:600}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{display:grid;grid-template-columns:52px 70px 1fr auto auto;gap:14px;align-items:center;padding:12px 14px;border-radius:14px;
+  background:var(--card);border:1px solid var(--line);transition:.15s}
+.item:hover{border-color:#353d4d}
+.item.off{opacity:.5}
+.item .tm{font-variant-numeric:tabular-nums;color:var(--soft);font-size:14px}
+.item .w b{display:block;font-weight:500}
+.item .w small{color:var(--faint);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:560px}
+.pill{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line);color:var(--soft);white-space:nowrap}
+.pill.new{color:var(--accent);border-color:rgba(255,179,71,.35)}
+.acts{display:flex;gap:4px}
+.acts .iconbtn{width:34px;height:34px}
+.play{width:38px;height:38px;border-radius:50%;background:var(--card2);border:1px solid var(--line);display:grid;place-items:center}
+.play:hover{border-color:var(--accent);color:var(--accent)}
+.play svg{width:16px;height:16px}
+.menu{position:fixed;z-index:50;min-width:230px;background:#1c212b;border:1px solid #333b4a;border-radius:12px;padding:6px;box-shadow:var(--shadow)}
+.menu button{display:flex;width:100%;gap:10px;align-items:center;padding:9px 12px;border-radius:8px;text-align:left}
+.menu button:hover{background:#262d3a}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.menu svg{width:16px;height:16px;color:var(--soft)}
+/* done */
+.done{display:grid;grid-template-columns:1.4fr 1fr;gap:22px}
+video{width:100%;border-radius:14px;background:#000;border:1px solid var(--line)}
+.ok-ring{width:56px;height:56px;border-radius:50%;background:rgba(76,214,160,.12);display:grid;place-items:center;color:var(--good);margin-bottom:12px}
+.ok-ring svg{width:30px;height:30px}
+.notes{margin:14px 0 0;padding-left:18px;color:var(--soft);font-size:14px}
+.notes li{margin:4px 0}
+/* feedback */
+.fb{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:22px;align-items:start}
+.fb > div:first-child{position:sticky;top:0}
+.sev{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none}
+.note{display:grid;grid-template-columns:10px 1fr auto;gap:14px;align-items:start;padding:14px 16px;border-radius:14px;background:var(--card);border:1px solid var(--line)}
+.note .sev{margin-top:7px}
+.note.off{opacity:.5}
+.note .nh{display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap}
+.note .nh b{font-weight:600}
+.note .how{margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--bg2);color:var(--soft);font-size:14px}
+.tmb{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-variant-numeric:tabular-nums;font-size:13px;color:var(--soft)}
+.tmb:hover{border-color:var(--accent);color:var(--accent)}
+.good-t{color:var(--good)} .fix-t{color:var(--warn)}
+@media (max-width:900px){.fb{grid-template-columns:1fr}.fb > div:first-child{position:static}}
+/* script builder */
+.sbsteps{display:flex;flex-direction:column;gap:14px}
+.sbstep{display:flex;gap:18px;align-items:flex-start}
+.sbn{width:34px;height:34px;flex:none;border-radius:50%;background:var(--grad);color:#1b1206;font-weight:700;display:grid;place-items:center}
+.sbin{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px;resize:vertical}
+.kindbtn{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:18px 22px;border-radius:14px;background:var(--bg2);border:1.5px solid var(--line);min-width:220px;text-align:left}
+.kindbtn svg{width:26px;height:26px;color:var(--accent);margin-bottom:6px}
+.kindbtn span{color:var(--soft);font-size:14px}
+.kindbtn.on{border-color:var(--accent);background:rgba(255,179,71,.08)}
+.ideas{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:12px}
+.idea{text-align:left;padding:14px;border-radius:12px;background:var(--bg2);border:1px solid var(--line)}
+.idea:hover{border-color:var(--accent)}
+.idea b{display:block;margin-bottom:4px}.idea span{color:var(--soft);font-size:14px}
+.stylegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;max-height:520px;overflow:auto;padding-right:4px}
+.stylecard{position:relative;text-align:left;padding:12px 14px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--line)}
+.stylecard:hover{border-color:#46506a}
+.stylecard.on{border-color:var(--accent);background:rgba(255,179,71,.08)}
+.stylecard b{display:block;margin-bottom:4px;padding-right:16px}.stylecard span{color:var(--faint);font-size:12.5px}
+.stylecard .del{position:absolute;top:6px;right:10px;font-style:normal;color:var(--faint);font-size:18px}
+.stylecard .del:hover{color:var(--bad)}
+.stylecard img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;margin-bottom:8px;background:#0b0d12}
+.stylechosen{margin-top:14px}
+.stylepics{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.stylepics figure{margin:0}
+.stylepics img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:12px;border:1px solid var(--line);display:block}
+.stylepics figcaption{color:var(--faint);font-size:12.5px;margin-top:4px}
+.toplist{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-top:16px}
+.charlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.scenehead{margin:26px 0 10px;padding-left:12px;border-left:3px solid var(--accent)}
+.shot{margin-bottom:12px}
+.shot.extra{border-style:dashed}
+.shot .words{margin:12px 0 4px;color:#ffe2b0}
+.shot .purpose{margin:6px 0 2px;color:var(--soft);font-size:14px}
+.pbox{margin-top:12px}
+.ptitle{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;margin-bottom:6px}
+.ptitle .sub{margin:0;font-weight:400;font-size:13px}
+.ptext{white-space:pre-wrap;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;color:#d9dde5;max-height:220px;overflow:auto}
+.btn.small{padding:5px 12px;font-size:13px;border-radius:9px}
+.pastlist{display:flex;flex-direction:column;gap:8px}
+.pastrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-radius:12px;background:var(--card2);border:1px solid var(--line)}
+.pastrow b{display:block;font-weight:500}.pastrow small{color:var(--faint)}
+.pbox.busy .ptext{opacity:.45}
+.pbox.fresh .ptext{border-color:var(--good);box-shadow:0 0 0 2px rgba(76,214,160,.25);transition:box-shadow .3s}
+.pmsg{font-size:13.5px;margin-top:6px;color:var(--soft);display:flex;align-items:center;gap:8px}
+.pmsg:empty{display:none}
+.pmsg .ok{color:var(--good)} .pmsg .err{color:var(--bad)}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--accent);border-top-color:transparent;animation:spin 1s linear infinite;display:inline-block}
+.updbar{display:flex;align-items:center;gap:12px;padding:10px 28px;background:rgba(255,179,71,.1);border-bottom:1px solid rgba(255,179,71,.35);color:#ffe2b0;font-size:14px}
+.updbar > span{flex:1;display:flex;align-items:center;gap:8px}
+/* modal + toast */
+.scrim{position:fixed;inset:0;background:rgba(4,6,10,.62);backdrop-filter:blur(3px);display:grid;place-items:center;z-index:60}
+.modal{width:min(720px,92vw);background:var(--card);border:1px solid #333b4a;border-radius:18px;padding:22px;box-shadow:var(--shadow)}
+.modal textarea,.modal input[type=text]{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0 16px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#232937;border:1px solid #3a4252;padding:12px 18px;border-radius:12px;z-index:70;box-shadow:var(--shadow);max-width:80vw}
+.toast.err{border-color:rgba(255,107,107,.5)}
+::-webkit-scrollbar{width:12px}::-webkit-scrollbar-thumb{background:#2a303c;border-radius:10px;border:3px solid var(--bg)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#1b1206" stroke-width="2.2" stroke-linecap="round"><path d="M4 9v6M8 6v12M12 3v18M16 7v10M20 10v4"/></svg></div>
+    <div class="brand">StoryStudio<small>Your AI editing helper for stories, movies and music videos</small></div>
+    <div class="grow"></div>
+    <button class="iconbtn" title="Home" onclick="goHome()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button>
+    <button class="iconbtn" title="Settings" onclick="openSettings()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </header>
+  <div id="updbar" class="updbar hidden"></div>
+  <main><div class="wrap" id="view"></div></main>
+</div>
+<div id="layer"></div>
+
+<script>
+const TOKEN = "__TOKEN__";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let H = {};            // last hello
+let P = null;          // project
+let R = null;          // review
+let filter = "";
+let opts = {};
+let polling = null;
+const ICON = {
+  sound:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+  wave:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9v6M8 6v12M12 3v18M16 7v10M20 10v4"/></svg>',
+  mic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+  eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  scissors:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></svg>',
+  play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  pause:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
+  more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 12l5 5 9-10"/></svg>',
+  folder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>',
+  film:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>',
+};
+
+async function api(name, data = {}) {
+  const r = await fetch("/api/" + name, {method:"POST", headers:{"Content-Type":"application/json","X-Token":TOKEN}, body:JSON.stringify(data)});
+  const j = await r.json();
+  if (j.error) { toast(j.error, true); throw new Error(j.error); }
+  return j;
+}
+function toast(msg, err) {
+  const t = document.createElement("div"); t.className = "toast" + (err ? " err" : ""); t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), err ? 7000 : 3500);
+}
+function modal(html) { $("#layer").innerHTML = `<div class="scrim" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`; }
+function closeModal() { $("#layer").innerHTML = ""; }
+function reportError(msg) { fetch("/api/client_error", {method:"POST", headers:{"Content-Type":"application/json","X-Token":TOKEN}, body:JSON.stringify({msg:String(msg).slice(0, 3000)})}).catch(()=>{}); }
+window.addEventListener("error", e => reportError("window error: " + e.message + " at " + (e.filename || "") + ":" + (e.lineno || "")));
+window.addEventListener("unhandledrejection", e => reportError("unhandled: " + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
+setInterval(() => fetch("/api/ping", {method:"POST", headers:{"X-Token":TOKEN}, body:"{}"}).catch(()=>{}), 5000);
+
+// ---------------------------------------------------------------- home
+async function goHome() {
+  if (polling) return;
+  H = await api("hello"); P = H.project; opts = Object.assign({best_of:3, busy:"normal"}, H.settings);
+  if (H.job) return watchJob();
+  renderHome();
+}
+function readyCard() {
+  const n = H.needs || [];
+  if (!n.length) return "";
+  const what = n.map(x => x === "ffmpeg" ? "ffmpeg (reads your video)" : "the speech model (hears the words)").join(" and ");
+  return `<div class="card" style="margin-bottom:22px;border-color:rgba(255,179,71,.4)"><div class="row" style="justify-content:space-between;flex-wrap:wrap">
+    <div><h2 style="margin:0 0 4px">One more step to get ready</h2><div class="sub" style="margin:0">StoryStudio needs to download ${what}. They're free and only download once (${n.includes("speech") ? "about 600 MB" : "about 115 MB"}).</div></div>
+    <button class="btn primary" onclick="setupTools()">Download now</button></div></div>`;
+}
+async function setupTools() { const j = await api("setup_tools"); watchJob(j.job); }
+function renderHome() {
+  if (!P) {
+    $("#view").innerHTML = readyCard() + `
+      <h1>Welcome back</h1><p class="sub">Open a Premiere project to get started. StoryStudio works on its own copy, so you can keep editing.</p>
+      <div class="hero">
+        <button class="drop" onclick="pickProject()">
+          ${ICON.folder.replace('<svg','<svg style="width:54px;height:54px;color:var(--accent)"')}
+          <h2 style="margin:6px 0 4px">Open a Premiere project</h2>
+          <div class="sub" style="margin:0">Choose a .prproj file</div>
+        </button>
+        <div class="card"><button class="btn primary" style="width:100%;justify-content:center;margin-bottom:16px" onclick="openBuilder()">${ICON.film} Plan a new video: script builder</button>${(H.shotlists||[]).length ? `<h2>Your shot lists</h2><div class="pastlist" style="margin-bottom:18px">${H.shotlists.map(r => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots</small></div><button class="btn small" onclick='homeOpenList(${JSON.stringify(r.path)}, this)'>Open</button></div>`).join("")}</div>` : ""}<h2>Recent projects</h2>
+          <div class="recent">${(H.recent||[]).map(r => `<button onclick='openProject(${JSON.stringify(r.path)})'><div class="ic">Pr</div><div><div>${esc(r.name)}</div><small>${esc(r.folder)}</small></div></button>`).join("") || '<div class="sub">Projects you open will show up here.</div>'}</div>
+        </div>
+      </div>`;
+    return;
+  }
+  const seqs = P.sequences.length > 1 ? `<div class="field">Sequence <select onchange="switchSeq(this.value)">${P.sequences.map(s => `<option value="${esc(s.uid)}" ${s.uid===P.seq_uid?"selected":""}>${esc(s.name)} (${s.duration})</option>`).join("")}</select></div>` : "";
+  $("#view").innerHTML = readyCard() + `
+    <div class="card project">
+      <div class="thumb" style="${P.thumb ? `background-image:url('${P.thumb}')` : ""}"><span class="len">${P.duration}</span></div>
+      <div>
+        <div class="row" style="justify-content:space-between;align-items:flex-start">
+          <div><p class="pname">${esc(P.name)}</p><div class="sub" style="margin:2px 0 0">Sequence “${esc(P.seq)}”</div></div>
+          <button class="btn ghost" onclick="pickProject()">${ICON.folder} Open another</button>
+        </div>
+        <div class="chips">
+          <span class="chip">${P.duration} long</span><span class="chip">${P.shots} shots</span>
+          ${P.narration ? `<span class="chip">${P.narration} narration clips</span>` : ""}
+          ${P.export ? `<span class="chip good">Uses your export: ${esc(P.export)}</span>` : `<span class="chip">Preview made from your shots</span>`}
+          ${P.missing.length ? `<span class="chip warn">${P.missing.length} file(s) not found</span>` : ""}
+        </div>
+        ${P.snapshot_time ? `<div class="saved">${ICON.shield}<div>StoryStudio saved its own copy of your project at <b>${esc(P.snapshot_time)}</b>. Keep working and saving in Premiere; it won't change this.</div></div>` : ""}
+        ${seqs}
+        <div class="field">Story <b title="${esc(P.story)}">${P.story ? esc(P.story.split(/[\\/]/).pop()) : "No script found (StoryStudio will listen to the narration)"}</b><button class="btn ghost" onclick="pickStory()">Choose…</button></div>
+      </div>
+    </div>
+    <h2 style="margin-top:30px">What would you like to do?</h2>
+    <div class="tasks">
+      ${task("sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","setupSounds()")}
+      ${task("wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
+      ${task("mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
+      ${task("film","#2b2414","#ffd27a","Script builder","Lyrics or a story into shots, with picture and MiniMax prompts for each.","openBuilder()")}
+      ${task("eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback()")}
+      ${task("scissors","#3a1a22","#ff8fa3","Smooth edits","Lines cuts up with the beat and smooths rough spots.","", true)}
+      ${P.previous ? task("film","#22262f","var(--soft)","Open last time's sounds","Pick up where you left off with this project.","openPrevious()") : ""}
+      ${P.previous_feedback ? task("eye","#22262f","var(--soft)","Open last time's feedback","See the notes from the last time it watched this project.","openPreviousFeedback()") : ""}
+    </div>
+    <div id="setup"></div>`;
+}
+function task(ic, bg, col, title, text, onclick, soon) {
+  return `<button class="task ${soon?"soon":""}" ${soon?"":`onclick="${onclick}"`}><div class="ti" style="background:${bg};color:${col}">${ICON[ic]}</div><b>${title}</b><span>${text}</span>${soon?'<span class="badge">Coming next</span>':""}</button>`;
+}
+async function homeOpenList(path, b) {
+  b.disabled = true; b.textContent = "Opening…";
+  try { if (!SBD) { SBD = await api("sb_styles"); } await sbOpen(path); }
+  catch (e) { b.disabled = false; b.textContent = "Open"; }
+}
+async function pickProject() { const j = await api("pick_project"); if (j.project) { P = j.project; renderHome(); } }
+async function openProject(path) { toast("Opening and saving a copy…"); const j = await api("open_project", {path}); P = j.project; renderHome(); }
+async function switchSeq(uid) { const j = await api("open_project", {path:P.file, seq_uid:uid}); P = j.project; renderHome(); }
+async function pickStory() { const j = await api("pick_story"); P = j.project; renderHome(); }
+async function openPrevious() { const j = await api("open_previous"); R = j.review; renderReview(); }
+
+// ---------------------------------------------------------------- setup: sound effects
+function seg(key, items) {
+  return `<div class="seg">${items.map(([v,t]) => `<button class="${opts[key]==v?"on":""}" onclick="setOpt('${key}',${JSON.stringify(v)})">${t}</button>`).join("")}</div>`;
+}
+function sw(key) { return `<button class="switch ${opts[key]?"on":""}" onclick="setOpt('${key}',${!opts[key]})" aria-label="${key}"></button>`; }
+function setOpt(k, v) { opts[k] = v; setupSounds(true); }
+async function setupSounds(keepScroll) {
+  $("#setup").innerHTML = `
+    <div class="card panel">
+      <h2>Add sound effects</h2>
+      <div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"]])}</div>
+      <div class="opt"><div><label class="t">Quality</label><div class="hint">Best makes 3 versions of each sound and keeps the one that fits.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>
+      <div class="opt"><div><label class="t">Background music</label><div class="hint">For parts with no music. Gives you Suno wording plus a rough version.</div></div><div class="swrow">${sw("add_music")}<span class="sub" style="margin:0">${opts.add_music?"On":"Off: you make music in Suno"}</span></div></div>
+      <div class="opt"><div><label class="t">Make sounds on this PC</label><div class="hint">Free. Watches each moment so sounds line up.</div></div><div class="swrow">${sw("use_local")}</div></div>
+      <div class="opt"><div><label class="t">Long natural backgrounds</label><div class="hint">Stable Audio Open: needs a free Hugging Face key (in Settings).</div></div><div class="swrow"><span class="chip ${H.has_hf_key?"good":""}">${H.has_hf_key?"Key added: on":"No key yet"}</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>
+      <div class="footerbar">
+        <div class="est" id="est">Working out the time…</div>
+        <button class="btn primary big" onclick="startSounds()">Find sounds ${arrow()}</button>
+      </div>
+    </div>`;
+  if (!keepScroll) $("#setup").scrollIntoView({behavior:"smooth"});
+  if (H.gpu === undefined) { try { H.gpu = (await api("gpu")).gpu; } catch(e) { H.gpu = 0; } }
+  const e = await api("estimate", Object.assign({gpu:H.gpu}, opts));
+  $("#est").innerHTML = `About <b>&nbsp;${e.text.replace("about ","")}&nbsp;</b> for about ${e.sounds} sounds.${e.busy_gpu ? ' <span class="chip warn">Graphics card busy: closing Premiere makes it faster</span>' : ""}`;
+}
+function arrow() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'; }
+async function startSounds() { const j = await api("start_sounds", opts); watchJob(j.job); }
+
+// ---------------------------------------------------------------- setup: fix audio
+function setupFix() {
+  $("#setup").innerHTML = `
+    <div class="card panel">
+      <h2>Fix the audio</h2>
+      <p class="sub">StoryStudio will clean up and even out the narration, balance the music under the voice, set the sound effects already in your movie below the narration, and take off Premiere effects that would double up. No new sound effects; it double-checks ones it made before and remakes any that came out wrong.</p>
+      <div class="footerbar"><span class="sub" style="margin:0">You'll get a copy ending in “(audio fixed)”. Your project isn't changed.</span>
+      <button class="btn primary big" onclick="startFix()">Fix the audio ${arrow()}</button></div>
+    </div>`;
+  $("#setup").scrollIntoView({behavior:"smooth"});
+}
+async function startFix() { const j = await api("start_fix_audio", opts); watchJob(j.job); }
+
+// ---------------------------------------------------------------- setup: karaoke
+function setupKaraoke() {
+  $("#setup").innerHTML = `
+    <div class="card panel">
+      <h2>Karaoke lyrics</h2>
+      <p class="sub" style="margin-bottom:8px">Paste the song's lyrics in the order they're sung. Labels like [Chorus] are fine. Write repeated lines out, or add (x2) at the end of a line.</p>
+      <textarea id="lyrics" rows="12" style="width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:14px;resize:vertical" placeholder="Paste the lyrics here…">${esc(H.lyrics || "")}</textarea>
+      <div class="footerbar">
+        <div class="row"><button class="btn" onclick="loadLyrics()">${ICON.folder} Load from a file…</button>
+        <span class="sub" style="margin:0">Every word lights up in gold as it's sung. You'll get a copy of your project ending in “(karaoke)”.</span></div>
+        <button class="btn primary big" onclick="startKaraoke()">Make karaoke ${arrow()}</button>
+      </div>
+    </div>`;
+  $("#setup").scrollIntoView({behavior:"smooth"});
+}
+async function loadLyrics() { const j = await api("pick_lyrics"); if (j.text) $("#lyrics").value = j.text; }
+async function startKaraoke() { H.lyrics = $("#lyrics").value; const j = await api("start_karaoke", {lyrics: H.lyrics}); watchJob(j.job); }
+
+// ---------------------------------------------------------------- setup: edit feedback
+let fbOpts = {kind:"auto", claude:true};
+function setupFeedback() {
+  const segFb = (key, items) => `<div class="seg">${items.map(([v,t]) => `<button class="${fbOpts[key]===v?"on":""}" onclick='fbOpts.${key}=${JSON.stringify(v)};setupFeedback()'>${t}</button>`).join("")}</div>`;
+  const mins = Math.max(1, Math.round((25 + P.seconds * 0.12 + (fbOpts.claude ? 20 + 75 * Math.ceil(P.seconds / (P.seconds <= 420 ? 160 : 320)) : 0)) / 60));
+  $("#setup").innerHTML = `
+    <div class="card panel">
+      <h2>Edit feedback</h2>
+      <p class="sub" style="margin-bottom:6px">StoryStudio checks every cut, the sound and the beat, then ${aiName()} watches the movie with your story and gives friendly notes: what's working, what to fix, and how. Every note becomes a marker on the timeline in a copy ending in “(feedback)”.</p>
+      <div class="opt"><div><label class="t">This is a</label><div class="hint">Music videos also get notes about cutting on the beat.</div></div>${segFb("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"]])}</div>
+      <div class="opt"><div><label class="t">${aiName()} watches it</label><div class="hint">Catches AI glitches, characters that change between shots, and story and pacing. Off: only the timeline checks (a minute or less).</div></div><div class="swrow"><button class="switch ${fbOpts.claude?"on":""}" onclick="fbOpts.claude=!fbOpts.claude;setupFeedback()" aria-label="AI watches it"></button></div></div>
+      <div class="footerbar">
+        <div class="est">About <b>&nbsp;${mins} minute${mins>1?"s":""}&nbsp;</b></div>
+        <button class="btn primary big" onclick="startFeedback()">Get feedback ${arrow()}</button>
+      </div>
+    </div>`;
+  $("#setup").scrollIntoView({behavior:"smooth"});
+}
+async function startFeedback() { const j = await api("start_feedback", fbOpts); watchJob(j.job); }
+async function openPreviousFeedback() { const j = await api("open_previous_feedback"); F = j.feedback; renderFeedback(); }
+
+// ---------------------------------------------------------------- feedback page
+let F = null, fbFilter = "";
+const SEV = {fix:["Please fix","var(--bad)"], suggest:["Ideas","var(--warn)"], beat:["Beat","#7cc4ff"], good:["Nicely done","var(--good)"]};
+function renderFeedback() {
+  const s = F.summary || {}, st = F.stats || {};
+  const counts = k => F.notes.filter(n => n.severity === k).length;
+  const shown = F.notes.filter(n => !fbFilter || n.severity === fbFilter);
+  const kept = F.notes.filter(n => n.keep).length;
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Notes on “${esc(F.title)}”</h1><div class="sub" style="margin:0">${F.kind === "music" ? "Music video" : "Story"} · ${st.shots} shots, ${(+st.average).toFixed(1)} s each on average${st.beat ? ` · ${st.beat.on_beat} of ${st.beat.cuts} cuts on the beat (${st.beat.bpm} beats a minute)` : ""}</div></div>
+      <div class="row">${F.project ? `<button class="btn primary big" onclick='openFbProject()'>Open in Premiere ${arrow()}</button>` : ""}</div></div>
+    ${F.project_error ? `<div class="banner">${esc(F.project_error)}</div>` : ""}
+    <div class="fb">
+      <div>
+        <div class="card" style="padding:12px"><video id="fbv" src="${F.video}" controls preload="metadata"></video></div>
+        ${s.overall ? `<div class="card" style="margin-top:16px"><h2>Overall</h2><p style="margin:0 0 12px">${esc(s.overall)}</p>
+          ${(s.strengths||[]).length ? `<b class="good-t">What's working</b><ul class="notes">${s.strengths.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          ${(s.top_fixes||[]).length ? `<b class="fix-t" style="display:block;margin-top:12px">What would help most</b><ul class="notes">${s.top_fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</div>` : ""}
+        <div class="card" style="margin-top:16px">
+          <div class="sub" style="margin:0 0 12px">${kept} note${kept===1?"":"s"} ${F.dirty ? "switched on. Update the copy to change the markers." : "are markers on the timeline in your “(feedback)” copy. Your project wasn't changed."}</div>
+          <div class="row" style="flex-wrap:wrap;gap:10px">
+            ${F.dirty ? `<button class="btn primary" onclick="fbSave()">Update the (feedback) copy</button>` : ""}
+            <button class="btn" onclick='api("open",{path:${JSON.stringify(F.folder)}})'>${ICON.folder} Open the folder</button>
+            ${F.list ? `<button class="btn" onclick='api("open",{path:${JSON.stringify(F.list)}})'>Notes list</button>` : ""}
+            <button class="btn ghost" onclick="goHome()">Home</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="filters">
+          <span class="chip ${!fbFilter?"on":""}" onclick="fbSet('')">All ${F.notes.length}</span>
+          ${Object.keys(SEV).filter(k => counts(k)).map(k => `<span class="chip ${fbFilter===k?"on":""}" onclick="fbSet('${k}')"><i class="sev" style="background:${SEV[k][1]}"></i>${SEV[k][0]} ${counts(k)}</span>`).join("")}
+        </div>
+        <div class="list">${shown.map(noteHtml).join("") || '<div class="sub">No notes here.</div>'}</div>
+      </div>
+    </div>`;
+}
+function noteHtml(n) {
+  return `<div class="note ${n.keep?"":"off"}">
+    <i class="sev" style="background:${SEV[n.severity][1]}"></i>
+    <div class="nb">
+      <div class="nh"><button class="tmb" title="Watch this moment" onclick="fbSeek(${n.t})">${ICON.play.replace('<svg','<svg width="11" height="11"')} ${n.time}</button><b>${esc(n.title)}</b>${n.ai ? `<span class="pill">${esc(F.by || "AI")}</span>` : ""}</div>
+      <div>${esc(n.note)}</div>
+      ${n.how ? `<div class="how">${esc(n.how)}</div>` : ""}
+    </div>
+    <button class="switch ${n.keep?"on":""}" title="${n.keep ? "On: shows as a marker" : "Off: no marker"}" onclick="fbToggle(${n.id})"></button>
+  </div>`;
+}
+function fbSet(k) { fbFilter = k; renderFeedback(); }
+function fbSeek(t) { const v = $("#fbv"); if (!v) return; v.currentTime = Math.max(0, t - 1.5); v.play(); v.scrollIntoView({behavior:"smooth", block:"center"}); }
+async function fbToggle(id) { const n = F.notes.find(x => x.id === id); const j = await api("fb_toggle", {id, keep:!n.keep}); Object.assign(n, j.note); F.dirty = true; const t = $("#fbv") ? $("#fbv").currentTime : 0; renderFeedback(); if ($("#fbv")) $("#fbv").currentTime = t; }
+async function fbSave() { toast("Updating the markers…"); const j = await api("fb_save"); F = j.feedback; renderFeedback(); toast("The (feedback) copy is up to date"); }
+async function openFbProject() { if (F.dirty) { const j = await api("fb_save"); F = j.feedback; renderFeedback(); } api("open", {path: F.project}); toast("Opening in Premiere…"); }
+
+// ---------------------------------------------------------------- script builder
+let SBD = null;                       // styles, aspects, recent shot lists
+let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", cast:"", style_id:"", aspect:"16:9", styleTab:"", styleFind:"", ideas:[], wording:"improved"};
+let SBR = null;                       // the finished shot list
+let PICS = null;                      // sample pictures for the default styles
+async function openBuilder() {
+  const fresh = await api("sb_styles");          // re-read every time, so new lists show up
+  if (SBD) SBD.recent = fresh.recent; else SBD = fresh;
+  if (!PICS) api("sb_style_pics").then(j => { PICS = j.pics || {}; if ($("#stylegrid")) { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; } }).catch(() => {});
+  if (!SBS.style_id && SBD.styles.length) SBS.style_id = (SBD.styles.find(s => !s.mine) || SBD.styles[0]).id;
+  renderBuilder(true);
+}
+function sbSet(k, v, redraw) { SBS[k] = v; if (redraw) renderBuilder(); }
+function sbStep(n, title, body, hint) {
+  return `<div class="card sbstep"><div class="sbn">${n}</div><div style="flex:1;min-width:0"><h2 style="margin:0 0 4px">${title}</h2>${hint ? `<div class="sub" style="margin:0 0 12px">${hint}</div>` : ""}${body}</div></div>`;
+}
+function renderBuilder(top) {
+  const music = SBS.kind === "music", story = SBS.kind === "story";
+  const groups = [...new Set(SBD.styles.map(s => s.group))];
+  if (!SBS.styleTab) SBS.styleTab = groups.find(g => g !== "My styles") || groups[0];
+  const find = SBS.styleFind.toLowerCase();
+  const shown = SBD.styles.filter(s => find ? (s.name + " " + s.style).toLowerCase().includes(find) : s.group === SBS.styleTab);
+  const chosen = SBD.styles.find(s => s.id === SBS.style_id);
+  let n = 1, steps = [];
+  steps.push(sbStep(n++, "What are we making?", `<div class="row" style="gap:12px;flex-wrap:wrap">
+      <button class="kindbtn ${music?"on":""}" onclick="sbSet('kind','music',true)">${ICON.mic}<b>Music video</b><span>From song lyrics</span></button>
+      <button class="kindbtn ${story?"on":""}" onclick="sbSet('kind','story',true)">${ICON.film}<b>Story</b><span>From a story script</span></button></div>`));
+  if (SBS.kind) {
+    steps.push(sbStep(n++, music ? "The lyrics" : "The story script", `
+      <input type="text" class="sbin" placeholder="Title (optional)" value="${esc(SBS.title)}" oninput="SBS.title=this.value" style="margin-bottom:10px">
+      <textarea id="sbtext" class="sbin" rows="10" placeholder="${music ? "Paste the song lyrics here…" : "Paste the story script here…"}" oninput="SBS.text=this.value">${esc(SBS.text)}</textarea>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="sbLoadText()">${ICON.folder} Load from a file…</button><span class="sub" style="margin:0">Word, PDF or text file</span></div>`));
+    if (music) {
+      steps.push(sbStep(n++, "Song length and clips", `
+        <div class="row" style="flex-wrap:wrap;gap:12px">
+          <input type="text" class="sbin" style="width:120px" placeholder="3:15" value="${esc(SBS.song)}" oninput="SBS.song=this.value">
+          <button class="btn" onclick="sbSongFile()">${ICON.sound} Get it from the song file…</button>
+          <span style="flex:1"></span>
+          <span class="sub" style="margin:0">Clip length</span>
+          <div class="seg">${[5,8].map(c => `<button class="${SBS.clip==c?"on":""}" onclick="sbSet('clip',${c},true)">${c} seconds</button>`).join("")}</div>
+        </div>`, "Minutes:seconds. Each shot is one clip; StoryStudio adds extra shots so you always have something to cut to."));
+      steps.push(sbStep(n++, "Direction for the video", `
+        <textarea class="sbin" rows="4" placeholder="What should the video show? Who is in it, where, what happens…" oninput="SBS.direction=this.value">${esc(SBS.direction)}</textarea>
+        <div class="row" style="margin-top:10px"><button class="btn" id="bsbtn" onclick="sbBrainstorm()">✨ Brainstorm ideas</button><span class="sub" style="margin:0">${aiName()} suggests a few directions from the lyrics. Pick one, then change it however you like.</span></div>
+        ${SBS.ideas.length ? `<div class="ideas">${SBS.ideas.map((d, i) => `<button class="idea" onclick="sbUseIdea(${i})"><b>${esc(d.name)}</b><span>${esc(d.direction)}</span></button>`).join("")}</div>` : ""}`));
+    } else {
+      steps.push(sbStep(n++, "Length and clips", `<div class="sub" style="margin:0">Stories use <b>8-second clips</b>. ${aiName()} reads the script, works out how long it takes to tell, and plans enough shots, plus extra shots to give you room. The story itself is the direction.</div>`));
+    }
+    steps.push(sbStep(n++, "Characters", `
+      <textarea id="sbcast" class="sbin" rows="6" placeholder="One per line, for example:&#10;Grace: a 7-year-old girl with short brown hair, a light blue hoodie and a yellow daisy t-shirt…&#10;Jasper: a fluffy orange cat with a blue collar…" oninput="SBS.cast=this.value">${esc(SBS.cast)}</textarea>
+      <div class="row" style="margin-top:10px"><button class="btn" id="castbtn" onclick="sbCast()">✨ Describe the characters for me</button><span class="sub" style="margin:0">Keeps anything you typed and fills in the rest. Edit it until it's right.</span></div>`,
+      "Type the characters you have in mind, or let the AI describe them. Every character gets its own character prompt."));
+    steps.push(sbStep(n++, "Art style", `
+      <div class="filters" style="margin-bottom:10px">
+        ${groups.map(g => `<span class="chip ${!find && SBS.styleTab===g?"on":""}" onclick="SBS.styleFind='';sbSet('styleTab',${JSON.stringify(g)},true)">${esc(g)} ${SBD.styles.filter(s=>s.group===g).length}</span>`).join("")}
+        <span style="flex:1"></span><input type="text" class="sbin" style="width:200px;padding:6px 10px" placeholder="Search styles" value="${esc(SBS.styleFind)}" oninput="SBS.styleFind=this.value;renderStyles()">
+      </div>
+      <div id="stylegrid" class="stylegrid">${shown.map(styleCard).join("")}</div>
+      <details style="margin-top:12px"><summary class="btn ghost" style="display:inline-flex">+ Add my own style</summary>
+        <div style="margin-top:10px">
+          <input type="text" id="nsname" class="sbin" placeholder="Style name" style="margin-bottom:8px">
+          <textarea id="nsstyle" class="sbin" rows="4" placeholder="Describe the style the way you'd write it in a prompt…"></textarea>
+          <textarea id="nsclean" class="sbin" rows="2" placeholder="Clean Render Standard (optional; leave empty to use the standard one from your PDF)" style="margin-top:8px"></textarea>
+          <button class="btn primary" style="margin-top:10px" onclick="sbSaveStyle()">Save my style</button>
+        </div></details>
+      ${chosen ? stylePreview(chosen) : ""}`));
+    steps.push(sbStep(n++, "Picture shape", `<div class="seg">${SBD.aspects.map(a => `<button class="${SBS.aspect===a?"on":""}" onclick="sbSet('aspect','${a}',true)">${a}</button>`).join("")}</div>`, "16:9 is the usual YouTube shape."));
+  }
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Script builder</h1><div class="sub" style="margin:0">Turns lyrics or a story into a shot list with a picture prompt and a MiniMax prompt for every shot.</div></div>
+</div>
+    ${SBD.recent.length ? `<div class="card" style="margin-bottom:14px"><h2 style="margin:0 0 10px">Your shot lists</h2>${pastLists()}</div>` : ""}
+    <div class="sbsteps">${steps.join("")}</div>
+    ${SBS.kind ? `<div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><button class="btn primary big" onclick="sbStart()">Generate script ${arrow()}</button></div>` : ""}`;
+  if (top) $("main").scrollTop = 0;
+}
+function styleCard(s) {
+  const pic = PICS && PICS[s.id] && PICS[s.id][0];
+  return `<button class="stylecard ${s.id===SBS.style_id?"on":""}" onclick="sbPickStyle('${s.id}')" title="${esc(s.style)}">${pic ? `<img src="${pic}" alt="">` : ""}<b>${esc(s.name)}</b><span>${esc(s.style.slice(0, pic ? 70 : 110))}…</span>${s.mine ? `<i class="del" onclick="event.stopPropagation();sbDelStyle('${s.id}')" title="Delete this style">×</i>` : ""}</button>`;
+}
+function stylePreview(s) {
+  const p = PICS && PICS[s.id], opt = !!s.style_opt, useOpt = opt && SBS.wording !== "original";
+  const text = useOpt ? `${s.style_opt} ${s.clean_opt || ""}` : `${s.style}${s.clean ? " Clean Render Standard: " + s.clean : ""}`;
+  return `<div class="stylechosen"><div class="sub" style="margin:0 0 8px">Chosen: <b>${esc(s.name)}</b>${p ? " · sample pictures from your style guide" : ""}</div>
+    ${p ? `<div class="stylepics">${p.map((src, i) => `<figure><img src="${src}" alt=""><figcaption>${i === 0 ? "Made in ChatGPT" : "Made in Flow (Nano Banana)"}</figcaption></figure>`).join("")}</div>` : ""}
+    ${opt ? `<div class="row" style="margin-top:12px;flex-wrap:wrap;gap:10px"><span class="sub" style="margin:0">Style wording</span><div class="seg"><button class="${useOpt ? "on" : ""}" onclick="sbWording('improved')">Improved (recommended)</button><button class="${useOpt ? "" : "on"}" onclick="sbWording('original')">My original</button></div>
+      <span class="sub" style="margin:0">${useOpt ? "Tighter and positively worded, so ChatGPT and Nano Banana follow it better." : "Exactly as written in your style guide."}</span></div>` : ""}
+    <details style="margin-top:8px"><summary class="sub" style="cursor:pointer;margin:0">See the exact style words</summary><div class="ptext" style="margin-top:6px">${esc(text)}</div></details></div>`;
+}
+function sbWording(w) { const y = $("main").scrollTop; SBS.wording = w; renderBuilder(); $("main").scrollTop = y; }
+function renderStyles() {
+  const find = SBS.styleFind.toLowerCase();
+  const shown = SBD.styles.filter(s => find ? (s.name + " " + s.style).toLowerCase().includes(find) : s.group === SBS.styleTab);
+  $("#stylegrid").innerHTML = shown.map(styleCard).join("") || '<div class="sub">No styles match.</div>';
+}
+function sbPickStyle(id) { const y = $("main").scrollTop; SBS.style_id = id; renderBuilder(); $("main").scrollTop = y; }
+async function sbLoadText() { const j = await api("sb_pick_text", {kind:SBS.kind}); if (j.text) { SBS.text = j.text; if (!SBS.title && j.name) SBS.title = j.name; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; } }
+async function sbSongFile() { const j = await api("sb_pick_song"); if (j.seconds) { const m = Math.floor(j.seconds / 60), s = Math.round(j.seconds % 60); SBS.song = `${m}:${String(s).padStart(2,"0")}`; if (!SBS.title && j.name) SBS.title = j.name; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; } }
+async function sbBrainstorm() {
+  if (!SBS.text.trim()) return toast("Paste the lyrics first.", true);
+  const b = $("#bsbtn"); b.disabled = true; b.textContent = "Thinking of ideas…";
+  try { const st = SBD.styles.find(s => s.id === SBS.style_id); const j = await api("sb_brainstorm", {text:SBS.text, notes:SBS.direction, style_name: st ? st.name : ""}); SBS.ideas = j.ideas || []; } finally { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+}
+function sbUseIdea(i) { SBS.direction = SBS.ideas[i].direction; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; toast("Added to the direction. Change it however you like."); }
+async function sbCast() {
+  if (!SBS.text.trim()) return toast("Paste the " + (SBS.kind === "story" ? "story" : "lyrics") + " first.", true);
+  const b = $("#castbtn"); b.disabled = true; b.textContent = "Describing the characters…";
+  try {
+    const st = SBD.styles.find(s => s.id === SBS.style_id);
+    const j = await api("sb_cast", {kind:SBS.kind, text:SBS.text, cast:SBS.cast, direction:SBS.direction, style_name: st ? st.name : ""});
+    if ((j.characters || []).length) SBS.cast = j.characters.map(c => `${c.name}: ${c.look}`).join("\n\n");
+  } finally { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+}
+async function sbSaveStyle() {
+  const name = $("#nsname").value.trim(), style = $("#nsstyle").value.trim(), clean = $("#nsclean").value.trim();
+  const j = await api("sb_save_style", {name, style, clean}); SBD.styles = j.styles; SBS.style_id = j.id; SBS.styleTab = "My styles"; SBS.styleFind = "";
+  const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; toast("Saved to My styles");
+}
+async function sbDelStyle(id) { const j = await api("sb_delete_style", {id}); SBD.styles = j.styles; if (SBS.style_id === id) SBS.style_id = ""; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+function songSeconds(t) { t = String(t || "").trim(); if (!t) return 0; const p = t.split(":").map(Number); return p.length > 1 ? p[0] * 60 + (p[1] || 0) : p[0]; }
+async function sbStart() {
+  if (!SBS.text.trim()) return toast("Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first.", true);
+  if (SBS.kind === "music" && !(songSeconds(SBS.song) >= 5)) return toast("Enter how long the song is, for example 3:15.", true);
+  if (!SBS.style_id) return toast("Choose an art style.", true);
+  const j = await api("sb_start", {kind:SBS.kind, text:SBS.text, title:SBS.title, song_seconds:songSeconds(SBS.song), clip:SBS.clip, direction: SBS.kind === "music" ? SBS.direction : "", cast:SBS.cast, style_id:SBS.style_id, aspect:SBS.aspect, wording:SBS.wording});
+  watchJob(j.job);
+}
+function pastLists() {
+  return `<div class="pastlist">${SBD.recent.map((r, i) => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots · ${esc(r.made || "")}</small></div><button class="btn small" id="past${i}" onclick="sbOpenRecent(${i})">Open</button></div>`).join("")}</div>`;
+}
+async function sbOpenRecent(i) {
+  const b = $("#past" + i); if (b) { b.disabled = true; b.textContent = "Opening…"; }
+  try { await sbOpen(SBD.recent[i].path); }
+  catch (e) { if (b) { b.disabled = false; b.textContent = "Open"; } }
+}
+async function sbOpen(path) {
+  let j;
+  try { j = await api("sb_open", {path}); }
+  catch (e) { reportError("sb_open: " + e.message); throw e; }
+  if (!j.result) { toast("That shot list couldn't be opened.", true); reportError("sb_open: empty result"); return; }
+  SBR = j.result;
+  try { renderScript(); }
+  catch (e) { toast("That shot list opened, but something went wrong showing it. Details were saved to the log file.", true); reportError("renderScript: " + (e.stack || e.message)); throw e; }
+  $("main").scrollTop = 0;
+}
+function mmss(s) { s = Math.round(s); return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; }
+let PB = [];                           // prompt boxes on the page: text + how to redo it
+let FRESH = "";                        // the prompt that was just rewritten (highlighted)
+function promptBox(label, sub, text, redo) {
+  const i = PB.length; PB.push({text, redo});
+  const key = redo ? `${redo.which}-${redo.n}` : "";
+  return `<div class="pbox ${key && key === FRESH ? "fresh" : ""}" id="pb${i}" data-key="${key}"><div class="ptitle">${label}${sub ? ` <span class="sub">${sub}</span>` : ""}<span style="flex:1"></span>
+    <button class="btn small" onclick="pbCopy(${i})">Copy</button>${redo ? `<button class="btn small ghost" onclick="pbRedo(${i})">New version</button>` : ""}</div>
+    <div class="ptext">${esc(text)}</div><div class="pmsg"></div></div>`;
+}
+function renderScript() {
+  const r = SBR; if (!r) return openBuilder();
+  PB = [];
+  const story = r.kind === "story";
+  let top = "";
+  if (r.title_image) top += `<div class="card"><h2>Title image</h2><div class="sub">The story's name on a transparent background. Make it in ChatGPT and ask for a transparent PNG (Nano Banana can't make true transparency).</div>${promptBox("Title image prompt", "", r.title_image.prompt, {which:"title", n:0})}</div>`;
+  if (r.thumbnail) top += `<div class="card"><h2>YouTube thumbnail</h2>${promptBox("Thumbnail prompt", "ChatGPT / Nano Banana", r.thumbnail.prompt, {which:"thumbnail", n:0})}</div>`;
+  if (r.suno && r.suno.length) top += `<div class="card"><h2>Background theme music</h2><div class="sub">Suno prompts that follow the feel of the story. Instrumental, made to sit under the narration.</div>${r.suno.map((m, i) => promptBox(esc(m.name), "Suno", m.prompt, {which:"suno", n:i})).join("")}</div>`;
+  const chars = r.characters.length ? `<h2 style="margin-top:26px">Characters</h2><div class="sub">Make each character's picture first, then attach it whenever that character is in a shot, so they look the same every time.</div>
+    <div class="charlist">${r.characters.map((c, i) => `<div class="card"><b style="font-size:16px">${esc(c.name)}</b><div class="sub" style="margin:6px 0 4px">${esc(c.look)}</div>${promptBox("Character prompt", "", c.sheet_prompt, {which:"character", n:i})}</div>`).join("")}</div>` : "";
+  let scene = 0;
+  const shots = r.shots.map(s => {
+    let head = "";
+    if (s.scene !== scene) {
+      scene = s.scene; const sc = r.scenes[scene - 1] || {};
+      head = `<div class="scenehead"><h2 style="margin:0">Scene ${scene}: ${esc(sc.title || "")}</h2><div class="sub" style="margin:4px 0 0">${esc(sc.section || "")} · ${mmss(sc.start || 0)}–${mmss(sc.end || 0)} · ${sc.clips || 0} clips${sc.concept ? " · " + esc(sc.concept) : ""}</div></div>`;
+    }
+    return head + `<div class="card shot ${s.extra ? "extra" : ""}">
+      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${s.n}${s.title ? ": " + esc(s.title) : ""}</b><span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
+      <span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span></div>
+      ${s.words ? `<div class="words">💬 ${esc(s.words)}</div>` : ""}
+      ${s.purpose ? `<div class="purpose"><b>What this shot is for:</b> ${esc(s.purpose)}</div>` : ""}
+      ${promptBox("Text-to-image prompt", "ChatGPT / Nano Banana", s.picture_prompt, {which:"picture", n:s.n})}
+      ${promptBox("Image-to-video prompt", `MiniMax · ${r.clip}-second clip`, s.minimax_prompt, {which:"motion", n:s.n})}</div>`;
+  }).join("");
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>${esc(r.title)}</h1><div class="sub" style="margin:0">${esc(r.summary)}</div></div>
+      <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${JSON.stringify(r.files.text)}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${JSON.stringify(r.files.folder)}})'>${ICON.folder} Folder</button>` : ""}</div></div>
+    <div class="chips"><span class="chip">${story ? "Story" : "Music video"}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span></div>
+    ${r.visual_rules ? `<div class="banner">${esc(r.visual_rules)}</div>` : ""}
+    ${top ? `<div class="toplist">${top}</div>` : ""}
+    ${chars}
+    <h2 style="margin-top:26px">Shots</h2>
+    ${shots}
+    <div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><button class="btn" onclick="openBuilder()">Make another</button></div>`;
+}
+async function pbCopy(i) { await navigator.clipboard.writeText(PB[i].text); toast("Copied"); }
+function pbRedo(i) {
+  const r = PB[i].redo, ch = r.which === "character" ? SBR.characters[r.n] : null;
+  modal(`<h2>New version</h2><div class="sub" style="margin:0">What would you like changed? Leave it empty for a fresh take.${ch ? ` This gives ${esc(ch.name)} a new look and updates ${esc(ch.name)} in every shot too.` : ""}</div>
+    <input type="text" id="redonote" placeholder="${ch ? "For example: give her a green coat and longer hair…" : "For example: make it a close-up, add the cat, slower camera…"}" onkeydown="if(event.key==='Enter')doRedo(${i})">
+    <div class="footerbar"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doRedo(${i})">Write a new one</button></div>`);
+  setTimeout(() => $("#redonote").focus(), 50);
+}
+async function doRedo(i) {
+  const note = $("#redonote").value.trim(), redo = PB[i].redo, box = $("#pb" + i);
+  closeModal();
+  box.classList.add("busy"); box.querySelectorAll("button").forEach(b => b.disabled = true);
+  box.querySelector(".pmsg").innerHTML = `<span class="spin"></span> Writing a new version${note ? ` (“${esc(note)}”)` : ""}… this takes about 20 seconds.`;
+  let j;
+  try { j = await api("sb_redo", Object.assign({note}, redo)); }
+  catch (e) {
+    box.classList.remove("busy"); box.querySelectorAll("button").forEach(b => b.disabled = false);
+    box.querySelector(".pmsg").innerHTML = `<span class="err">That didn't work: ${esc(e.message)}</span>`;
+    return;
+  }
+  if (j.job) return watchJob(j.job);           // a new character look also updates the shots
+  if (j.shot) Object.assign(SBR.shots.find(s => s.n === j.shot.n), j.shot);
+  if (j.character) Object.assign(SBR.characters[redo.n], j.character);
+  if (j.suno) SBR.suno = j.suno;
+  if (j.thumbnail) SBR.thumbnail = j.thumbnail;
+  if (j.title_image) SBR.title_image = j.title_image;
+  const y = $("main").scrollTop;
+  FRESH = `${redo.which}-${redo.n}`;
+  renderScript(); $("main").scrollTop = y;
+  const nb = document.querySelector(`.pbox[data-key="${FRESH}"]`);
+  if (nb) { nb.querySelector(".pmsg").innerHTML = '<span class="ok">✓ New version (the shot list file is updated too)</span>'; nb.scrollIntoView({behavior:"smooth", block:"center"}); }
+  setTimeout(() => { FRESH = ""; document.querySelectorAll(".pbox.fresh").forEach(b => b.classList.remove("fresh")); }, 6000);
+}
+async function sbCopyChar(i) { await navigator.clipboard.writeText(SBR.characters[i].sheet_prompt); toast("Character prompt copied"); }
+
+// ---------------------------------------------------------------- working
+function watchJob(first) {
+  let shown = false;
+  const draw = j => {
+    if (!shown) {
+      $("#view").innerHTML = `<div class="working card"><h1 id="jt"></h1><div class="sub" id="jm"></div>
+        <div class="bar"><i id="jb"></i></div><div class="row" style="justify-content:space-between"><span class="left" id="jl"></span><span class="sub" id="jp" style="margin:0"></span></div>
+        <ul class="steps" id="js"></ul>
+        <div class="footerbar"><span class="sub" style="margin:0">You can keep using your computer.</span><button class="btn" onclick="api('stop');toast('Stopping after this step…')">Stop</button></div></div>`;
+      shown = true;
+    }
+    $("#jt").textContent = j.title; $("#jm").textContent = j.msg;
+    $("#jb").style.width = (j.frac * 100).toFixed(1) + "%";
+    $("#jl").textContent = j.elapsed < 8 ? "Getting started…" : j.left;
+    $("#jp").textContent = Math.round(j.frac * 100) + "%";
+    const st = j.steps || [];
+    $("#js").innerHTML = st.map((s, i) => `<li class="${i < st.length - 1 ? "ok" : "now"}"><span class="dot">${i < st.length - 1 ? ICON.check.replace('<svg','<svg width="12" height="12"') : ""}</span>${esc(s)}</li>`).join("");
+  };
+  if (first) draw(first);
+  clearInterval(polling);
+  polling = setInterval(async () => {
+    let j; try { j = (await api("job")).job; } catch (e) { return; }
+    if (!j) return;
+    draw(j);
+    if (j.done) {
+      clearInterval(polling); polling = null;
+      if (j.failed) { toast(j.error, true); goHome(); return; }
+      if (j.then === "review") { R = (await api("review")).review; renderReview(); }
+      else if (j.then === "done") renderDone();
+      else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
+      else if (j.then === "script") { SBR = (await api("sb_result")).result; renderScript(); $("main").scrollTop = 0; }
+      else if (j.then === "feedback") { F = (await api("feedback")).feedback; fbFilter = ""; renderFeedback(); }
+    }
+  }, 700);
+}
+
+// ---------------------------------------------------------------- review
+function renderReview() {
+  const kinds = [...new Set(R.cues.map(c => c.kind))];
+  const shown = R.cues.filter(c => !filter || c.kind === filter);
+  const on = R.cues.filter(c => c.keep && c.made).length, made = R.cues.filter(c => c.made).length;
+  const missing = R.cues.length - made;
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Sounds for “${esc(R.title)}”</h1><div class="sub" style="margin:0">${on} switched on · ${made} of ${R.cues.length} made</div></div>
+      <div class="row">${missing ? `<button class="btn" onclick="makeMissing()">Make the ${missing} missing</button>` : ""}<button class="btn primary big" onclick="finish()">Put them in my movie ${arrow()}</button></div></div>
+    ${(R.notice || R.notes) ? `<div class="banner">${esc(R.notice ? R.notice + " " : "")}${esc(R.notes)}</div>` : ""}
+    <div class="filters">
+      <span class="chip ${!filter?"on":""}" onclick="setFilter('')">All ${R.cues.length}</span>
+      ${kinds.map(k => `<span class="chip ${filter===k?"on":""}" onclick='setFilter(${JSON.stringify(k)})'>${esc(k)} ${R.cues.filter(c=>c.kind===k).length}</span>`).join("")}
+      <span style="flex:1"></span>
+      <button class="btn ghost" onclick="setAll(true)">Turn ${filter ? esc(filter).toLowerCase() : "all"} on</button>
+      <button class="btn ghost" onclick="setAll(false)">Turn ${filter ? esc(filter).toLowerCase() : "all"} off</button>
+    </div>
+    <div class="list">${shown.map(itemHtml).join("")}</div>`;
+}
+function itemHtml(c) {
+  return `<div class="item ${c.keep?"":"off"}" id="it_${c.id}">
+    <button class="switch ${c.keep?"on":""}" onclick="toggle('${c.id}')" aria-label="use this sound"></button>
+    <span class="tm">${c.time}</span>
+    <div class="w"><b>${esc(c.what)}</b><small title="${esc(c.prompt)}">${c.note ? esc(c.note) : esc(c.prompt)}</small></div>
+    <span class="pill ${c.added?"new":""}">${esc(c.kind)}${c.added?" · story":""}</span>
+    <div class="acts">${c.made ? `<button class="play" title="Play" onclick="play('${c.id}', this)">${ICON.play}</button>` : `<span class="pill">Not made</span>`}
+      <button class="iconbtn" title="More" onclick="openMenu(event,'${c.id}')">${ICON.more}</button></div>
+  </div>`;
+}
+function setFilter(k) { filter = k; renderReview(); }
+async function setAll(v) { const j = await api("all", {keep:v, kind: filter ? R.cues.find(c=>c.kind===filter).kind_id : ""}); R = j.review; renderReview(); }
+function cueById(id) { return R.cues.find(c => c.id === id); }
+async function toggle(id) { const c = cueById(id); const j = await api("toggle", {id, keep:!c.keep}); Object.assign(c, j.cue); renderReview(); }
+let audio = null, playingBtn = null;
+function play(id, btn) {
+  const c = cueById(id);
+  if (audio && playingBtn === btn) { audio.pause(); return; }
+  if (audio) audio.pause();
+  audio = new Audio(c.audio + "&v=" + Date.now()); playingBtn = btn; btn.innerHTML = ICON.pause;
+  audio.onpause = audio.onended = () => { btn.innerHTML = ICON.play; };
+  audio.play();
+}
+function openMenu(ev, id) {
+  ev.stopPropagation(); closeMenu();
+  const c = cueById(id), m = document.createElement("div"); m.className = "menu"; m.id = "menu";
+  const items = [];
+  if (c.made) items.push(["Watch it with the movie", `watch('${id}')`], ["A bit earlier", `nudge('${id}',-0.1)`], ["A bit later", `nudge('${id}',0.1)`], ["Quieter", `louder('${id}',-3)`], ["Louder", `louder('${id}',3)`], ["-"]);
+  items.push(["Try a different one", `remake('${id}')`], ["Change it in my words…", `changeIt('${id}')`], ["-"], [c.suno ? "Copy Suno wording" : "Copy Adobe wording", `copyWording('${id}')`]);
+  m.innerHTML = items.map(([t, f]) => t === "-" ? "<hr>" : `<button onclick="closeMenu();${f}">${t}</button>`).join("");
+  document.body.appendChild(m);
+  const r = ev.currentTarget.getBoundingClientRect();
+  m.style.top = Math.min(r.bottom + 6, innerHeight - m.offsetHeight - 10) + "px"; m.style.left = Math.max(10, r.right - m.offsetWidth) + "px";
+  setTimeout(() => document.addEventListener("click", closeMenu, {once:true}), 0);
+}
+function closeMenu() { const m = $("#menu"); if (m) m.remove(); }
+async function watch(id) { toast("Making a little preview…"); const j = await api("watch", {id}); modal(`<h2>${esc(cueById(id).what)}</h2><video src="${j.video}" controls autoplay></video><div class="footerbar"><span></span><button class="btn" onclick="closeModal()">Close</button></div>`); }
+async function nudge(id, by) { const j = await api("nudge", {id, by}); Object.assign(cueById(id), j.cue); renderReview(); toast(by < 0 ? "Moved 0.1 s earlier" : "Moved 0.1 s later"); }
+async function louder(id, db) { const j = await api("louder", {id, db}); Object.assign(cueById(id), j.cue); toast(db < 0 ? "A bit quieter" : "A bit louder"); }
+async function remake(id) { const j = await api("remake", {id}); watchJob(j.job); }
+function changeIt(id) {
+  const c = cueById(id);
+  modal(`<h2>How should “${esc(c.what)}” sound instead?</h2><div class="sub" style="margin:0">For example: a bigger splash, softer steps on grass, a happier horse call.</div>
+    <input type="text" id="words" placeholder="Describe it in your own words" onkeydown="if(event.key==='Enter')doChange('${id}')">
+    <div class="footerbar"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doChange('${id}')">Make it</button></div>`);
+  setTimeout(() => $("#words").focus(), 50);
+}
+async function doChange(id) { const words = $("#words").value.trim(); if (!words) return; closeModal(); toast("Asking " + aiName() + "…"); const j = await api("change", {id, words}); watchJob(j.job); }
+async function copyWording(id) { const c = cueById(id); await navigator.clipboard.writeText(c.suno || c.adobe); toast(c.suno ? "Copied: paste it into Suno as the style" : "Copied: paste it into Adobe's sound effect generator"); }
+async function makeMissing() { const j = await api("make_missing"); watchJob(j.job); }
+async function finish() { const j = await api("finish"); watchJob(j.job); }
+
+// ---------------------------------------------------------------- done
+async function renderDone() {
+  const o = (await api("outputs")).outputs;
+  const audioMode = o.mode === "audio", karaoke = o.mode === "karaoke";
+  $("#view").innerHTML = `
+    <div class="done">
+      <div class="card">${o.preview ? `<video src="${o.preview}" controls></video>` : ""}</div>
+      <div class="card">
+        <div class="ok-ring">${ICON.check}</div>
+        <h1>${karaoke ? "Your karaoke lyrics are ready!" : audioMode ? "Your audio is fixed!" : "Your movie has sound effects!"}</h1>
+        <p class="sub">${o.project ? (karaoke ? "A copy of your Premiere project has the lyrics on their own video track at the top, over the whole song. Move it, fade it, or switch the track off any time." : audioMode ? "A copy of your Premiere project has cleaned, balanced audio." : "A copy of your Premiere project has every sound on its own tracks, in a bin called “StoryStudio sounds”.") + " Your original project wasn't changed." : esc(o.project_error)}</p>
+        ${o.snapshot_time ? `<div class="sub" style="margin-top:-10px">Made from your project as it was at ${esc(o.snapshot_time)}.</div>` : ""}
+        <div class="row" style="flex-wrap:wrap;gap:10px">
+          ${o.project ? `<button class="btn primary big" onclick='api("open",{path:${JSON.stringify(o.project)}})'>Open in Premiere</button>` : ""}
+          <button class="btn" onclick='api("open",{path:${JSON.stringify(o.folder)}})'>${ICON.folder} Open the folder</button>
+          ${o.list ? `<button class="btn" onclick='api("open",{path:${JSON.stringify(o.list)}})'>${karaoke ? "Lyrics timing" : audioMode ? "Notes" : "Sound list"}</button>` : ""}
+        </div>
+        ${o.levels && o.levels.length ? `<ul class="notes">${o.levels.slice(0,6).map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
+        <div class="footerbar">${audioMode || karaoke ? "<span></span>" : `<button class="btn ghost" onclick="api('review').then(j=>{R=j.review;renderReview()})">Back to the sounds</button>`}<button class="btn ghost" onclick="goHome()">Home</button></div>
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------- settings
+function aiName() { return (H.ai && H.ai.name) || "Claude"; }
+async function openSettings() {
+  modal(`<h2>Settings</h2>
+    <div id="aibox" class="card" style="padding:16px;margin-bottom:18px"><b>Your AI helper</b><div class="sub" style="margin:6px 0 0">Checking for Claude and ChatGPT…</div></div>
+    <p class="sub">Keys are kept on this computer only.</p>
+    <label>Hugging Face key, for Stable Audio Open backgrounds ${H.has_hf_key ? '<span class="chip good">saved</span>' : ""}</label>
+    <input type="text" id="hfk" placeholder="${H.has_hf_key ? "Leave empty to keep the saved key" : "Paste your key"}">
+    <div class="sub" style="margin-top:-8px">How to get one: make a free account at huggingface.co, open <a href="https://huggingface.co/stabilityai/stable-audio-open-1.0" target="_blank">stable-audio-open-1.0</a> and click “Agree and access repository”, then create a “Read” token at huggingface.co/settings/tokens and paste it here.</div>
+    <label style="display:block;margin-top:16px">Freesound key (optional) ${H.has_fs_key ? '<span class="chip good">saved</span>' : ""}</label>
+    <input type="text" id="fsk" placeholder="${H.has_fs_key ? "Leave empty to keep the saved key" : "Paste your key"}">
+    <div class="footerbar"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveKeys()">Save</button></div>`);
+  try { drawAi((await api("ai_status")).ai); } catch (e) {}
+}
+function drawAi(ai) {
+  const box = $("#aibox"); if (!box) return;
+  H.ai = Object.assign(H.ai || {}, ai);
+  const gpt = ai.chatgpt === "ready" ? '<span class="chip good">Ready</span>'
+    : ai.chatgpt === "signed_out" ? '<span class="chip warn">Not signed in</span> <button class="btn" onclick="aiSignIn()">Sign in to ChatGPT</button>'
+    : '<span class="chip">Not set up</span> <button class="btn" onclick="aiInstall()">Set up ChatGPT</button>';
+  const choice = (v, t) => `<button class="${ai.choice===v?"on":""}" onclick="aiChoose('${v}')">${t}</button>`;
+  box.innerHTML = `<b>Your AI helper</b>
+    <div class="sub" style="margin:4px 0 12px">Plans sounds and gives edit feedback. StoryStudio works with Claude or ChatGPT, using your own plan (no extra cost).</div>
+    <div class="field" style="margin-top:0">Claude ${ai.claude ? '<span class="chip good">On this computer</span>' : '<span class="chip">Not installed</span>'}</div>
+    <div class="field">ChatGPT ${gpt}</div>
+    <div class="field">Use <div class="seg">${choice("auto","Automatic")}${choice("claude","Claude")}${choice("chatgpt","ChatGPT")}</div></div>
+    <div class="sub" style="margin:10px 0 0">${ai.name ? `Right now StoryStudio is using <b>${ai.name}</b>.` : "Neither is set up yet: set up ChatGPT above, or install Claude."}</div>`;
+}
+async function aiChoose(v) { const j = await api("ai_choose", {choice:v}); drawAi(Object.assign({}, H.ai, j.ai)); }
+async function aiSignIn() { await api("ai_sign_in_chatgpt"); toast("A sign-in window opened. Sign in there, then come back here.", false); setTimeout(async () => drawAi((await api("ai_status")).ai), 20000); }
+async function aiInstall() { closeModal(); const j = await api("ai_install_chatgpt"); watchJob(j.job); }
+async function saveKeys() {
+  const hf = $("#hfk").value.trim(), fs = $("#fsk").value.trim();
+  await api("save_settings", {hf_key:hf, freesound_key:fs, use_freesound: fs ? true : undefined});
+  closeModal(); toast("Saved"); H = await api("hello");
+}
+
+// ---------------------------------------------------------------- updates
+let UPD = null;
+async function checkUpdate() {
+  try { const j = await api("update_check"); UPD = j.update; } catch (e) { return; }
+  const bar = $("#updbar");
+  if (!UPD) { bar.classList.add("hidden"); return; }
+  bar.innerHTML = `<span>✨ A new version of StoryStudio (${esc(UPD.version)}) is ready.${UPD.notes ? " " + esc(UPD.notes) : ""}</span><button class="btn small primary" onclick="updateNow()">Update now</button><button class="btn small ghost" onclick="$('#updbar').classList.add('hidden')">Later</button>`;
+  bar.classList.remove("hidden");
+}
+async function updateNow() {
+  const bar = $("#updbar");
+  bar.innerHTML = `<span><span class="spin"></span> Updating StoryStudio… it will reopen by itself in a few seconds.</span>`;
+  let j;
+  try { j = await api("update_now"); } catch (e) { checkUpdate(); return; }
+  if (!j.ok) { bar.innerHTML = `<span>${esc(j.message || "You already have the newest version.")}</span>`; setTimeout(() => bar.classList.add("hidden"), 4000); return; }
+  bar.innerHTML = `<span>✓ Updated to ${esc(j.version)}. StoryStudio is reopening…</span>`;
+  setTimeout(() => { try { window.close(); } catch (e) {} }, 4000);
+}
+setTimeout(checkUpdate, 4000);
+setInterval(checkUpdate, 30 * 60 * 1000);
+
+goHome();
+</script>
+</body>
+</html>
