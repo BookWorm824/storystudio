@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Script builder: follows your direction (B-roll means no main character), shorter prompts, more varied shots, Who's in it choice, Different shot button."
+  "notes": "A new shot list never replaces an older one with the same title (it becomes Title 2)."
 }

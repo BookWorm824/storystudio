@@ -757,9 +757,20 @@ def out_dir():
 
 
 def save(r):
-    d = out_dir()
-    base = safe_name(r["title"])[:80]
-    txt, js = d / f"{base} - shot list.txt", d / f"{base} - shot list.json"
+    """A shot list that was opened or saved before goes back into its own file. A new one gets
+    a new file: an older list with the same title is never replaced ("Title 2" instead)."""
+    f = r.get("files") or {}
+    if f.get("json") and f.get("text"):
+        js, txt = Path(f["json"]), Path(f["text"])
+        d = js.parent
+    else:
+        d = out_dir()
+        base = safe_name(r["title"])[:80]
+        name, n = base, 2
+        while (d / f"{name} - shot list.json").exists() or (d / f"{name} - shot list.txt").exists():
+            name, n = f"{base} {n}", n + 1
+        txt, js = d / f"{name} - shot list.txt", d / f"{name} - shot list.json"
+    r["files"] = {"text": str(txt), "json": str(js), "folder": str(d)}
     js.write_text(json.dumps(r, indent=1, ensure_ascii=False), encoding="utf8")
     txt.write_text(as_text(r), encoding="utf8")
     return {"text": str(txt), "json": str(js), "folder": str(d)}
@@ -1102,7 +1113,12 @@ your new text.""" + NO_SHORT, REDO, system=SYSTEM, timeout=300)
 
 
 def load(path):
-    return json.loads(Path(path).read_text(encoding="utf8"))
+    """Open a saved shot list; changes to it are saved back into this same file."""
+    p = Path(path)
+    r = json.loads(p.read_text(encoding="utf8"))
+    txt = p.with_name(re.sub(r"\.json$", ".txt", p.name))
+    r["files"] = {"json": str(p), "text": str(txt), "folder": str(p.parent)}
+    return r
 
 
 def recent(limit=8):
