@@ -472,7 +472,8 @@ def api(name, a):
     if name == "sb_brainstorm":
         import ss_script as SB
         return {"ideas": SB.brainstorm(a.get("text", ""), a.get("notes", ""),
-                                       a.get("style_name", ""))}
+                                       a.get("style_name", ""),
+                                       onscreen=a.get("onscreen") or "auto")}
     if name == "sb_cast":
         import ss_script as SB
         return {"characters": SB.suggest_cast(a)}

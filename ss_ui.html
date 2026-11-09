@@ -599,7 +599,9 @@ async function openFbProject() { if (F.dirty) { const j = await api("fb_save"); 
 
 // ---------------------------------------------------------------- script builder
 let SBD = null;                       // styles, aspects, recent shot lists
-let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", cast:"", style_id:"", aspect:"16:9", styleTab:"", styleFind:"", ideas:[], wording:"improved"};
+let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", onscreen:"auto", cast:"", style_id:"", aspect:"16:9", styleTab:"", styleFind:"", ideas:[], wording:"improved", style_len:"short"};
+const ONSCREEN = [["auto","Go by my direction"],["main","Main characters"],["none","No main character (B-roll)"],["nopeople","No people"]];
+const ONSCREEN_HINT = {auto:"StoryStudio follows what your direction says.", main:"The video follows the characters you set up below.", none:"Different people of all ages in different shots, mixed with nature. No one person throughout.", nopeople:"Only nature, animals and places."};
 let SBR = null;                       // the finished shot list
 let PICS = null;                      // sample pictures for the default styles
 async function openBuilder() {
@@ -610,6 +612,7 @@ async function openBuilder() {
   renderBuilder(true);
 }
 function sbSet(k, v, redraw) { SBS[k] = v; if (redraw) renderBuilder(); }
+function sbSetKeep(k, v) { const y = $("main").scrollTop; SBS[k] = v; renderBuilder(); $("main").scrollTop = y; }
 function sbStep(n, title, body, hint) {
   return `<div class="card sbstep"><div class="sbn">${n}</div><div style="flex:1;min-width:0"><h2 style="margin:0 0 4px">${title}</h2>${hint ? `<div class="sub" style="margin:0 0 12px">${hint}</div>` : ""}${body}</div></div>`;
 }
@@ -642,10 +645,15 @@ function renderBuilder(top) {
         <textarea class="sbin" rows="4" placeholder="What should the video show? Who is in it, where, what happens…" oninput="SBS.direction=this.value">${esc(SBS.direction)}</textarea>
         <div class="row" style="margin-top:10px"><button class="btn" id="bsbtn" onclick="sbBrainstorm()">✨ Brainstorm ideas</button><span class="sub" style="margin:0">${aiName()} suggests a few directions from the lyrics. Pick one, then change it however you like.</span></div>
         ${SBS.ideas.length ? `<div class="ideas">${SBS.ideas.map((d, i) => `<button class="idea" onclick="sbUseIdea(${i})"><b>${esc(d.name)}</b><span>${esc(d.direction)}</span></button>`).join("")}</div>` : ""}`));
+      steps.push(sbStep(n++, "Who's in it?", `<div class="seg" style="flex-wrap:wrap">${ONSCREEN.map(([v, t]) => `<button class="${SBS.onscreen === v ? "on" : ""}" onclick="sbSetKeep('onscreen','${v}')">${t}</button>`).join("")}</div>
+        <div class="sub" style="margin:8px 0 0">${ONSCREEN_HINT[SBS.onscreen] || ""}</div>`));
     } else {
       steps.push(sbStep(n++, "Length and clips", `<div class="sub" style="margin:0">Stories use <b>8-second clips</b>. ${aiName()} reads the script, works out how long it takes to tell, and plans enough shots, plus extra shots to give you room. The story itself is the direction.</div>`));
+      steps.push(sbStep(n++, "Anything to keep in mind?", `<textarea class="sbin" rows="3" placeholder="Optional. For example: make the opening obvious she's dreaming, more scenes of the dad, no classroom…" oninput="SBS.direction=this.value">${esc(SBS.direction)}</textarea>`));
     }
-    steps.push(sbStep(n++, "Characters", `
+    const nobody = music && (SBS.onscreen === "none" || SBS.onscreen === "nopeople");
+    if (nobody) steps.push(sbStep(n++, "Characters", `<div class="sub" style="margin:0">${SBS.onscreen === "none" ? "No main character, so there are no character prompts: each shot describes its own people." : "No people, so there are no character prompts."} If you do want one recurring character (an animal, say), choose “Go by my direction” and put it in your direction.</div>`));
+    else steps.push(sbStep(n++, "Characters", `
       <textarea id="sbcast" class="sbin" rows="6" placeholder="One per line, for example:&#10;Grace: a 7-year-old girl with short brown hair, a light blue hoodie and a yellow daisy t-shirt…&#10;Jasper: a fluffy orange cat with a blue collar…" oninput="SBS.cast=this.value">${esc(SBS.cast)}</textarea>
       <div class="row" style="margin-top:10px"><button class="btn" id="castbtn" onclick="sbCast()">✨ Describe the characters for me</button><span class="sub" style="margin:0">Keeps anything you typed and fills in the rest. Edit it until it's right.</span></div>`,
       "Type the characters you have in mind, or let the AI describe them. Every character gets its own character prompt."));
@@ -684,6 +692,8 @@ function stylePreview(s) {
     ${p ? `<div class="stylepics">${p.map((src, i) => `<figure><img src="${src}" alt=""><figcaption>${i === 0 ? "Made in ChatGPT" : "Made in Flow (Nano Banana)"}</figcaption></figure>`).join("")}</div>` : ""}
     ${opt ? `<div class="row" style="margin-top:12px;flex-wrap:wrap;gap:10px"><span class="sub" style="margin:0">Style wording</span><div class="seg"><button class="${useOpt ? "on" : ""}" onclick="sbWording('improved')">Improved (recommended)</button><button class="${useOpt ? "" : "on"}" onclick="sbWording('original')">My original</button></div>
       <span class="sub" style="margin:0">${useOpt ? "Tighter and positively worded, so ChatGPT and Nano Banana follow it better." : "Exactly as written in your style guide."}</span></div>` : ""}
+    <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:10px"><span class="sub" style="margin:0">In each shot prompt</span><div class="seg"><button class="${SBS.style_len !== "full" ? "on" : ""}" onclick="sbSetKeep('style_len','short')">Short style (recommended)</button><button class="${SBS.style_len === "full" ? "on" : ""}" onclick="sbSetKeep('style_len','full')">Full style</button></div>
+      <span class="sub" style="margin:0">${SBS.style_len === "full" ? "Every shot prompt ends with the whole style text above." : `Shot prompts end with a short version${s.style_short ? `: “${esc(s.style_short)}”` : ""} and the picture shape. Character prompts always get the full style.`}</span></div>
     <details style="margin-top:8px"><summary class="sub" style="cursor:pointer;margin:0">See the exact style words</summary><div class="ptext" style="margin-top:6px">${esc(text)}</div></details></div>`;
 }
 function sbWording(w) { const y = $("main").scrollTop; SBS.wording = w; renderBuilder(); $("main").scrollTop = y; }
@@ -698,7 +708,7 @@ async function sbSongFile() { const j = await api("sb_pick_song"); if (j.seconds
 async function sbBrainstorm() {
   if (!SBS.text.trim()) return toast("Paste the lyrics first.", true);
   const b = $("#bsbtn"); b.disabled = true; b.textContent = "Thinking of ideas…";
-  try { const st = SBD.styles.find(s => s.id === SBS.style_id); const j = await api("sb_brainstorm", {text:SBS.text, notes:SBS.direction, style_name: st ? st.name : ""}); SBS.ideas = j.ideas || []; } finally { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+  try { const st = SBD.styles.find(s => s.id === SBS.style_id); const j = await api("sb_brainstorm", {text:SBS.text, notes:SBS.direction, style_name: st ? st.name : "", onscreen:SBS.onscreen}); SBS.ideas = j.ideas || []; } finally { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
 }
 function sbUseIdea(i) { SBS.direction = SBS.ideas[i].direction; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; toast("Added to the direction. Change it however you like."); }
 async function sbCast() {
@@ -706,8 +716,9 @@ async function sbCast() {
   const b = $("#castbtn"); b.disabled = true; b.textContent = "Describing the characters…";
   try {
     const st = SBD.styles.find(s => s.id === SBS.style_id);
-    const j = await api("sb_cast", {kind:SBS.kind, text:SBS.text, cast:SBS.cast, direction:SBS.direction, style_name: st ? st.name : ""});
+    const j = await api("sb_cast", {kind:SBS.kind, text:SBS.text, cast:SBS.cast, direction:SBS.direction, onscreen: SBS.kind === "music" ? SBS.onscreen : "main", style_name: st ? st.name : ""});
     if ((j.characters || []).length) SBS.cast = j.characters.map(c => `${c.name}: ${c.look}`).join("\n\n");
+    else toast("Your direction doesn't need any recurring characters, so there's nothing to describe.");
   } finally { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
 }
 async function sbSaveStyle() {
@@ -721,7 +732,8 @@ async function sbStart() {
   if (!SBS.text.trim()) return toast("Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first.", true);
   if (SBS.kind === "music" && !(songSeconds(SBS.song) >= 5)) return toast("Enter how long the song is, for example 3:15.", true);
   if (!SBS.style_id) return toast("Choose an art style.", true);
-  const j = await api("sb_start", {kind:SBS.kind, text:SBS.text, title:SBS.title, song_seconds:songSeconds(SBS.song), clip:SBS.clip, direction: SBS.kind === "music" ? SBS.direction : "", cast:SBS.cast, style_id:SBS.style_id, aspect:SBS.aspect, wording:SBS.wording});
+  const music = SBS.kind === "music", nobody = music && (SBS.onscreen === "none" || SBS.onscreen === "nopeople");
+  const j = await api("sb_start", {kind:SBS.kind, text:SBS.text, title:SBS.title, song_seconds:songSeconds(SBS.song), clip:SBS.clip, direction:SBS.direction, onscreen: music ? SBS.onscreen : "main", cast: nobody ? "" : SBS.cast, style_id:SBS.style_id, aspect:SBS.aspect, wording:SBS.wording, style_len:SBS.style_len});
   watchJob(j.job);
 }
 function pastLists() {
@@ -749,7 +761,7 @@ function promptBox(label, sub, text, redo) {
   const i = PB.length; PB.push({text, redo});
   const key = redo ? `${redo.which}-${redo.n}` : "";
   return `<div class="pbox ${key && key === FRESH ? "fresh" : ""}" id="pb${i}" data-key="${key}"><div class="ptitle">${label}${sub ? ` <span class="sub">${sub}</span>` : ""}<span style="flex:1"></span>
-    <button class="btn small" onclick="pbCopy(${i})">Copy</button>${redo ? `<button class="btn small ghost" onclick="pbRedo(${i})">New version</button>` : ""}</div>
+    <button class="btn small" onclick="pbCopy(${i})">Copy</button>${redo ? `<button class="btn small ghost" onclick="pbRedo(${i})">${redo.which === "picture" ? "Different shot" : "New version"}</button>` : ""}</div>
     <div class="ptext">${esc(text)}</div><div class="pmsg"></div></div>`;
 }
 function renderScript() {
@@ -781,6 +793,7 @@ function renderScript() {
     <div class="rhead"><div><h1>${esc(r.title)}</h1><div class="sub" style="margin:0">${esc(r.summary)}</div></div>
       <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.text))}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.folder))}})'>${ICON.folder} Folder</button>` : ""}</div></div>
     <div class="chips"><span class="chip">${story ? "Story" : "Music video"}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span></div>
+    ${r.approach ? `<div class="banner"><b>The plan:</b> ${esc(r.approach)}</div>` : ""}
     ${r.visual_rules ? `<div class="banner">${esc(r.visual_rules)}</div>` : ""}
     ${top ? `<div class="toplist">${top}</div>` : ""}
     ${chars}
@@ -791,8 +804,9 @@ function renderScript() {
 async function pbCopy(i) { await navigator.clipboard.writeText(PB[i].text); toast("Copied"); }
 function pbRedo(i) {
   const r = PB[i].redo, ch = r.which === "character" ? SBR.characters[r.n] : null;
-  modal(`<h2>New version</h2><div class="sub" style="margin:0">What would you like changed? Leave it empty for a fresh take.${ch ? ` This gives ${esc(ch.name)} a new look and updates ${esc(ch.name)} in every shot too.` : ""}</div>
-    <input type="text" id="redonote" placeholder="${ch ? "For example: give her a green coat and longer hair…" : "For example: make it a close-up, add the cat, slower camera…"}" onkeydown="if(event.key==='Enter')doRedo(${i})">
+  const pic = r.which === "picture";
+  modal(`<h2>${pic ? "A different shot" : "New version"}</h2><div class="sub" style="margin:0">${pic ? "What would you like instead? Leave it empty and you'll get a different shot for the same words, with a new MiniMax prompt to match." : "What would you like changed? Leave it empty for a fresh take."}${ch ? ` This gives ${esc(ch.name)} a new look and updates ${esc(ch.name)} in every shot too.` : ""}</div>
+    <input type="text" id="redonote" placeholder="${ch ? "For example: give her a green coat and longer hair…" : pic ? "For example: a grandpa and grandson fishing, wider, more nature…" : "For example: slower camera, she waves…"}" onkeydown="if(event.key==='Enter')doRedo(${i})">
     <div class="footerbar"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="doRedo(${i})">Write a new one</button></div>`);
   setTimeout(() => $("#redonote").focus(), 50);
 }
@@ -818,7 +832,7 @@ async function doRedo(i) {
   FRESH = `${redo.which}-${redo.n}`;
   renderScript(); $("main").scrollTop = y;
   const nb = document.querySelector(`.pbox[data-key="${FRESH}"]`);
-  if (nb) { nb.querySelector(".pmsg").innerHTML = '<span class="ok">✓ New version (the shot list file is updated too)</span>'; nb.scrollIntoView({behavior:"smooth", block:"center"}); }
+  if (nb) { nb.querySelector(".pmsg").innerHTML = `<span class="ok">✓ ${redo.which === "picture" ? "A new shot: the picture and the MiniMax prompt are both new" : "New version"} (the shot list file is updated too)</span>`; nb.scrollIntoView({behavior:"smooth", block:"center"}); }
   setTimeout(() => { FRESH = ""; document.querySelectorAll(".pbox.fresh").forEach(b => b.classList.remove("fresh")); }, 6000);
 }
 async function sbCopyChar(i) { await navigator.clipboard.writeText(SBR.characters[i].sheet_prompt); toast("Character prompt copied"); }

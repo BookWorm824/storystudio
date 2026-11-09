@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Pick several jobs in a row (like sound effects, then fix the audio). Copies are named for everything done to them. Home button works."
+  "notes": "Script builder: follows your direction (B-roll means no main character), shorter prompts, more varied shots, Who's in it choice, Different shot button."
 }
