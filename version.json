@@ -1,5 +1,5 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Karaoke lines appear just before they are sung, not a second and a half early."
+  "notes": "Fixes buttons that did nothing (how many sounds, style tabs, opening files)."
 }

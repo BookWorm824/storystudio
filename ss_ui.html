@@ -310,8 +310,8 @@ function renderHome() {
           <h2 style="margin:6px 0 4px">Open a Premiere project</h2>
           <div class="sub" style="margin:0">Choose a .prproj file</div>
         </button>
-        <div class="card"><button class="btn primary" style="width:100%;justify-content:center;margin-bottom:16px" onclick="openBuilder()">${ICON.film} Plan a new video: script builder</button>${(H.shotlists||[]).length ? `<h2>Your shot lists</h2><div class="pastlist" style="margin-bottom:18px">${H.shotlists.map(r => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots</small></div><button class="btn small" onclick='homeOpenList(${JSON.stringify(r.path)}, this)'>Open</button></div>`).join("")}</div>` : ""}<h2>Recent projects</h2>
-          <div class="recent">${(H.recent||[]).map(r => `<button onclick='openProject(${JSON.stringify(r.path)})'><div class="ic">Pr</div><div><div>${esc(r.name)}</div><small>${esc(r.folder)}</small></div></button>`).join("") || '<div class="sub">Projects you open will show up here.</div>'}</div>
+        <div class="card"><button class="btn primary" style="width:100%;justify-content:center;margin-bottom:16px" onclick="openBuilder()">${ICON.film} Plan a new video: script builder</button>${(H.shotlists||[]).length ? `<h2>Your shot lists</h2><div class="pastlist" style="margin-bottom:18px">${H.shotlists.map(r => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots</small></div><button class="btn small" onclick='homeOpenList(${esc(JSON.stringify(r.path))}, this)'>Open</button></div>`).join("")}</div>` : ""}<h2>Recent projects</h2>
+          <div class="recent">${(H.recent||[]).map(r => `<button onclick='openProject(${esc(JSON.stringify(r.path))})'><div class="ic">Pr</div><div><div>${esc(r.name)}</div><small>${esc(r.folder)}</small></div></button>`).join("") || '<div class="sub">Projects you open will show up here.</div>'}</div>
         </div>
       </div>`;
     return;
@@ -365,7 +365,7 @@ async function openPrevious() { const j = await api("open_previous"); R = j.revi
 
 // ---------------------------------------------------------------- setup: sound effects
 function seg(key, items) {
-  return `<div class="seg">${items.map(([v,t]) => `<button class="${opts[key]==v?"on":""}" onclick="setOpt('${key}',${JSON.stringify(v)})">${t}</button>`).join("")}</div>`;
+  return `<div class="seg">${items.map(([v,t]) => `<button class="${opts[key]==v?"on":""}" onclick="setOpt('${key}',${esc(JSON.stringify(v))})">${t}</button>`).join("")}</div>`;
 }
 function sw(key) { return `<button class="switch ${opts[key]?"on":""}" onclick="setOpt('${key}',${!opts[key]})" aria-label="${key}"></button>`; }
 function setOpt(k, v) { opts[k] = v; setupSounds(true); }
@@ -425,7 +425,7 @@ async function startKaraoke() { H.lyrics = $("#lyrics").value; const j = await a
 // ---------------------------------------------------------------- setup: edit feedback
 let fbOpts = {kind:"auto", claude:true};
 function setupFeedback() {
-  const segFb = (key, items) => `<div class="seg">${items.map(([v,t]) => `<button class="${fbOpts[key]===v?"on":""}" onclick='fbOpts.${key}=${JSON.stringify(v)};setupFeedback()'>${t}</button>`).join("")}</div>`;
+  const segFb = (key, items) => `<div class="seg">${items.map(([v,t]) => `<button class="${fbOpts[key]===v?"on":""}" onclick='fbOpts.${key}=${esc(JSON.stringify(v))};setupFeedback()'>${t}</button>`).join("")}</div>`;
   const mins = Math.max(1, Math.round((25 + P.seconds * 0.12 + (fbOpts.claude ? 20 + 75 * Math.ceil(P.seconds / (P.seconds <= 420 ? 160 : 320)) : 0)) / 60));
   $("#setup").innerHTML = `
     <div class="card panel">
@@ -465,8 +465,8 @@ function renderFeedback() {
           <div class="sub" style="margin:0 0 12px">${kept} note${kept===1?"":"s"} ${F.dirty ? "switched on. Update the copy to change the markers." : "are markers on the timeline in your “(feedback)” copy. Your project wasn't changed."}</div>
           <div class="row" style="flex-wrap:wrap;gap:10px">
             ${F.dirty ? `<button class="btn primary" onclick="fbSave()">Update the (feedback) copy</button>` : ""}
-            <button class="btn" onclick='api("open",{path:${JSON.stringify(F.folder)}})'>${ICON.folder} Open the folder</button>
-            ${F.list ? `<button class="btn" onclick='api("open",{path:${JSON.stringify(F.list)}})'>Notes list</button>` : ""}
+            <button class="btn" onclick='api("open",{path:${esc(JSON.stringify(F.folder))}})'>${ICON.folder} Open the folder</button>
+            ${F.list ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(F.list))}})'>Notes list</button>` : ""}
             <button class="btn ghost" onclick="goHome()">Home</button>
           </div>
         </div>
@@ -551,7 +551,7 @@ function renderBuilder(top) {
       "Type the characters you have in mind, or let the AI describe them. Every character gets its own character prompt."));
     steps.push(sbStep(n++, "Art style", `
       <div class="filters" style="margin-bottom:10px">
-        ${groups.map(g => `<span class="chip ${!find && SBS.styleTab===g?"on":""}" onclick="SBS.styleFind='';sbSet('styleTab',${JSON.stringify(g)},true)">${esc(g)} ${SBD.styles.filter(s=>s.group===g).length}</span>`).join("")}
+        ${groups.map(g => `<span class="chip ${!find && SBS.styleTab===g?"on":""}" onclick="SBS.styleFind='';sbSet('styleTab',${esc(JSON.stringify(g))},true)">${esc(g)} ${SBD.styles.filter(s=>s.group===g).length}</span>`).join("")}
         <span style="flex:1"></span><input type="text" class="sbin" style="width:200px;padding:6px 10px" placeholder="Search styles" value="${esc(SBS.styleFind)}" oninput="SBS.styleFind=this.value;renderStyles()">
       </div>
       <div id="stylegrid" class="stylegrid">${shown.map(styleCard).join("")}</div>
@@ -679,7 +679,7 @@ function renderScript() {
   }).join("");
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>${esc(r.title)}</h1><div class="sub" style="margin:0">${esc(r.summary)}</div></div>
-      <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${JSON.stringify(r.files.text)}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${JSON.stringify(r.files.folder)}})'>${ICON.folder} Folder</button>` : ""}</div></div>
+      <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.text))}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.folder))}})'>${ICON.folder} Folder</button>` : ""}</div></div>
     <div class="chips"><span class="chip">${story ? "Story" : "Music video"}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span></div>
     ${r.visual_rules ? `<div class="banner">${esc(r.visual_rules)}</div>` : ""}
     ${top ? `<div class="toplist">${top}</div>` : ""}
@@ -771,7 +771,7 @@ function renderReview() {
     ${(R.notice || R.notes) ? `<div class="banner">${esc(R.notice ? R.notice + " " : "")}${esc(R.notes)}</div>` : ""}
     <div class="filters">
       <span class="chip ${!filter?"on":""}" onclick="setFilter('')">All ${R.cues.length}</span>
-      ${kinds.map(k => `<span class="chip ${filter===k?"on":""}" onclick='setFilter(${JSON.stringify(k)})'>${esc(k)} ${R.cues.filter(c=>c.kind===k).length}</span>`).join("")}
+      ${kinds.map(k => `<span class="chip ${filter===k?"on":""}" onclick='setFilter(${esc(JSON.stringify(k))})'>${esc(k)} ${R.cues.filter(c=>c.kind===k).length}</span>`).join("")}
       <span style="flex:1"></span>
       <button class="btn ghost" onclick="setAll(true)">Turn ${filter ? esc(filter).toLowerCase() : "all"} on</button>
       <button class="btn ghost" onclick="setAll(false)">Turn ${filter ? esc(filter).toLowerCase() : "all"} off</button>
@@ -864,9 +864,9 @@ async function renderDone() {
         <p class="sub">${o.project ? (karaoke ? "A copy of your Premiere project has the lyrics on their own video track at the top, over the whole song. Move it, fade it, or switch the track off any time." : audioMode ? "A copy of your Premiere project has cleaned, balanced audio." : "A copy of your Premiere project has every sound on its own tracks, in a bin called “StoryStudio sounds”.") + " Your original project wasn't changed." : esc(o.project_error)}</p>
         ${o.snapshot_time ? `<div class="sub" style="margin-top:-10px">Made from your project as it was at ${esc(o.snapshot_time)}.</div>` : ""}
         <div class="row" style="flex-wrap:wrap;gap:10px">
-          ${o.project ? `<button class="btn primary big" onclick='openFile(${JSON.stringify(o.project)}, this, "Opening in Premiere…")'>Open in Premiere</button>` : ""}
-          <button class="btn" onclick='openFile(${JSON.stringify(o.folder)}, this)'>${ICON.folder} Open the folder</button>
-          ${o.list ? `<button class="btn" onclick='openFile(${JSON.stringify(o.list)}, this)'>${karaoke ? "Lyrics timing" : audioMode ? "Notes" : "Sound list"}</button>` : ""}
+          ${o.project ? `<button class="btn primary big" onclick='openFile(${esc(JSON.stringify(o.project))}, this, "Opening in Premiere…")'>Open in Premiere</button>` : ""}
+          <button class="btn" onclick='openFile(${esc(JSON.stringify(o.folder))}, this)'>${ICON.folder} Open the folder</button>
+          ${o.list ? `<button class="btn" onclick='openFile(${esc(JSON.stringify(o.list))}, this)'>${karaoke ? "Lyrics timing" : audioMode ? "Notes" : "Sound list"}</button>` : ""}
         </div>
         ${o.source ? `<div class="row" style="flex-wrap:wrap;gap:10px;margin-top:14px">
           <button class="btn" onclick="runAgain()">↻ Run it again</button>
