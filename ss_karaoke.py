@@ -147,20 +147,21 @@ def time_lyrics(st, lines, progress=None, cancel=None):
         raise StoryError("StoryStudio couldn't line the lyrics up with the song. Check that "
                          "the lyrics are in the order they're sung.")
     result = json.loads((work / "timing.json").read_text(encoding="utf8"))
-    timing = result["words"]
-    k = 0
-    for l in lines:
-        for w in l["words"]:
-            t = timing[k] if k < len(timing) else None
-            k += 1
+    # the worker returns the lines in the order they're sung: a section sung more times than
+    # it's written (an extra chorus) is repeated, and lines written but not sung there are
+    # left out rather than flashed on screen at the wrong time
+    import copy
+    timed = []
+    for item in result["lines"]:
+        line = copy.deepcopy(lines[item["line"]])
+        for w, t in zip(line["words"], item["words"]):
             if t:
                 w.update(start=t["start"], end=max(t["end"], t["start"] + 0.12),
                          score=t["score"])
-    # lines written but not sung where they are (squeezed in, or a repeat written once too
-    # often) are left out rather than flashed on screen at the wrong time
-    dropped = set(result.get("dropped_lines") or [])
-    left_out = [l["text"] for i, l in enumerate(lines) if i in dropped]
-    lines = [l for i, l in enumerate(lines) if i not in dropped]
+        timed.append(line)
+    left_out = [lines[i]["text"] for i in result.get("dropped_lines") or []]
+    repeats = [a["lines"] for a in result.get("added") or []]
+    lines = timed
     if not lines:
         raise StoryError("StoryStudio couldn't hear these lyrics in the song.")
     _fill_gaps(lines)
@@ -169,9 +170,12 @@ def time_lyrics(st, lines, progress=None, cancel=None):
         l["end"] = l["words"][-1]["end"]
     weak = sum(1 for l in lines for w in l["words"] if w.get("score", 1) < 0.15)
     total = sum(len(l["words"]) for l in lines)
-    st["karaoke"] = {"lines": lines, "weak": weak, "total": total, "left_out": left_out}
+    st["karaoke"] = {"lines": lines, "weak": weak, "total": total, "left_out": left_out,
+                     "repeats": repeats}
     if left_out:
         log("karaoke: left out (not sung where written):", left_out)
+    if repeats:
+        log("karaoke: added repeated sections:", repeats)
     if progress:
         progress(0.75, f"Timed {total} words.")
     return lines
@@ -475,6 +479,9 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     st["levels"] = [f"Timed {k['total']} words to the singing."]
     if k["weak"]:
         st["levels"].append(f"{k['weak']} word(s) were hard to hear; check them in the preview.")
+    for n in k.get("repeats") or []:
+        st["levels"].append(f"A section of {n} lines (like the chorus) is sung more times than "
+                            "it's written in the lyrics, so StoryStudio added the repeat.")
     gone = k.get("left_out") or []
     if gone:
         st["levels"].append(

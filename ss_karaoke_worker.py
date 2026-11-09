@@ -95,26 +95,32 @@ def main():
     sep = vocab.get("|")
     import torchaudio.functional as F
     tokens = [[vocab[c] for c in w.upper() if c in vocab and c != "|"] for w in spec["words"]]
+    sizes = spec.get("lines") or [len(spec["words"])]
+    starts = [sum(sizes[:i]) for i in range(len(sizes))]
+    text_of = [tuple(spec["words"][starts[i]:starts[i] + sizes[i]]) for i in range(len(sizes))]
 
-    def align(word_ids):
-        """Forced alignment of these words (in order) over the whole song."""
+    def align(seq):
+        """Forced alignment of these lyric lines (original line numbers, repeats allowed) over
+        the whole song. Returns {(position, word in line): {start, end, score[]}} in frames."""
         targets, owner = [], []
-        for wi in word_ids:
-            if not tokens[wi]:
-                continue
-            if targets:
-                targets.append(sep)
-                owner.append(-1)
-            targets += tokens[wi]
-            owner += [wi] * len(tokens[wi])
-        if not targets:
+        for pos, li in enumerate(seq):
+            for k in range(sizes[li]):
+                t = tokens[starts[li] + k]
+                if not t:
+                    continue
+                if targets:
+                    targets.append(sep)
+                    owner.append(None)
+                targets += t
+                owner += [(pos, k)] * len(t)
+        if not targets or len(targets) >= em.shape[0]:
             return {}
         tg = torch.tensor([targets], dtype=torch.int32)
         ali, scores = F.forced_align(em[None], tg, blank=blank)
         spans = F.merge_tokens(ali[0], scores[0].exp(), blank=blank)
         got = {}
         for sp, o in zip(spans, owner):
-            if o < 0:
+            if o is None:
                 continue
             w = got.setdefault(o, {"start": sp.start, "end": sp.end, "score": []})
             w["start"] = min(w["start"], sp.start)
@@ -122,56 +128,144 @@ def main():
             w["score"].append(float(sp.score))
         return got
 
+    def span(got, pos, seq):
+        ws = [got[(pos, k)] for k in range(sizes[seq[pos]]) if (pos, k) in got]
+        if not ws:
+            return None
+        return (min(w["start"] for w in ws) * frame_sec, max(w["end"] for w in ws) * frame_sec,
+                ws)
+
+    # what the speech model hears in the voice: used to find singing that has no lyrics
+    heard = []
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import ss_media as M
+        heard = sorted(((w["s"] + w["e"]) / 2) for w in M.transcribe_raw(vocals16))
+    except Exception as ex:
+        say(event="note", text=f"listening check skipped: {type(ex).__name__}: {ex}"[:300])
+
+    def unexplained(got, seq):
+        """How many heard words have no lyric word on them: singing with no lyrics. Word by
+        word, and no word may stretch past ~1.2 s, so lyrics spread thin over a section
+        that's really sung twice don't count as covering it."""
+        spans = sorted((w["start"] * frame_sec,
+                        min(w["end"], w["start"] + int(1.2 / frame_sec)) * frame_sec)
+                       for w in got.values())
+        n, j = 0, 0
+        for t in heard:
+            while j < len(spans) and spans[j][1] + 0.45 < t:
+                j += 1
+            if not any(a - 0.45 <= t <= b + 0.45 for a, b in spans[j:j + 4]):
+                n += 1
+        return n
+
+    def repeated_blocks(seq):
+        """The longest runs of lyric lines that appear more than once (the chorus): the
+        sections a singer might repeat more times than they're written."""
+        keys = [text_of[li] for li in seq]
+        n = len(seq)
+        for size in range(min(14, n // 2), 1, -1):
+            found = {}
+            for i in range(n - size + 1):
+                b = tuple(keys[i:i + size])
+                if b in found or len(set(b)) < 2:
+                    continue
+                occ, j = [], 0
+                while j <= n - size:
+                    if tuple(keys[j:j + size]) == b:
+                        occ.append(j)
+                        j += size
+                    else:
+                        j += 1
+                if len(occ) >= 2:
+                    found[b] = occ
+            if found:
+                return [(size, occ) for occ in found.values()]
+        return []
+
+    seq = [i for i in range(len(sizes)) if sizes[i] > 0]
+    added = []                     # [(position, how many lines)] of repeats that were added
+    got = align(seq)
+    def low_lines(got, seq):
+        """Lines the aligner is unsure of (score under 0.5)."""
+        n = 0
+        for p in range(len(seq)):
+            s = span(got, p, seq)
+            sc = [x for w in s[2] for x in w["score"]] if s else []
+            if not sc or sum(sc) / len(sc) < 0.5:
+                n += 1
+        return n
+
+    if heard:
+        base = unexplained(got, seq)
+        base_cost = base + 3 * low_lines(got, seq)
+        say(event="debug", text=f"as written: unheard {base}, cost {base_cost}")
+        for _ in range(3):
+            best = None
+            for size, occ in repeated_blocks(seq):
+                for j in occ:                    # try the repeat after each place it's sung
+                    end = j + size
+                    cand = seq[:end] + seq[j:end] + seq[end:]
+                    g = align(cand)
+                    if not g:
+                        continue
+                    u = unexplained(g, cand)
+                    unsure = low_lines(g, cand)
+                    cost = u + 3 * unsure        # a repeat in the wrong place leaves lines unsure
+                    say(event="debug", text=f"repeat {size} lines after {end}: unheard {u}, "
+                                            f"unsure lines {unsure}, cost {cost}")
+                    if best is None or cost < best[5]:
+                        best = (u, cand, g, end, size, cost)
+            if not best or best[5] > base_cost - max(4, 0.2 * base_cost):
+                break                            # adding a repeat doesn't explain the singing
+            say(event="note", text=f"added a repeated section ({best[4]} lines): heard "
+                                   f"{base} words without lyrics, now {best[0]}")
+            base, seq, got, base_cost = best[0], best[1], best[2], best[5]
+            added.append((best[3], best[4]))
+
     # lines that are written but not sung there get squeezed into a gap, where the aligner is
     # unsure of them (score far below the ~0.9+ of sung lines). Take out the least sure line,
     # line up the rest again, and repeat, so one mismatch can't throw off the song.
-    sizes = spec.get("lines") or [len(spec["words"])]
-    starts = [sum(sizes[:i]) for i in range(len(sizes))]
-    keep = [i for i in range(len(sizes)) if sizes[i] > 0]
     dropped = []
-    words = {}
-    for _ in range(max(1, min(12, len(keep) // 3 + 1))):
-        ids = [starts[i] + k for i in keep for k in range(sizes[i])]
-        words = align(ids)
+    for _ in range(max(1, min(12, len(seq) // 3 + 1))):
+        def line_score(p):
+            s = span(got, p, seq)
+            sc = [x for w in s[2] for x in w["score"]] if s else []
+            return sum(sc) / len(sc) if sc else 0.0
 
-        def line_score(i):
-            sc = [s for k in range(sizes[i]) for s in words.get(starts[i] + k, {}).get("score", [])]
-            return sum(sc) / len(sc) if sc else 1.0
-
-        def squeezed(i):
+        def squeezed(p):
             """Crammed into far less time than singing it takes (under 0.2 s a word). A line
             sung with different words still fills its own time, so it isn't squeezed."""
-            ws = [words[starts[i] + k] for k in range(sizes[i]) if starts[i] + k in words]
-            if not ws:
-                return True
-            span = (max(w["end"] for w in ws) - min(w["start"] for w in ws)) * frame_sec
-            return span / len(ws) < 0.2
-        def repeat_nearby(i):
+            s = span(got, p, seq)
+            return not s or (s[1] - s[0]) / len(s[2]) < 0.2
+
+        def repeat_nearby(p):
             """The same words as a line close by (a chorus or line written out once too
             often): both copies share the singing of one, so each is only half sure."""
-            me = spec["words"][starts[i]:starts[i] + sizes[i]]
-            pos = keep.index(i)
-            near = keep[max(0, pos - 3):pos] + keep[pos + 1:pos + 4]
-            return any(spec["words"][starts[j]:starts[j] + sizes[j]] == me for j in near)
-        doubtful = sorted((line_score(i), i) for i in keep
-                          if squeezed(i) or (repeat_nearby(i) and line_score(i) < 0.55))
-        worst, wi_line = doubtful[0] if doubtful else (1.0, None)
-        if worst >= 0.6 or len(keep) <= 2:
+            near = seq[max(0, p - 3):p] + seq[p + 1:p + 4]
+            return any(text_of[q] == text_of[seq[p]] for q in near)
+        doubtful = sorted((line_score(p), p) for p in range(len(seq))
+                          if squeezed(p) or (repeat_nearby(p) and line_score(p) < 0.55))
+        worst, wp = doubtful[0] if doubtful else (1.0, None)
+        if worst >= 0.6 or len(seq) <= 2:
             break
-        keep.remove(wi_line)
-        dropped.append(wi_line)
-        say(event="note", text=f"line {wi_line + 1} doesn't seem to be sung there; left out")
-    out = []
-    for wi in range(len(spec["words"])):
-        w = words.get(wi)
-        if w is None:
-            out.append(None)
-        else:
-            out.append({"start": round(w["start"] * frame_sec, 3),
-                        "end": round(w["end"] * frame_sec, 3),
-                        "score": round(sum(w["score"]) / len(w["score"]), 3)})
-    Path(spec["out"]).write_text(json.dumps({"words": out, "dropped_lines": sorted(dropped)}),
-                                 encoding="utf8")
+        dropped.append(seq[wp])
+        say(event="note", text=f"line {seq[wp] + 1} doesn't seem to be sung there; left out")
+        seq = seq[:wp] + seq[wp + 1:]
+        got = align(seq)
+
+    out_lines = []
+    for p, li in enumerate(seq):
+        ws = []
+        for k in range(sizes[li]):
+            w = got.get((p, k))
+            ws.append(None if w is None else {
+                "start": round(w["start"] * frame_sec, 3), "end": round(w["end"] * frame_sec, 3),
+                "score": round(sum(w["score"]) / len(w["score"]), 3)})
+        out_lines.append({"line": li, "words": ws})
+    Path(spec["out"]).write_text(json.dumps({
+        "lines": out_lines, "dropped_lines": dropped,
+        "added": [{"lines": n} for _, n in added], "heard_words": len(heard)}), encoding="utf8")
     say(event="done")
 
 

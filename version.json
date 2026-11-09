@@ -1,5 +1,5 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Karaoke stays in time when the lyrics don't exactly match the singing."
+  "notes": "Karaoke handles a chorus that is sung more times than it is written."
 }
