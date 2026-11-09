@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Buttons keep working when the window was in the background, and a Run it again button."
+  "notes": "Karaoke lines appear just before they are sung, not a second and a half early."
 }

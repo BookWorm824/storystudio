@@ -305,6 +305,9 @@ def short_lines(lines, max_chars=24):
     return out
 
 
+LEAD = 0.5          # seconds each pair of lines shows before its first word is sung
+
+
 def _visibility(lines):
     """When each line appears and disappears, and which row it uses.
     Lines come in pages of two, read top to bottom like a book: the top line is sung, then
@@ -322,12 +325,12 @@ def _visibility(lines):
     prev_gone = 0.0
     for p, page in enumerate(pages):
         first, last = lines[page[0]], lines[page[-1]]
-        appear = max(prev_gone, first["start"] - 1.5)
+        appear = max(prev_gone, first["start"] - LEAD)
         appear = max(0.0, min(appear, first["start"] - 0.05))
         gone = last["end"] + 1.5
         if p + 1 < len(pages):
             nxt = lines[pages[p + 1][0]]["start"]
-            gone = min(gone, max(last["end"] + 0.05, nxt - 0.6))
+            gone = min(gone, max(last["end"] + 0.05, nxt - LEAD))
         for row, k in enumerate(page):
             vis[k] = (appear, gone, row)
         prev_gone = gone
