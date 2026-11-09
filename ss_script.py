@@ -505,6 +505,113 @@ LYRICS:
 
 
 # ---------------------------------------------------------------------------
+# talking the direction over before the whole shot list is written
+# ---------------------------------------------------------------------------
+TALK = {
+    "type": "object",
+    "properties": {
+        "heard": {"type": "string", "description": "1-2 plain sentences: what you understand "
+                  "the song or story to be about and the feeling it should leave"},
+        "plan": {"type": "string", "description": "the direction for the video so far, 4-8 "
+                 "short plain sentences: who we see (a main character, different people each "
+                 "time, or no people), where, how it moves from start to end, what the chorus "
+                 "or big moments look like, how it opens and ends, and anything to avoid"},
+        "questions": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"q": {"type": "string", "description": "one short, plain question"},
+                           "options": {"type": "array", "items": {"type": "string"},
+                                       "description": "2-4 concrete suggested answers that fit "
+                                       "this song or story, each under 12 words"}},
+            "required": ["q", "options"], "additionalProperties": False}},
+    },
+    "required": ["heard", "plan", "questions"],
+    "additionalProperties": False,
+}
+
+
+def talk(spec, rounds=None):
+    """One turn of talking the direction over: the AI's current plan, plus the questions that
+    would change the video most. `rounds` is what was asked and answered so far."""
+    import ss_claude as C
+    text = (spec.get("text") or "").strip()
+    music = spec.get("kind") != "story"
+    if not text:
+        raise StoryError("Paste or load the " + ("song lyrics" if music else "story script") +
+                         " first.")
+    rounds = rounds or []
+    direction = (spec.get("direction") or "").strip()
+    given = parse_cast(spec.get("cast") or "")
+    facts = []
+    if music:
+        secs = float(spec.get("song_seconds") or 0)
+        clip = int(spec.get("clip") or 8)
+        if secs:
+            facts.append(f"The song is {secs:.0f} seconds long, about {round(secs / clip)} "
+                         f"clips of {clip} seconds.")
+        facts.append(on_screen(spec))
+    else:
+        facts.append("It is a story read aloud as narration over the pictures, in 8-second "
+                     "clips. The story itself sets what happens; talk about how to show it.")
+    if spec.get("style_name"):
+        facts.append(f"Art style (already chosen): {spec['style_name']}.")
+    if given:
+        facts.append("Characters the user has set up:\n" +
+                     "\n".join(f"{c['name']}: {c['look']}" for c in given))
+    history = []
+    for i, r in enumerate(rounds, 1):
+        lines = []
+        for q, a in zip(r.get("questions") or [], r.get("answers") or []):
+            a = (a or "").strip()
+            lines.append(f"Q: {q.get('q', '')}\nA: {a or '(skipped: your choice)'}")
+        if (r.get("note") or "").strip():
+            lines.append(f"The user also said: {r['note'].strip()}")
+        if (r.get("plan") or "").strip():
+            lines.append(f"The plan as the user last saw it{' (they edited it: keep their edits)' if r.get('edited') else ''}:\n{r['plan'].strip()}")
+        history.append(f"ROUND {i}\n" + "\n".join(lines))
+    if history:
+        turn = ("Fold their answers and anything they said into the plan (their words win over "
+                "your ideas; a skipped question is yours to decide). Then ask only follow-up "
+                "questions that would still really change the video, at most 3; return no "
+                "questions when the plan is clear enough to build.")
+    else:
+        turn = ("This is the start. Write a first plan from what you have, then ask the 3-5 "
+                "questions whose answers would change the video most.")
+    words = "lyrics" if music else "story"
+    prompt = f"""You are talking with the studio owner about the direction of this \
+{"music video" if music else "story video"} BEFORE you write the shot list, the way a director \
+talks a video over with the client first. Be warm and brief.
+
+{turn}
+
+Good questions are about what the direction leaves open: the main idea or thread that ties the \
+video together, who is on screen (only if it isn't already clear), the places and season, how \
+literally to show the words, what the chorus or big moments look like, the feel and pace, how it \
+opens and ends, and anything to avoid. Never ask about the art style, picture shape, song length \
+or clip length (those are chosen with buttons), and never ask what is already answered. \
+{"If the direction doesn't make clear who is on screen, make that your FIRST question, with these options: one main character (or a few) the video follows / no main character: different people of all ages in different shots, mixed with nature (B-roll) / no people, only nature and animals. Until it is answered, write the plan for the likeliest choice. " if music and (spec.get("onscreen") or "auto") == "auto" and not rounds else ""}Use \
+plain everyday words, one idea per question, and give 2-4 concrete suggested answers that fit \
+this {words} (the user clicks one or types their own).
+
+The plan must follow the user's direction and answers exactly. If there is no recurring main \
+character, say "No main character (B-roll)" or "No people" plainly in the plan.
+
+THE USER'S DIRECTION SO FAR: {direction or "(none yet)"}
+{chr(10).join(facts)}
+Title: {spec.get('title') or '(none)'}
+
+{chr(10).join(history) if history else ""}
+
+THE {words.upper()}:
+{text[:40000]}"""
+    res = C.ask(prompt, TALK, system=SYSTEM, timeout=600)
+    qs = [q for q in res.get("questions") or [] if (q.get("q") or "").strip()][:5]
+    for q in qs:
+        q["options"] = [o.strip() for o in q.get("options") or [] if o.strip()][:4]
+    return {"heard": res.get("heard", "").strip(), "plan": res.get("plan", "").strip(),
+            "questions": qs}
+
+
+# ---------------------------------------------------------------------------
 # step 2: the shots
 # ---------------------------------------------------------------------------
 PICTURE_RULES = ("the TEXT-TO-IMAGE prompt, SHORT: 1-3 sentences, about 25-50 words. Start "
@@ -699,6 +806,12 @@ def build(spec, progress=None, cancel=None):
     style["length"] = "full" if spec.get("style_len") == "full" else "short"
     aspect = spec.get("aspect") or "16:9"
     spec["style_name"] = style.get("name", "")
+    agreed = (spec.get("agreed") or "").strip()
+    if agreed:                                   # the plan talked over with the user
+        mine = (spec.get("direction") or "").strip()
+        spec["my_direction"] = mine
+        spec["direction"] = (f"{mine}\n\n" if mine else "") + \
+            "THE PLAN WE AGREED ON (talked over with the user): " + agreed
     if style["length"] == "short" and not style.get("style_short"):
         try:                                     # one of the user's own styles: shorten it once
             say(0.02, "Writing a short version of your art style…")
@@ -742,7 +855,8 @@ def build(spec, progress=None, cancel=None):
               "covers": len(main) * spec["clip"], "made": time.strftime("%Y-%m-%d %H:%M"),
               "spec": {k: spec.get(k) for k in ("kind", "title", "song_seconds", "clip",
                                                  "style_id", "aspect", "direction", "cast",
-                                                 "wording", "onscreen", "style_len")}}
+                                                 "wording", "onscreen", "style_len",
+                                                 "my_direction", "agreed")}}
     add_extras(result, style, say)
     say(0.97, "Saving the shot list…")
     result["files"] = save(result)
@@ -784,8 +898,13 @@ def mmss(sec):
 def as_text(r):
     kind = "Story" if r["kind"] == "story" else "Music video"
     L = [f"{r['title']}  ({kind})", "=" * 60, r["summary"], ""]
-    if r["spec"].get("direction"):
-        L += ["Direction: " + r["spec"]["direction"], ""]
+    sp = r["spec"]
+    if sp.get("agreed"):
+        if sp.get("my_direction"):
+            L += ["Direction: " + sp["my_direction"], ""]
+        L += ["The plan we agreed on: " + sp["agreed"], ""]
+    elif sp.get("direction"):
+        L += ["Direction: " + sp["direction"], ""]
     on = {"main": "Main characters", "none": "No main character (B-roll)",
           "nopeople": "No people"}.get(r["spec"].get("onscreen") or "")
     if on:

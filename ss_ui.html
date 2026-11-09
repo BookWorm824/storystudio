@@ -171,6 +171,11 @@ video{width:100%;border-radius:14px;background:#000;border:1px solid var(--line)
 .idea{text-align:left;padding:14px;border-radius:12px;background:var(--bg2);border:1px solid var(--line)}
 .idea:hover{border-color:var(--accent)}
 .idea b{display:block;margin-bottom:4px}.idea span{color:var(--soft);font-size:14px}
+.talkq{padding:14px 0;border-top:1px solid var(--line)}.talkq:first-child{border-top:0;padding-top:0}
+.talkq h3{margin:0 0 8px;font-size:16px}
+.talkq .chips{margin:0 0 8px}.talkq .chip{cursor:pointer;font-size:14px;padding:6px 12px}
+.talkq .chip.on{color:#1b1206;background:var(--grad);border-color:transparent;font-weight:600}
+.talkbusy{display:flex;align-items:center;gap:12px;color:var(--soft)}
 .stylegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;max-height:520px;overflow:auto;padding-right:4px}
 .stylecard{position:relative;text-align:left;padding:12px 14px;border-radius:12px;background:var(--bg2);border:1.5px solid var(--line)}
 .stylecard:hover{border-color:#46506a}
@@ -599,7 +604,7 @@ async function openFbProject() { if (F.dirty) { const j = await api("fb_save"); 
 
 // ---------------------------------------------------------------- script builder
 let SBD = null;                       // styles, aspects, recent shot lists
-let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", onscreen:"auto", cast:"", style_id:"", aspect:"16:9", styleTab:"", styleFind:"", ideas:[], wording:"improved", style_len:"short"};
+let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", onscreen:"auto", cast:"", style_id:"", aspect:"16:9", styleTab:"", styleFind:"", ideas:[], wording:"improved", style_len:"short", talk:null, talkView:false};
 const ONSCREEN = [["auto","Go by my direction"],["main","Main characters"],["none","No main character (B-roll)"],["nopeople","No people"]];
 const ONSCREEN_HINT = {auto:"StoryStudio follows what your direction says.", main:"The video follows the characters you set up below.", none:"Different people of all ages in different shots, mixed with nature. No one person throughout.", nopeople:"Only nature, animals and places."};
 let SBR = null;                       // the finished shot list
@@ -617,6 +622,7 @@ function sbStep(n, title, body, hint) {
   return `<div class="card sbstep"><div class="sbn">${n}</div><div style="flex:1;min-width:0"><h2 style="margin:0 0 4px">${title}</h2>${hint ? `<div class="sub" style="margin:0 0 12px">${hint}</div>` : ""}${body}</div></div>`;
 }
 function renderBuilder(top) {
+  if (SBS.talkView && SBS.kind) return renderTalk(top);
   const music = SBS.kind === "music", story = SBS.kind === "story";
   const groups = [...new Set(SBD.styles.map(s => s.group))];
   if (!SBS.styleTab) SBS.styleTab = groups.find(g => g !== "My styles") || groups[0];
@@ -678,7 +684,11 @@ function renderBuilder(top) {
 </div>
     ${SBD.recent.length ? `<div class="card" style="margin-bottom:14px"><h2 style="margin:0 0 10px">Your shot lists</h2>${pastLists()}</div>` : ""}
     <div class="sbsteps">${steps.join("")}</div>
-    ${SBS.kind ? `<div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><button class="btn primary big" onclick="sbStart()">Generate script ${arrow()}</button></div>` : ""}`;
+    ${SBS.kind ? (SBS.talk && SBS.talk.plan
+      ? `<div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><span style="flex:1"></span><button class="btn" onclick="sbTalkOpen()">Keep talking it over</button><button class="btn primary big" onclick="sbStart()">Generate script ${arrow()}</button></div>
+         <div class="sub" style="text-align:right;margin:8px 0 0">Uses the plan you talked over with ${aiName()}.</div>`
+      : `<div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><span style="flex:1"></span><button class="btn" onclick="sbStart()">Skip, generate now</button><button class="btn primary big" onclick="sbTalkOpen()">Talk it over first ${arrow()}</button></div>
+         <div class="sub" style="text-align:right;margin:8px 0 0">${aiName()} asks a few questions about the direction before writing the whole script.</div>`) : ""}`;
   if (top) $("main").scrollTop = 0;
 }
 function styleCard(s) {
@@ -732,9 +742,75 @@ async function sbStart() {
   if (!SBS.text.trim()) return toast("Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first.", true);
   if (SBS.kind === "music" && !(songSeconds(SBS.song) >= 5)) return toast("Enter how long the song is, for example 3:15.", true);
   if (!SBS.style_id) return toast("Choose an art style.", true);
-  const music = SBS.kind === "music", nobody = music && (SBS.onscreen === "none" || SBS.onscreen === "nopeople");
-  const j = await api("sb_start", {kind:SBS.kind, text:SBS.text, title:SBS.title, song_seconds:songSeconds(SBS.song), clip:SBS.clip, direction:SBS.direction, onscreen: music ? SBS.onscreen : "main", cast: nobody ? "" : SBS.cast, style_id:SBS.style_id, aspect:SBS.aspect, wording:SBS.wording, style_len:SBS.style_len});
+  const spec = Object.assign(sbSpec(), {style_id:SBS.style_id, aspect:SBS.aspect, wording:SBS.wording, style_len:SBS.style_len,
+                                        agreed: (SBS.talk && SBS.talk.plan) || ""});
+  const j = await api("sb_start", spec);
   watchJob(j.job);
+}
+function sbSpec() {                    // what the AI needs to know, for talking it over and building
+  const music = SBS.kind === "music", nobody = music && (SBS.onscreen === "none" || SBS.onscreen === "nopeople");
+  const st = SBD.styles.find(s => s.id === SBS.style_id);
+  return {kind:SBS.kind, text:SBS.text, title:SBS.title, song_seconds:songSeconds(SBS.song), clip:SBS.clip, direction:SBS.direction,
+          onscreen: music ? SBS.onscreen : "main", cast: nobody ? "" : SBS.cast, style_name: st ? st.name : ""};
+}
+
+// talking the direction over before the whole script is written
+function sbTalkOpen() {
+  if (!SBS.text.trim()) return toast("Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first.", true);
+  SBS.talkView = true;
+  if (!SBS.talk) { SBS.talk = {heard:"", plan:"", questions:[], answers:[], note:"", rounds:[], edited:false, busy:false}; sbTalkAsk(); }
+  renderBuilder(true);
+}
+function sbTalkKeep() { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+async function sbTalkAsk() {
+  const T = SBS.talk; T.busy = true; if (SBS.talkView) sbTalkKeep();
+  try {
+    const j = await api("sb_talk", {spec: sbSpec(), rounds: T.rounds});
+    if (SBS.talk !== T) return;          // started over meanwhile
+    Object.assign(T, {heard: j.heard || T.heard, plan: j.plan || T.plan, questions: j.questions || [], answers: (j.questions || []).map(() => ""), note: "", edited: false});
+  } catch (e) {
+    if (SBS.talk === T && T.rounds.length) {   // put the last answers back so nothing typed is lost
+      const r = T.rounds.pop(); Object.assign(T, {questions: r.questions, answers: r.answers, note: r.note, plan: r.plan, edited: r.edited});
+    } else if (SBS.talk === T && !T.plan) { SBS.talk = null; SBS.talkView = false; renderBuilder(true); return; }
+  } finally { if (SBS.talk === T) { T.busy = false; if (SBS.talkView) sbTalkKeep(); } }
+}
+function sbTalkSend() {
+  const T = SBS.talk;
+  if (!T.answers.some(a => a.trim()) && !T.note.trim() && !T.edited) return toast("Answer a question or write something first, or build it as it is.", true);
+  T.rounds.push({questions: T.questions, answers: T.answers.slice(), note: T.note, plan: T.plan, edited: T.edited});
+  sbTalkAsk();
+}
+function sbTalkPick(i, k) { const T = SBS.talk, o = T.questions[i].options[k]; T.answers[i] = T.answers[i] === o ? "" : o; sbTalkKeep(); }
+function sbTalkRestart() { SBS.talk = null; sbTalkOpen(); }
+function sbTalkBack() { SBS.talkView = false; renderBuilder(true); }
+function sbTalkBuild() {
+  const T = SBS.talk;
+  if (!T.plan.trim()) return toast("There's no plan yet.", true);
+  if (T.answers.some(a => a.trim()) || T.note.trim()) return toast("You have answers that aren't in the plan yet. Click \u201cUpdate the plan\u201d first, or clear them.", true);
+  SBS.talkView = false; sbStart();
+}
+function renderTalk(top) {
+  const T = SBS.talk, ai = aiName(), first = !T.plan;
+  const busy = `<div class="card"><div class="talkbusy"><span class="spin"></span>${first ? `${ai} is reading the ${SBS.kind === "story" ? "story" : "lyrics"} and thinking of questions\u2026` : `${ai} is updating the plan\u2026`} This can take up to a minute.</div></div>`;
+  const qs = T.questions.map((q, i) => `<div class="talkq"><h3>${esc(q.q)}</h3>
+      ${q.options.length ? `<div class="chips">${q.options.map((o, k) => `<span class="chip ${T.answers[i] === o ? "on" : ""}" onclick="sbTalkPick(${i},${k})">${esc(o)}</span>`).join("")}</div>` : ""}
+      <input type="text" class="sbin" placeholder="Or type your own answer (leave empty to let ${ai} decide)" value="${esc(T.answers[i] || "")}" oninput="SBS.talk.answers[${i}]=this.value"></div>`).join("");
+  const said = T.rounds.map(r => r.questions.map((q, i) => r.answers[i] && r.answers[i].trim() ? `<div><b>${esc(q.q)}</b> ${esc(r.answers[i])}</div>` : "").join("") + (r.note && r.note.trim() ? `<div><b>You said:</b> ${esc(r.note)}</div>` : "")).join("");
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Talk it over</h1><div class="sub" style="margin:0">${ai} asks about the direction before writing the whole script. Answer what you like and skip the rest. Nothing is built until you say so.</div></div></div>
+    ${first && T.busy ? busy : `
+      ${T.heard ? `<div class="card"><h2 style="margin:0 0 6px">What ${ai} hears in it</h2><div>${esc(T.heard)}</div></div>` : ""}
+      <div class="card"><h2 style="margin:0 0 4px">The plan so far</h2><div class="sub" style="margin:0 0 10px">This becomes the direction for every shot. Change any of it.</div>
+        <textarea class="sbin" rows="7" ${T.busy ? "disabled" : ""} oninput="SBS.talk.plan=this.value;SBS.talk.edited=true">${esc(T.plan)}</textarea></div>
+      ${T.busy ? busy : `
+        <div class="card">${T.questions.length ? `<h2 style="margin:0 0 12px">${T.rounds.length ? "A few more questions" : "Questions"}</h2>${qs}` : `<h2 style="margin:0 0 4px">No more questions</h2><div class="sub" style="margin:0">${ai} has what it needs. Change the plan above if you like, then build it.</div>`}
+          <div class="talkq"><h3>Anything else?</h3><textarea class="sbin" rows="2" placeholder="Optional. For example: more animals, a grandpa in the last chorus, keep it bright, no city scenes\u2026" oninput="SBS.talk.note=this.value">${esc(T.note)}</textarea></div>
+          <div class="row" style="margin-top:12px;gap:10px;flex-wrap:wrap"><button class="btn" onclick="sbTalkSend()">Update the plan</button><span class="sub" style="margin:0">${ai} folds your answers into the plan${T.questions.length ? " and asks anything else it needs" : ""}.</span></div></div>`}
+      ${said ? `<details class="card"><summary class="sub" style="cursor:pointer;margin:0">What you've told ${ai} so far</summary><div style="margin-top:8px;display:grid;gap:6px">${said}</div></details>` : ""}`}
+    <div class="footerbar"><button class="btn ghost" onclick="sbTalkBack()">\u2039 Back to the settings</button><span style="flex:1"></span>
+      ${T.plan ? `<button class="btn ghost" onclick="sbTalkRestart()" ${T.busy ? "disabled" : ""}>Start the talk over</button>` : ""}
+      <button class="btn primary big" onclick="sbTalkBuild()" ${T.busy || !T.plan ? "disabled" : ""}>Looks good, build it ${arrow()}</button></div>`;
+  if (top) $("main").scrollTop = 0;
 }
 function pastLists() {
   return `<div class="pastlist">${SBD.recent.map((r, i) => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots · ${esc(r.made || "")}</small></div><button class="btn small" id="past${i}" onclick="sbOpenRecent(${i})">Open</button></div>`).join("")}</div>`;

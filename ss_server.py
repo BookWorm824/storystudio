@@ -47,7 +47,7 @@ class State:
 
 
 S = State()
-SLOW_ASKS = {"sb_redo", "sb_brainstorm", "sb_cast"}
+SLOW_ASKS = {"sb_redo", "sb_brainstorm", "sb_cast", "sb_talk"}
 PICK_LOCK = threading.Lock()            # one Windows file window at a time
 # never wait behind other actions: quick status calls, and file pickers (a Windows file window
 # left open must not freeze the rest of StoryStudio)
@@ -477,6 +477,9 @@ def api(name, a):
     if name == "sb_cast":
         import ss_script as SB
         return {"characters": SB.suggest_cast(a)}
+    if name == "sb_talk":
+        import ss_script as SB
+        return SB.talk(a.get("spec") or {}, a.get("rounds") or [])
     if name == "sb_start":
         import math
         import ss_script as SB

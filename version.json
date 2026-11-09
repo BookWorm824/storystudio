@@ -1,5 +1,5 @@
 {
-  "version": "1.2.1",
+  "version": "1.3.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "A new shot list never replaces an older one with the same title (it becomes Title 2)."
+  "notes": "Script builder: talk the direction over first. The AI asks a few questions and writes a plan you can change before it builds the whole shot list."
 }
