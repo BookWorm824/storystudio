@@ -397,7 +397,7 @@ function setupKaraoke() {
   $("#setup").innerHTML = `
     <div class="card panel">
       <h2>Karaoke lyrics</h2>
-      <p class="sub" style="margin-bottom:8px">Paste the song's lyrics in the order they're sung. Labels like [Chorus] are fine. Write repeated lines out, or add (x2) at the end of a line.</p>
+      <p class="sub" style="margin-bottom:8px">Paste the song's lyrics in the order they're sung. Labels like [Chorus] are fine: a label with nothing under it repeats that section, and [Chorus x2] repeats it twice. Add (x2) at the end of a line that's sung twice. Lines that aren't sung where they're written are left out, and StoryStudio tells you which.</p>
       <textarea id="lyrics" rows="12" style="width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:14px;resize:vertical" placeholder="Paste the lyrics here…">${esc(H.lyrics || "")}</textarea>
       <div class="footerbar">
         <div class="row"><button class="btn" onclick="loadLyrics()">${ICON.folder} Load from a file…</button>

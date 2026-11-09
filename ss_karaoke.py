@@ -20,14 +20,55 @@ SECTION = re.compile(r"^\s*[\[(].*[\])]\s*$")          # [Chorus], (Verse 2) ...
 REPEAT = re.compile(r"\s*[\[(]?\s*x\s*(\d)\s*[\])]?\s*$", re.I)
 
 
-def parse_lyrics(text):
-    """Lyrics in the order they are sung -> lines of words. Section labels like [Chorus]
-    are skipped; a line ending in (x2) is sung twice."""
-    lines = []
+def _section_key(label):
+    s = re.sub(r"[\[\]()]", " ", label.lower())
+    s = REPEAT.sub("", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _expand_sections(text):
+    """Section labels are not sung, but they often stand in for words: a label like [Chorus]
+    with nothing under it means "sing the chorus again", and [Chorus x2] means twice. Returns
+    the lyric lines in the order they're sung."""
+    sections, cur = [], None
     for raw in (text or "").splitlines():
         s = raw.strip()
-        if not s or SECTION.match(s):
+        if not s:
             continue
+        if SECTION.match(s):
+            m = REPEAT.search(s.rstrip("])"))
+            cur = {"key": _section_key(s), "times": int(m.group(1)) if m else 1, "lines": []}
+            sections.append(cur)
+        else:
+            if cur is None:
+                cur = {"key": "", "times": 1, "lines": []}
+                sections.append(cur)
+            cur["lines"].append(s)
+    seen, out = {}, []
+    for sec in sections:
+        body = sec["lines"]
+        if body:
+            if sec["key"]:
+                seen[sec["key"]] = body
+        elif sec["key"]:
+            # same label as before, or the same kind ("Chorus" for "Final Chorus")
+            body = seen.get(sec["key"])
+            if body is None:
+                kind = next((w for w in ("chorus", "hook", "refrain", "pre-chorus", "bridge")
+                             if w in sec["key"]), None)
+                if kind:
+                    body = next((b for k, b in reversed(list(seen.items())) if kind in k), None)
+            body = body or []
+        out += body * max(1, min(4, sec["times"]))
+    return out
+
+
+def parse_lyrics(text):
+    """Lyrics in the order they are sung -> lines of words. Section labels like [Chorus]
+    are not shown, but an empty [Chorus] repeats the chorus and [Chorus x2] repeats it twice;
+    a line ending in (x2) is sung twice."""
+    lines = []
+    for s in _expand_sections(text):
         times = 1
         m = REPEAT.search(s)
         if m:
@@ -62,11 +103,22 @@ def time_lyrics(st, lines, progress=None, cancel=None):
     if progress:
         progress(0.05, "Getting the song from your timeline…")
     song = song_audio(st, work)
+    try:                                   # no sound means the song file wasn't found
+        import numpy as _np
+        if float(_np.abs(M.wav_mono16k(song)).max()) < 0.01:
+            raise StoryError("StoryStudio couldn't hear the song on your timeline. The song "
+                             "file may have been moved or renamed; open the project in "
+                             "Premiere, relink the song, save, and try again.")
+    except StoryError:
+        raise
+    except Exception:
+        pass
     words = [w["norm"] for l in lines for w in l["words"]]
     if not words:
         raise StoryError("Please paste the song's lyrics first.")
     job = {"models_dir": str(MODELS), "ffmpeg": ffmpeg(), "audio": song, "words": words,
-           "out": str(work / "timing.json"), "vocals_out": str(work / "vocals.wav")}
+           "out": str(work / "timing.json"), "vocals_out": str(work / "vocals.wav"),
+           "lines": [len(l["words"]) for l in lines]}
     (work / "job.json").write_text(json.dumps(job), encoding="utf8")
     import ss_sounds as S
     proc = subprocess.Popen([S.python_exe(), str(APP_DIR / "ss_karaoke_worker.py"),
@@ -94,7 +146,8 @@ def time_lyrics(st, lines, progress=None, cancel=None):
         log("karaoke worker failed", fatal)
         raise StoryError("StoryStudio couldn't line the lyrics up with the song. Check that "
                          "the lyrics are in the order they're sung.")
-    timing = json.loads((work / "timing.json").read_text(encoding="utf8"))["words"]
+    result = json.loads((work / "timing.json").read_text(encoding="utf8"))
+    timing = result["words"]
     k = 0
     for l in lines:
         for w in l["words"]:
@@ -103,13 +156,22 @@ def time_lyrics(st, lines, progress=None, cancel=None):
             if t:
                 w.update(start=t["start"], end=max(t["end"], t["start"] + 0.12),
                          score=t["score"])
+    # lines written but not sung where they are (squeezed in, or a repeat written once too
+    # often) are left out rather than flashed on screen at the wrong time
+    dropped = set(result.get("dropped_lines") or [])
+    left_out = [l["text"] for i, l in enumerate(lines) if i in dropped]
+    lines = [l for i, l in enumerate(lines) if i not in dropped]
+    if not lines:
+        raise StoryError("StoryStudio couldn't hear these lyrics in the song.")
     _fill_gaps(lines)
     for l in lines:
         l["start"] = l["words"][0]["start"]
         l["end"] = l["words"][-1]["end"]
     weak = sum(1 for l in lines for w in l["words"] if w.get("score", 1) < 0.15)
     total = sum(len(l["words"]) for l in lines)
-    st["karaoke"] = {"lines": lines, "weak": weak, "total": total}
+    st["karaoke"] = {"lines": lines, "weak": weak, "total": total, "left_out": left_out}
+    if left_out:
+        log("karaoke: left out (not sung where written):", left_out)
     if progress:
         progress(0.75, f"Timed {total} words.")
     return lines
@@ -413,9 +475,18 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     st["levels"] = [f"Timed {k['total']} words to the singing."]
     if k["weak"]:
         st["levels"].append(f"{k['weak']} word(s) were hard to hear; check them in the preview.")
+    gone = k.get("left_out") or []
+    if gone:
+        st["levels"].append(
+            f"{len(gone)} line(s) didn't seem to be sung where they're written, so they're left "
+            "out instead of showing at the wrong time: " + "; ".join(f"“{t}”" for t in gone[:4])
+            + ("…" if len(gone) > 4 else "") + ". If they are sung, check the lyrics order.")
     lst = od / f"{name} - lyrics timing.txt"
-    lst.write_text("\n".join(f"{fmt_time(l['start'])}  {l['text']}" for l in k["lines"]),
-                   encoding="utf8")
+    text = "\n".join(f"{fmt_time(l['start'])}  {l['text']}" for l in k["lines"])
+    if gone:
+        text += ("\n\nLeft out (didn't seem to be sung where they're written):\n" +
+                 "\n".join(f"  {t}" for t in gone))
+    lst.write_text(text, encoding="utf8")
     out["list"] = str(lst)
     st["outputs"] = out
     st["stage"] = "karaoke"

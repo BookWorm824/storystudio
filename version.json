@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Auto-update, script builder, edit feedback, karaoke and ChatGPT support."
+  "notes": "Karaoke stays in time when the lyrics don't exactly match the singing."
 }

@@ -93,29 +93,74 @@ def main():
     vocab = proc.tokenizer.get_vocab()
     blank = vocab.get("<pad>", 0)
     sep = vocab.get("|")
-    targets, owner = [], []
-    for wi, w in enumerate(spec["words"]):
-        toks = [vocab[c] for c in w.upper() if c in vocab and c != "|"]
-        if not toks:
-            continue
-        if targets:
-            targets.append(sep)
-            owner.append(-1)
-        targets += toks
-        owner += [wi] * len(toks)
     import torchaudio.functional as F
-    tg = torch.tensor([targets], dtype=torch.int32)
-    ali, scores = F.forced_align(em[None], tg, blank=blank)
-    ali, scores = ali[0], scores[0].exp()
-    spans = F.merge_tokens(ali, scores, blank=blank)
+    tokens = [[vocab[c] for c in w.upper() if c in vocab and c != "|"] for w in spec["words"]]
+
+    def align(word_ids):
+        """Forced alignment of these words (in order) over the whole song."""
+        targets, owner = [], []
+        for wi in word_ids:
+            if not tokens[wi]:
+                continue
+            if targets:
+                targets.append(sep)
+                owner.append(-1)
+            targets += tokens[wi]
+            owner += [wi] * len(tokens[wi])
+        if not targets:
+            return {}
+        tg = torch.tensor([targets], dtype=torch.int32)
+        ali, scores = F.forced_align(em[None], tg, blank=blank)
+        spans = F.merge_tokens(ali[0], scores[0].exp(), blank=blank)
+        got = {}
+        for sp, o in zip(spans, owner):
+            if o < 0:
+                continue
+            w = got.setdefault(o, {"start": sp.start, "end": sp.end, "score": []})
+            w["start"] = min(w["start"], sp.start)
+            w["end"] = max(w["end"], sp.end)
+            w["score"].append(float(sp.score))
+        return got
+
+    # lines that are written but not sung there get squeezed into a gap, where the aligner is
+    # unsure of them (score far below the ~0.9+ of sung lines). Take out the least sure line,
+    # line up the rest again, and repeat, so one mismatch can't throw off the song.
+    sizes = spec.get("lines") or [len(spec["words"])]
+    starts = [sum(sizes[:i]) for i in range(len(sizes))]
+    keep = [i for i in range(len(sizes)) if sizes[i] > 0]
+    dropped = []
     words = {}
-    for sp, o in zip(spans, owner):
-        if o < 0:
-            continue
-        w = words.setdefault(o, {"start": sp.start, "end": sp.end, "score": []})
-        w["start"] = min(w["start"], sp.start)
-        w["end"] = max(w["end"], sp.end)
-        w["score"].append(float(sp.score))
+    for _ in range(max(1, min(12, len(keep) // 3 + 1))):
+        ids = [starts[i] + k for i in keep for k in range(sizes[i])]
+        words = align(ids)
+
+        def line_score(i):
+            sc = [s for k in range(sizes[i]) for s in words.get(starts[i] + k, {}).get("score", [])]
+            return sum(sc) / len(sc) if sc else 1.0
+
+        def squeezed(i):
+            """Crammed into far less time than singing it takes (under 0.2 s a word). A line
+            sung with different words still fills its own time, so it isn't squeezed."""
+            ws = [words[starts[i] + k] for k in range(sizes[i]) if starts[i] + k in words]
+            if not ws:
+                return True
+            span = (max(w["end"] for w in ws) - min(w["start"] for w in ws)) * frame_sec
+            return span / len(ws) < 0.2
+        def repeat_nearby(i):
+            """The same words as a line close by (a chorus or line written out once too
+            often): both copies share the singing of one, so each is only half sure."""
+            me = spec["words"][starts[i]:starts[i] + sizes[i]]
+            pos = keep.index(i)
+            near = keep[max(0, pos - 3):pos] + keep[pos + 1:pos + 4]
+            return any(spec["words"][starts[j]:starts[j] + sizes[j]] == me for j in near)
+        doubtful = sorted((line_score(i), i) for i in keep
+                          if squeezed(i) or (repeat_nearby(i) and line_score(i) < 0.55))
+        worst, wi_line = doubtful[0] if doubtful else (1.0, None)
+        if worst >= 0.6 or len(keep) <= 2:
+            break
+        keep.remove(wi_line)
+        dropped.append(wi_line)
+        say(event="note", text=f"line {wi_line + 1} doesn't seem to be sung there; left out")
     out = []
     for wi in range(len(spec["words"])):
         w = words.get(wi)
@@ -125,7 +170,8 @@ def main():
             out.append({"start": round(w["start"] * frame_sec, 3),
                         "end": round(w["end"] * frame_sec, 3),
                         "score": round(sum(w["score"]) / len(w["score"]), 3)})
-    Path(spec["out"]).write_text(json.dumps({"words": out}), encoding="utf8")
+    Path(spec["out"]).write_text(json.dumps({"words": out, "dropped_lines": sorted(dropped)}),
+                                 encoding="utf8")
     say(event="done")
 
 
