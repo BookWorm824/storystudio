@@ -460,12 +460,8 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     say(0.93, "Adding the lyrics to a copy of your Premiere project…")
     import ss_prwrite as W
     real = Path(st["project"])
-    base = re.sub(r" \((with sound|audio fixed|karaoke)( \d+)?\)$", "", real.stem)
-    proj = real.with_name(f"{base} (karaoke).prproj")
-    n = 2
-    while proj.with_suffix(".prlock").exists():
-        proj = real.with_name(f"{base} (karaoke {n}).prproj")
-        n += 1
+    import storysound as _E
+    proj = _E.copy_path(real, "karaoke")
     try:
         out["project"] = W.add_overlay(st.get("snapshot") or st["project"], st["seq_uid"],
                                        overlay, 0.0, st["duration"], st["width"],

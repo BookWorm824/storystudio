@@ -600,12 +600,8 @@ def write_outputs(st):
     lst.write_text(notes_text(st, notes), encoding="utf8")
     out["list"] = str(lst)
     real = Path(st["project"])
-    base = re.sub(r" \((with sound|audio fixed|karaoke|feedback)( \d+)?\)$", "", real.stem)
-    proj = real.with_name(f"{base} (feedback).prproj")
-    n = 2
-    while proj.with_suffix(".prlock").exists():
-        proj = real.with_name(f"{base} (feedback {n}).prproj")
-        n += 1
+    import storysound as _E
+    proj = _E.copy_path(real, "feedback")
     markers = [{"start": x["time"], "end": x.get("end"), "colour": COLOUR[x["severity"]],
                 "name": f"{LABEL[x['severity']]}: {x['title']}",
                 "comment": x["note"] + (f"\n\nHow: {x['how']}" if x.get("how") else "")}

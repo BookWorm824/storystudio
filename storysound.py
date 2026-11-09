@@ -791,20 +791,40 @@ def assign_tracks(cues):
     return tracks
 
 
+COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback")
+
+
+def copy_path(project, tag):
+    """Where a StoryStudio copy of this project goes: "<name> (<tags>).prproj". The tags say
+    everything done to it, in order, so a copy made from a copy keeps its history:
+    "Song (with sound)" + "audio fixed" -> "Song (with sound, audio fixed)". It replaces the
+    earlier copy with the same tags, unless Premiere has that copy open right now (it leaves
+    a .prlock file beside it): then a numbered copy instead."""
+    real = Path(project)
+    stem, tags = real.stem, []
+    m = re.search(r" \(([^()]*)\)$", stem)
+    if m:
+        parts = [re.sub(r" \d+$", "", p.strip()) for p in m.group(1).split(",")]
+        if parts and all(p in COPY_TAGS for p in parts):
+            stem, tags = stem[:m.start()], parts
+    if tag not in tags:
+        tags.append(tag)
+    label = ", ".join(tags)
+    out = real.with_name(f"{stem} ({label}).prproj")
+    n = 2
+    while out.with_suffix(".prlock").exists():
+        out = real.with_name(f"{stem} ({label} {n}).prproj")
+        n += 1
+    return out
+
+
 def write_premiere(st, kept, label="with sound"):
     import ss_prwrite as W
     real = Path(st["project"])
     # built from StoryStudio's own copy (taken when the project was picked), never from the
     # live project you may still be working in
     src = Path(st.get("snapshot") or real)
-    # replaces the earlier "(with sound)" / "(audio fixed)" copy, unless Premiere has that
-    # copy open right now (it leaves a .prlock file beside it): then a numbered copy instead
-    base = re.sub(r" \((with sound|audio fixed)( \d+)?\)$", "", real.stem)
-    out = real.with_name(f"{base} ({label}).prproj")
-    n = 2
-    while out.with_suffix(".prlock").exists():
-        out = real.with_name(f"{base} ({label} {n}).prproj")
-        n += 1
+    out = copy_path(real, label)
     w = W.Writer(src)
     _, ext = w.template_item(".wav")
     tracks = []
@@ -831,8 +851,9 @@ def write_audio_notes(st, path):
     lines = [f"StoryStudio – audio fixed for \"{st['seq_name']}\"", "=" * 60, "",
              f"Made from your project as it was at {st.get('snapshot_time', '?')}.", ""]
     lines += ["What was done:"] + [f"  • {x}" for x in st.get("levels", [])] + [""]
-    lines += ["The list of sounds with all their prompts is in the “sound list” file from "
-              "the run that made them."]
+    if any(Path(path).parent.glob("* - sound list.txt")):   # only when sounds were added before
+        lines += ["The list of sounds with all their prompts is in the “sound list” file from "
+                  "the run that made them."]
     Path(path).write_text("\n".join(lines), encoding="utf8")
     return str(path)
 

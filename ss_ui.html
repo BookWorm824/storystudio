@@ -207,6 +207,16 @@ video{width:100%;border-radius:14px;background:#000;border:1px solid var(--line)
 .spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--accent);border-top-color:transparent;animation:spin 1s linear infinite;display:inline-block}
 .updbar{display:flex;align-items:center;gap:12px;padding:10px 28px;background:rgba(255,179,71,.1);border-bottom:1px solid rgba(255,179,71,.35);color:#ffe2b0;font-size:14px}
 .updbar > span{flex:1;display:flex;align-items:center;gap:8px}
+.task.pick{cursor:pointer}
+.task.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.pickmark{position:absolute;top:14px;right:14px;width:28px;height:28px;border-radius:50%;border:2px solid #3a4252;display:grid;place-items:center;font-weight:700;color:#1b1206}
+.task.picked .pickmark{background:var(--grad);border-color:transparent}
+.planstep{display:flex;gap:16px;align-items:flex-start;padding:14px 0;border-top:1px solid var(--line)}
+.planstep:first-of-type{border-top:0}
+.chainbar{display:flex;align-items:center;gap:12px;padding:10px 28px;background:rgba(124,196,255,.08);border-bottom:1px solid rgba(124,196,255,.3);font-size:14px;flex-wrap:wrap}
+.csteps{display:flex;align-items:center;gap:6px;flex:1;flex-wrap:wrap}
+.cstep{color:var(--faint)} .cstep.now{color:var(--text);font-weight:600} .cstep.done{color:var(--good)}
+.carrow{color:var(--faint)} .cnext{color:#bfe0ff}
 /* modal + toast */
 .scrim{position:fixed;inset:0;background:rgba(4,6,10,.62);backdrop-filter:blur(3px);display:grid;place-items:center;z-index:60}
 .modal{width:min(720px,92vw);background:var(--card);border:1px solid #333b4a;border-radius:18px;padding:22px;box-shadow:var(--shadow)}
@@ -226,6 +236,7 @@ video{width:100%;border-radius:14px;background:#000;border:1px solid var(--line)
     <button class="iconbtn" title="Settings" onclick="openSettings()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
   </header>
   <div id="updbar" class="updbar hidden"></div>
+  <div id="chainbar" class="chainbar hidden"></div>
   <main><div class="wrap" id="view"></div></main>
 </div>
 <div id="layer"></div>
@@ -286,10 +297,18 @@ window.addEventListener("focus", ping);
 
 // ---------------------------------------------------------------- home
 async function goHome() {
-  if (polling) return;
+  if (polling) {                 // a job is running: show its progress rather than nothing
+    if (!$("#jt")) { const j = (await api("job")).job; if (j) { clearInterval(polling); polling = null; watchJob(j); } }
+    toast("StoryStudio is still working on this. You'll see the result here when it's done.");
+    return;
+  }
+  // already on this project's home screen: Home goes back to the start page
+  const onProjectHome = !!$("#view .project") && !$("#setup .panel");
   H = await api("hello"); P = H.project; opts = Object.assign({best_of:3, busy:"normal"}, H.settings);
-  if (H.job) return watchJob();
+  if (H.job) return watchJob(H.job);
+  if (onProjectHome) P = null;
   renderHome();
+  $("main").scrollTop = 0;
 }
 function readyCard() {
   const n = H.needs || [];
@@ -336,18 +355,98 @@ function renderHome() {
         <div class="field">Story <b title="${esc(P.story)}">${P.story ? esc(P.story.split(/[\\/]/).pop()) : "No script found (StoryStudio will listen to the narration)"}</b><button class="btn ghost" onclick="pickStory()">Choose…</button></div>
       </div>
     </div>
-    <h2 style="margin-top:30px">What would you like to do?</h2>
+    <div class="row" style="justify-content:space-between;margin-top:30px;flex-wrap:wrap;gap:10px"><h2 style="margin:0">What would you like to do?</h2>
+      <div class="swrow"><button class="switch ${MULTI?"on":""}" onclick="toggleMulti()" aria-label="Do several at once"></button><span class="sub" style="margin:0">Do several at once</span></div></div>
+    ${MULTI ? `<div class="sub" style="margin:8px 0 0">Tick what you'd like. StoryStudio does them in this order, each on the copy the step before made: sound effects, then the audio, then karaoke, then feedback.</div>` : ""}
     <div class="tasks">
-      ${task("sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","setupSounds()")}
-      ${task("wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
-      ${task("mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
-      ${task("film","#2b2414","#ffd27a","Script builder","Lyrics or a story into shots, with picture and MiniMax prompts for each.","openBuilder()")}
-      ${task("eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback()")}
-      ${task("scissors","#3a1a22","#ff8fa3","Smooth edits","Lines cuts up with the beat and smooths rough spots.","", true)}
-      ${P.previous ? task("film","#22262f","var(--soft)","Open last time's sounds","Pick up where you left off with this project.","openPrevious()") : ""}
-      ${P.previous_feedback ? task("eye","#22262f","var(--soft)","Open last time's feedback","See the notes from the last time it watched this project.","openPreviousFeedback()") : ""}
+      ${pickTask("sounds","sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","setupSounds()")}
+      ${pickTask("fix","wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
+      ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
+      ${MULTI ? "" : task("film","#2b2414","#ffd27a","Script builder","Lyrics or a story into shots, with picture and MiniMax prompts for each.","openBuilder()")}
+      ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback()")}
+      ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Smooth edits","Lines cuts up with the beat and smooths rough spots.","", true)}
+      ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","Open last time's sounds","Pick up where you left off with this project.","openPrevious()") : ""}
+      ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","Open last time's feedback","See the notes from the last time it watched this project.","openPreviousFeedback()") : ""}
     </div>
     <div id="setup"></div>`;
+  if (MULTI && PICK.length) renderPlan();
+}
+// ---------------------------------------------------------------- several at once
+const STEPS = {sounds:"Add sound effects", fix:"Fix the audio", karaoke:"Karaoke lyrics", feedback:"Edit feedback"};
+const ORDER = ["sounds", "fix", "karaoke", "feedback"];
+let MULTI = false, PICK = [], CHAIN = null;
+function toggleMulti() { MULTI = !MULTI; PICK = []; renderHome(); }
+function pickTask(id, ic, bg, col, title, text, onclick) {
+  if (!MULTI) return task(ic, bg, col, title, text, onclick);
+  const n = PICK.indexOf(id);
+  return `<button class="task pick ${n >= 0 ? "picked" : ""}" onclick="togglePick('${id}')"><div class="ti" style="background:${bg};color:${col}">${ICON[ic]}</div><b>${title}</b><span>${text}</span><span class="pickmark">${n >= 0 ? n + 1 : ""}</span></button>`;
+}
+function togglePick(id) {
+  PICK = PICK.includes(id) ? PICK.filter(x => x !== id) : PICK.concat(id);
+  PICK.sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
+  const y = $("main").scrollTop; renderHome(); $("main").scrollTop = y;
+  if (!PICK.length) $("#setup").innerHTML = "";
+}
+function renderPlan() {
+  const keep = $("#plan_lyrics") ? $("#plan_lyrics").value : (H.lyrics || "");
+  H.lyrics = keep;
+  const fbSeg = (key, items) => `<div class="seg">${items.map(([v,t]) => `<button class="${fbOpts[key]===v?"on":""}" onclick="fbOpts.${key}=${esc(JSON.stringify(v))};renderPlan()">${t}</button>`).join("")}</div>`;
+  const parts = PICK.map((id, i) => {
+    let body = "";
+    if (id === "sounds") body = `<div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"]])}</div>
+      <div class="opt"><div><label class="t">Quality</label></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>
+      <div class="opt"><div><label class="t">Background music</label></div><div class="swrow">${sw("add_music")}<span class="sub" style="margin:0">${opts.add_music?"On":"Off"}</span></div></div>
+      <div class="sub" style="margin:6px 0 0">You'll check the sounds before they go in; after you press “Put them in my movie”, StoryStudio carries on by itself.</div>`;
+    if (id === "fix") body = `<div class="sub" style="margin:0">Cleans and balances everything${PICK.includes("sounds") ? ", including the new sound effects" : ""}.</div>`;
+    if (id === "karaoke") body = `<textarea id="plan_lyrics" rows="8" class="sbin" placeholder="Paste the lyrics here…" oninput="H.lyrics=this.value">${esc(keep)}</textarea>
+      <div class="row" style="margin-top:8px"><button class="btn" onclick="planLoadLyrics()">${ICON.folder} Load from a file…</button></div>`;
+    if (id === "feedback") body = `<div class="opt"><div><label class="t">This is a</label></div>${fbSeg("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"]])}</div>`;
+    return `<div class="planstep"><div class="sbn">${i + 1}</div><div style="flex:1;min-width:0"><b>${STEPS[id]}</b>${body ? `<div style="margin-top:8px">${body}</div>` : ""}</div></div>`;
+  }).join("");
+  $("#setup").innerHTML = `<div class="card panel"><h2>Your plan</h2>${parts}
+    <div class="footerbar"><span class="sub" style="margin:0">Each step works on the copy the step before made. Your project isn't changed.</span>
+    <button class="btn primary big" onclick="startChain()">Start ${PICK.length} step${PICK.length > 1 ? "s" : ""} ${arrow()}</button></div></div>`;
+}
+async function planLoadLyrics() { const j = await api("pick_lyrics"); if (j.text) { H.lyrics = j.text; $("#plan_lyrics").value = j.text; } }
+async function startChain() {
+  if ($("#plan_lyrics")) H.lyrics = $("#plan_lyrics").value;
+  if (PICK.includes("karaoke") && !(H.lyrics || "").trim()) return toast("Paste the song's lyrics for the karaoke step first.", true);
+  CHAIN = {steps: PICK.slice(), i: 0, lyrics: H.lyrics, fb: Object.assign({}, fbOpts), opts: Object.assign({}, opts)};
+  runStep();
+}
+function chainBar(html) { const b = $("#chainbar"); if (!html) { b.classList.add("hidden"); return; } b.innerHTML = html; b.classList.remove("hidden"); }
+function chainStatus(extra) {
+  if (!CHAIN) return chainBar("");
+  const steps = CHAIN.steps.map((id, i) => `<span class="cstep ${i < CHAIN.i ? "done" : i === CHAIN.i ? "now" : ""}">${i < CHAIN.i ? "✓ " : ""}${STEPS[id]}</span>`).join('<span class="carrow">›</span>');
+  chainBar(`<span class="csteps">${steps}</span>${extra || ""}<button class="btn small ghost" onclick="stopChain()">Stop the plan</button>`);
+}
+function stopChain() { CHAIN = null; chainBar(""); toast("The plan is stopped. Everything finished so far is saved."); }
+async function runStep() {
+  const id = CHAIN.steps[CHAIN.i];
+  chainStatus();
+  let j;
+  try {
+    if (id === "sounds") j = await api("start_sounds", CHAIN.opts);
+    if (id === "fix") j = await api("start_fix_audio", CHAIN.opts);
+    if (id === "karaoke") j = await api("start_karaoke", {lyrics: CHAIN.lyrics});
+    if (id === "feedback") j = await api("start_feedback", CHAIN.fb);
+  } catch (e) { stopChain(); return; }
+  watchJob(j.job);
+}
+// after a step's result is on screen: go on to the next step, on the copy this one made
+function chainNext(o) {
+  if (!CHAIN) return;
+  if (!o.project) { toast("The plan stopped: " + (o.project_error || "this step didn't make a project copy."), true); CHAIN = null; chainBar(""); return; }
+  CHAIN.i += 1;
+  if (CHAIN.i >= CHAIN.steps.length) { CHAIN = null; chainBar('<span>✓ Your plan is finished. Everything is in the copy shown here.</span>'); return; }
+  let left = 5;
+  const tick = async () => {
+    if (!CHAIN) return;
+    if (left > 0) { chainStatus(`<span class="cnext">Next: ${STEPS[CHAIN.steps[CHAIN.i]]} in ${left}…</span>`); left -= 1; setTimeout(tick, 1000); return; }
+    try { const r = await api("open_project", {path: o.project}); P = r.project; } catch (e) { stopChain(); return; }
+    runStep();
+  };
+  tick();
 }
 function task(ic, bg, col, title, text, onclick, soon) {
   return `<button class="task ${soon?"soon":""}" ${soon?"":`onclick="${onclick}"`}><div class="ti" style="background:${bg};color:${col}">${ICON[ic]}</div><b>${title}</b><span>${text}</span>${soon?'<span class="badge">Coming next</span>':""}</button>`;
@@ -368,7 +467,7 @@ function seg(key, items) {
   return `<div class="seg">${items.map(([v,t]) => `<button class="${opts[key]==v?"on":""}" onclick="setOpt('${key}',${esc(JSON.stringify(v))})">${t}</button>`).join("")}</div>`;
 }
 function sw(key) { return `<button class="switch ${opts[key]?"on":""}" onclick="setOpt('${key}',${!opts[key]})" aria-label="${key}"></button>`; }
-function setOpt(k, v) { opts[k] = v; setupSounds(true); }
+function setOpt(k, v) { opts[k] = v; if (MULTI && PICK.length && $("#setup .planstep")) renderPlan(); else setupSounds(true); }
 async function setupSounds(keepScroll) {
   $("#setup").innerHTML = `
     <div class="card panel">
@@ -447,6 +546,7 @@ async function openPreviousFeedback() { const j = await api("open_previous_feedb
 let F = null, fbFilter = "";
 const SEV = {fix:["Please fix","var(--bad)"], suggest:["Ideas","var(--warn)"], beat:["Beat","#7cc4ff"], good:["Nicely done","var(--good)"]};
 function renderFeedback() {
+  if (CHAIN && CHAIN.steps[CHAIN.i] === "feedback" && F) { CHAIN = null; chainBar('<span>✓ Your plan is finished. The notes are below and on your timeline.</span>'); }
   const s = F.summary || {}, st = F.stats || {};
   const counts = k => F.notes.filter(n => n.severity === k).length;
   const shown = F.notes.filter(n => !fbFilter || n.severity === fbFilter);
@@ -749,7 +849,7 @@ function watchJob(first) {
     draw(j);
     if (j.done) {
       clearInterval(polling); polling = null;
-      if (j.failed) { toast(j.error, true); goHome(); return; }
+      if (j.failed) { toast(j.error, true); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } goHome(); return; }
       if (j.then === "review") { R = (await api("review")).review; renderReview(); }
       else if (j.then === "done") renderDone();
       else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
@@ -761,6 +861,7 @@ function watchJob(first) {
 
 // ---------------------------------------------------------------- review
 function renderReview() {
+  if (CHAIN) chainStatus(`<span class="cnext">Check the sounds, then press “Put them in my movie”: the plan carries on after that.</span>`);
   const kinds = [...new Set(R.cues.map(c => c.kind))];
   const shown = R.cues.filter(c => !filter || c.kind === filter);
   const on = R.cues.filter(c => c.keep && c.made).length, made = R.cues.filter(c => c.made).length;
@@ -854,6 +955,7 @@ async function runAgain(editLyrics) {
 async function renderDone() {
   const o = (await api("outputs")).outputs;
   DONE = o;
+  setTimeout(() => chainNext(o), 50);
   const audioMode = o.mode === "audio", karaoke = o.mode === "karaoke";
   $("#view").innerHTML = `
     <div class="done">

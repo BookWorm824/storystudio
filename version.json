@@ -1,5 +1,5 @@
 {
-  "version": "1.0.5",
+  "version": "1.1.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Fixes buttons that did nothing (how many sounds, style tabs, opening files)."
+  "notes": "Pick several jobs in a row (like sound effects, then fix the audio). Copies are named for everything done to them. Home button works."
 }
