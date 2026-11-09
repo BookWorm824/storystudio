@@ -255,8 +255,16 @@ const ICON = {
   film:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>',
 };
 
+let DEAD = false;
+function showStopped() {
+  if (DEAD) return; DEAD = true;
+  modal(`<h2>StoryStudio stopped running</h2><p class="sub">This window lost its connection to StoryStudio, so its buttons can't do anything. Close this window and open StoryStudio again from the Desktop or Start Menu. Your finished work is saved.</p>
+    <div class="footerbar"><span></span><button class="btn primary" onclick="window.close()">Close this window</button></div>`);
+}
 async function api(name, data = {}) {
-  const r = await fetch("/api/" + name, {method:"POST", headers:{"Content-Type":"application/json","X-Token":TOKEN}, body:JSON.stringify(data)});
+  let r;
+  try { r = await fetch("/api/" + name, {method:"POST", headers:{"Content-Type":"application/json","X-Token":TOKEN}, body:JSON.stringify(data)}); }
+  catch (e) { showStopped(); throw new Error("StoryStudio isn't running."); }
   const j = await r.json();
   if (j.error) { toast(j.error, true); throw new Error(j.error); }
   return j;
@@ -270,7 +278,11 @@ function closeModal() { $("#layer").innerHTML = ""; }
 function reportError(msg) { fetch("/api/client_error", {method:"POST", headers:{"Content-Type":"application/json","X-Token":TOKEN}, body:JSON.stringify({msg:String(msg).slice(0, 3000)})}).catch(()=>{}); }
 window.addEventListener("error", e => reportError("window error: " + e.message + " at " + (e.filename || "") + ":" + (e.lineno || "")));
 window.addEventListener("unhandledrejection", e => reportError("unhandled: " + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
-setInterval(() => fetch("/api/ping", {method:"POST", headers:{"X-Token":TOKEN}, body:"{}"}).catch(()=>{}), 5000);
+function ping() { return fetch("/api/ping", {method:"POST", headers:{"X-Token":TOKEN}, body:"{}"}).catch(()=>{}); }
+setInterval(ping, 5000);
+// coming back to the window: say hello straight away (Edge slows background windows down)
+document.addEventListener("visibilitychange", () => { if (!document.hidden) ping(); });
+window.addEventListener("focus", ping);
 
 // ---------------------------------------------------------------- home
 async function goHome() {
@@ -819,8 +831,29 @@ async function makeMissing() { const j = await api("make_missing"); watchJob(j.j
 async function finish() { const j = await api("finish"); watchJob(j.job); }
 
 // ---------------------------------------------------------------- done
+let DONE = null;
+async function openFile(path, btn, msg) {
+  const old = btn.innerHTML; btn.disabled = true; btn.textContent = msg || "Opening…";
+  try { await api("open", {path}); }
+  catch (e) {}
+  finally { setTimeout(() => { btn.disabled = false; btn.innerHTML = old; }, 1500); }
+}
+async function runAgain(editLyrics) {
+  const o = DONE; if (!o || !o.source) return;
+  toast("Taking a fresh copy of your project…");
+  const j = await api("open_project", {path: o.source, seq_uid: o.seq_uid});
+  P = j.project;
+  if (o.mode === "karaoke") {
+    H.lyrics = o.lyrics || H.lyrics;
+    if (editLyrics || !H.lyrics) { renderHome(); setupKaraoke(); return; }
+    const k = await api("start_karaoke", {lyrics: H.lyrics}); watchJob(k.job); return;
+  }
+  renderHome();
+  if (o.mode === "audio") setupFix(); else setupSounds();
+}
 async function renderDone() {
   const o = (await api("outputs")).outputs;
+  DONE = o;
   const audioMode = o.mode === "audio", karaoke = o.mode === "karaoke";
   $("#view").innerHTML = `
     <div class="done">
@@ -831,10 +864,14 @@ async function renderDone() {
         <p class="sub">${o.project ? (karaoke ? "A copy of your Premiere project has the lyrics on their own video track at the top, over the whole song. Move it, fade it, or switch the track off any time." : audioMode ? "A copy of your Premiere project has cleaned, balanced audio." : "A copy of your Premiere project has every sound on its own tracks, in a bin called “StoryStudio sounds”.") + " Your original project wasn't changed." : esc(o.project_error)}</p>
         ${o.snapshot_time ? `<div class="sub" style="margin-top:-10px">Made from your project as it was at ${esc(o.snapshot_time)}.</div>` : ""}
         <div class="row" style="flex-wrap:wrap;gap:10px">
-          ${o.project ? `<button class="btn primary big" onclick='api("open",{path:${JSON.stringify(o.project)}})'>Open in Premiere</button>` : ""}
-          <button class="btn" onclick='api("open",{path:${JSON.stringify(o.folder)}})'>${ICON.folder} Open the folder</button>
-          ${o.list ? `<button class="btn" onclick='api("open",{path:${JSON.stringify(o.list)}})'>${karaoke ? "Lyrics timing" : audioMode ? "Notes" : "Sound list"}</button>` : ""}
+          ${o.project ? `<button class="btn primary big" onclick='openFile(${JSON.stringify(o.project)}, this, "Opening in Premiere…")'>Open in Premiere</button>` : ""}
+          <button class="btn" onclick='openFile(${JSON.stringify(o.folder)}, this)'>${ICON.folder} Open the folder</button>
+          ${o.list ? `<button class="btn" onclick='openFile(${JSON.stringify(o.list)}, this)'>${karaoke ? "Lyrics timing" : audioMode ? "Notes" : "Sound list"}</button>` : ""}
         </div>
+        ${o.source ? `<div class="row" style="flex-wrap:wrap;gap:10px;margin-top:14px">
+          <button class="btn" onclick="runAgain()">↻ Run it again</button>
+          ${karaoke ? `<button class="btn ghost" onclick="runAgain(true)">Change the lyrics…</button>` : ""}
+          <span class="sub" style="margin:0">Uses your project as it is now${karaoke ? ", with the same lyrics" : ""}.</span></div>` : ""}
         ${o.levels && o.levels.length ? `<ul class="notes">${o.levels.slice(0,6).map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
         <div class="footerbar">${audioMode || karaoke ? "<span></span>" : `<button class="btn ghost" onclick="api('review').then(j=>{R=j.review;renderReview()})">Back to the sounds</button>`}<button class="btn ghost" onclick="goHome()">Home</button></div>
       </div>

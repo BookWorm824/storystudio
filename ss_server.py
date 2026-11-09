@@ -185,7 +185,8 @@ def outputs_view():
             "folder": out.get("folder", ""), "list": out.get("list", ""),
             "levels": (st or {}).get("levels", []), "mode": (st or {}).get("mode", ""),
             "snapshot_time": (st or {}).get("snapshot_time", ""),
-            "overlay": out.get("overlay", ""), "lyrics": (st or {}).get("lyrics_text", "")}
+            "overlay": out.get("overlay", ""), "lyrics": (st or {}).get("lyrics_text", ""),
+            "source": (st or {}).get("project", ""), "seq_uid": (st or {}).get("seq_uid", "")}
 
 
 # ---------------------------------------------------------------------------
@@ -651,8 +652,10 @@ def api(name, a):
         return {"outputs": outputs_view()}
     if name == "open":
         p = a.get("path")
-        if p and os.path.exists(p):
-            os.startfile(p)
+        if not p or not os.path.exists(p):
+            raise StoryError("That file isn't there any more. It may have been moved, renamed "
+                             "or still be syncing.")
+        os.startfile(p)
         return {"ok": True}
     if name == "gpu":
         return {"gpu": E.gpu_free_gb()}
@@ -801,17 +804,25 @@ def main():
         ss_update.restart()
         srv.shutdown()
         return
+    window = None
     if edge:
-        subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}",
-                          "--window-size=1320,880", "--no-first-run",
-                          "--no-default-browser-check", "--disable-features=Translate"],
-                         **core.NOWIN)
+        window = subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}",
+                                   "--window-size=1320,880", "--no-first-run",
+                                   "--no-default-browser-check",
+                                   "--disable-features=Translate,IntensiveWakeUpThrottling",
+                                   "--disable-background-timer-throttling",
+                                   "--disable-renderer-backgrounding"],
+                                  **core.NOWIN)
     else:
         import webbrowser
         webbrowser.open(url)
+    opened = time.time()
     log("StoryStudio window at", url)
-    # the window pings every few seconds; when it has been gone a while and nothing is
-    # running, StoryStudio closes
+    # When does StoryStudio close? When its window is really closed (the Edge window we
+    # opened has exited and stopped checking in), or after the window has been silent for a
+    # long time with nothing running. Edge slows a background window's check-ins to about
+    # once a minute, so a short silence must never close StoryStudio: that left the window
+    # open with nothing behind its buttons.
     while True:
         time.sleep(5)
         if S.restart:                          # updated: open the new version, close this one
@@ -820,7 +831,12 @@ def main():
             ss_update.restart()
             break
         busy = (S.job is not None and not S.job.done) or S.asking > 0
-        if not busy and time.time() - S.last_ping > 25:
+        quiet = time.time() - S.last_ping
+        if window is not None and window.poll() is not None and time.time() - opened <= 20:
+            window = None        # Edge handed the window to one already open: can't watch it
+        closed = window is not None and window.poll() is not None
+        if not busy and ((closed and quiet > 30) or quiet > 15 * 60):
+            log("StoryStudio closing: window", "closed" if closed else "silent")
             break
     srv.shutdown()
 

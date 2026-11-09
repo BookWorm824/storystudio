@@ -1,5 +1,5 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Karaoke handles a chorus that is sung more times than it is written."
+  "notes": "Buttons keep working when the window was in the background, and a Run it again button."
 }
