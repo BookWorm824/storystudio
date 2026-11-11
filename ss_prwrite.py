@@ -504,17 +504,25 @@ class Writer:
             # control stops at +15 dB, so any boost beyond that goes into the clip gain
             sub = self.get(cti, "SubClip")
             clip = self.get(sub, "Clip") if sub is not None else None
+            total = db
             extra = max(0.0, db - 15.0)
             db = min(db, 15.0)
-            if clip is not None:
+
+            def set_gain(gain_db):
+                if clip is None:
+                    return False
                 g = clip.find("Gain")
-                if g is None and extra > 0:
+                if g is None and abs(gain_db) > 0.05:
                     g = ET.SubElement(clip, "Gain")
                 if g is not None:
-                    g.text = repr(float(10 ** (extra / 20)))
+                    g.text = repr(float(10 ** (gain_db / 20)))
+                return True
+            set_gain(extra)
             # effects: keep only the built-in volume controls
             chain = self.get(cti, "ComponentOwner/Components")
             if chain is None:
+                set_gain(total)
+                done += 1
                 continue
             comps = chain.find("ComponentChain/Components")
             level_set = False
@@ -532,9 +540,12 @@ class Writer:
                     ref.set("Index", str(i))
                     comps.append(ref)
             if not level_set and abs(db) > 0.05:
-                # no volume control on this clip (common on video clips): give it one,
-                # copied from another clip with the same channel layout
+                # no volume control on this clip (common on video clips, and on every clip in
+                # newer Premiere projects): give it one, copied from another clip with the
+                # same channel layout; failing that, the whole change goes into the clip gain
                 if self._give_volume(cti, chain, db):
+                    level_set = True
+                elif set_gain(total):
                     level_set = True
                 else:
                     log("couldn't set volume on clip", item_id, "(no volume control in it)")
