@@ -203,7 +203,10 @@ def build_picture(seq, work, progress=None):
     with ThreadPoolExecutor(max_workers=max(2, min(6, (os.cpu_count() or 4) // 2))) as ex:
         list(ex.map(one, range(len(segs))))
     lst = work / "segments.txt"
-    lst.write_text("".join(f"file '{o.as_posix()}'\n" for o in outs), encoding="utf8")
+    # paths relative to the list (ffmpeg reads them from the list's folder), so a project name
+    # with an apostrophe or other odd characters ("Grandpa's Old Jacket") can't break the list
+    lst.write_text("".join(f"file '{o.relative_to(work).as_posix()}'\n" for o in outs),
+                   encoding="utf8")
     out = work / "picture.mp4"
     run([ffmpeg(), "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
          out])
