@@ -17,14 +17,19 @@ import ss_media as M
 SR = M.SR
 NEGATIVE = "speech, talking, voice, words, singing, music, melody, distorted, noise, static"
 NEGATIVE_MUSIC = "vocals, singing, voice, speech, lyrics, distorted, noise, sound effects"
+# a laugh or a sigh IS a voice: only words are unwanted
+NEGATIVE_REACTION = "speech, talking, words, singing, music, distorted, noise, static, robotic"
 MAX_GEN = 10.0            # seconds per generation (the model is trained on 8 s)
 
 # how loud each kind of sound sits, relative to the narration (LUFS of the sound itself)
 DIALOGUE_REF = -18.0
-LEVEL_OFFSET = {"background": -21.0, "soft": -15.0, "medium": -12.0, "loud": -9.0}
-# the loudest moment (400 ms) of a sound may not go above this, relative to the narration:
-# short sharp sounds measure quiet overall but jump out at their peak
-PEAK_CAP = {"background": -15.0, "soft": -10.0, "medium": -9.0, "loud": -7.0}
+LEVEL_OFFSET = {"background": -19.0, "soft": -15.0, "medium": -12.0, "loud": -9.0}
+# the loudest moment (400 ms) of a background may not go above this, relative to the narration
+PEAK_CAP = {"background": -13.0}
+# spot effects are set by their LOUDEST MOMENT (400 ms), relative to the narration. Setting
+# them by their overall loudness made short sounds (a tap, a click) nearly silent and long
+# ones (a rustle) louder, so the effects went up and down.
+MOMENT_OFFSET = {"soft": -10.0, "medium": -7.0, "loud": -4.0}
 
 
 def dehash(a):
@@ -396,7 +401,10 @@ def normalise(a, lufs_target, level=None):
     if L <= -69:
         return a, 0.0
     g = lufs_target - L
-    if level in PEAK_CAP:
+    if level in MOMENT_OFFSET:               # spot effect: by its loudest moment
+        # lufs_target already carries any music-video adjustment
+        g = lufs_target + (MOMENT_OFFSET[level] - LEVEL_OFFSET[level]) - momentary_max(a)
+    elif level in PEAK_CAP:
         cap = DIALOGUE_REF + PEAK_CAP[level]
         g = min(g, cap - momentary_max(a))
     peak = float(np.abs(a).max()) or 1.0

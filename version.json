@@ -1,5 +1,5 @@
 {
-  "version": "1.3.2",
+  "version": "1.3.3",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Lip-sync character lines now come out at the same loudness as the narration in the Premiere copy (newer Premiere projects lost the boost)."
+  "notes": "Sound machine: more sounds all the way through, steadier effect levels, backgrounds that don't repeat or tick, and backgrounds that came out as static get remade."
 }

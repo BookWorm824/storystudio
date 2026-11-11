@@ -176,7 +176,11 @@ real sounds you would hear there (birdsong in a garden, crickets at night, wind 
 and a horse shifting in straw in a barn, a distant tractor on a farm, a busy market, gentle \
 waves). NEVER ask for "room tone", "silence", "quiet air", "stillness" or "a quiet room": AI \
 sound makers turn those into static hiss. If a place is truly silent, give it no background. \
-Start and end ambience at the exact shot-change times you are given when the place changes. \
+Backgrounds are steady textures only (birdsong, a breeze in leaves, crickets, distant traffic, a \
+crowd murmur, wind): NEVER a ticking clock, dripping, a dog barking, a lawnmower, a horn or any \
+sound with a beat or a one-off event, because a background is built from short pieces and those \
+sounds repeat and stutter. If the place needs one (a clock, a far-off bark), make it a separate \
+spot effect at one moment. Start and end ambience at the exact shot-change times you are given when the place changes. \
 Keep one ambience per place; do not stack two of the same.
 - SPOT EFFECTS for things you can SEE make a sound: footsteps when someone walks or runs, \
 doors, things picked up or put down, splashes, animals, vehicles, wings flapping, a fall or \
@@ -187,6 +191,9 @@ knock, a car arriving, rain starting, a horse calling for her foal. Animal chara
 their voices at the moments they react (calls, whinnies, nickers, bleats, barks), and people \
 get wordless reactions where the story has them (a soft chuckle, a happy laugh, a gasp, a \
 sigh).
+- FILL THE MOVIE. There should be no dead air: every moment has its place's background, and \
+foley carries on through the narration too (kept soft under the voice), not only in the gaps. \
+Wordless reactions (laughs, chuckles, sighs, gasps) sound best in the small gaps between lines.
 - Match the look: cartoon/animated pictures get lighter, playful, slightly exaggerated sounds \
 (boing, swish, pop) but still natural, never silly over a serious moment; realistic pictures \
 get natural sounds.
@@ -199,7 +206,10 @@ without words). Music only when the request below asks for it (kind "music").
 sparse; low ambience and only clear big visible actions.
 - Skip branded intro/outro clips (channel intros like "Storytime Saturday" or "Safe Harbor") \
 and anything the timeline already has a sound effect clip for.
-- Times: read them from the yellow timestamps on the stills and the exact shot list. \
+- Times: read them from the yellow timestamps on the stills (one still per second) and the \
+exact shot list. "start" is the moment the sound begins: find the first still where the action \
+starts (a hand reaching, a door starting to move) and use that time, not the still where it is \
+already happening. \
 synced=true for sounds that must land on a visible moment (a door shutting, a foot landing, a \
 splash); the program fine-tunes those against the picture. Spot effects last as long as the \
 sound really does (0.3 to 8 seconds); a long action (walking for 6 s) is one cue.
@@ -219,7 +229,7 @@ BUSY = {
     "normal": "Normal amount: ambience for each place plus the clearly visible actions (roughly "
               "one spot effect every 5-10 seconds where there is action).",
     "lots": "Make it rich, like a feature film: ambience, and foley for nearly every visible "
-            "movement and action.",
+            "movement and action, all the way through (soft under the narration).",
 }
 
 

@@ -203,7 +203,7 @@ def analyze(st, settings, progress=None, cancel=None):
 
     # stills for Claude
     _say(progress, 0.46, "Taking pictures of every moment…")
-    every = 1.0 if dur <= 420 else 2.0
+    every = 1.0 if dur <= 900 else 2.0
     frames = M.stills(st["picture"], work, every=every)
     sheets = M.contact_sheets(frames, work)
     st["shots"] = [{"start": a, "end": b, "name": (it or {}).get("name", "black")}
@@ -382,6 +382,16 @@ def tidy_cues(cues, dur, cuts):
     return merged
 
 
+# wordless reactions: a laugh or a sigh IS a voice, so only words are kept out of them
+REACT_WORDS = ("laugh", "giggle", "chuckle", "sigh", "gasp", "snort", "sniffle", "clears his",
+               "clears her", "throat", "groan", "murmur of", "hmm")
+
+
+def is_reaction(c):
+    t = f"{c.get('what', '')} {c.get('sound_prompt', '')}".lower()
+    return any(w in t for w in REACT_WORDS)
+
+
 def _snap(t, cuts, reach):
     near = [x for x in cuts if abs(x - t) <= reach]
     return min(near, key=lambda x: abs(x - t)) if near else t
@@ -416,7 +426,8 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     # plan where each sound comes from
     pc_jobs, pc_cues, sao_cues = [], [], []
     for c in cues:
-        c["file"], c["source"], c["note"] = "", "", ""
+        why_off = c.get("note", "") if not c.get("keep", True) else ""
+        c["file"], c["source"], c["note"] = "", "", why_off
         length = c["end"] - c["start"]
         if c["kind"] in BEDS:
             if hf_key:                                     # long natural backgrounds
@@ -427,8 +438,7 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
                 c["source"] = "freesound"
             elif use_pc:
                 c["source"] = "pc"
-                pc_cues.append((c, [_job(c, gen, None, 0, min(S.MAX_GEN, max(4, length)),
-                                         takes=takes)]))
+                pc_cues.append((c, _bed_jobs(c, gen, length, takes)))
         elif use_pc:
             c["source"] = "pc"
             jobs, t, k = [], max(0.0, c["start"] - 0.3), 0
@@ -453,9 +463,7 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
         bad = {flat_sao[i]["out"] for i in errs}
         for c, js in sao_cues:
             if any(j["out"] in bad for j in js):           # fall back to the video AI
-                pc_cues.append((c, [_job(c, gen, None, 0, min(S.MAX_GEN,
-                                                             max(4, c["end"] - c["start"])),
-                                         takes=takes)]))
+                pc_cues.append((c, _bed_jobs(c, gen, c["end"] - c["start"], takes)))
             else:
                 c["_jobs"] = js
                 c["engine"] = "stable audio"
@@ -465,11 +473,12 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
         errs = S.run_local(flat, lambda f, m: _say(progress, 0.23 + 0.55 * f, m), cancel)
         bad = {flat[i]["out"] for i in errs}
         for c, js in pc_cues:
-            if any(j["out"] in bad for j in js):
+            ok = [j for j in js if j["out"] not in bad]
+            if not ok or (c["kind"] not in BEDS and len(ok) < len(js)):
                 c["source"] = "freesound" if fs_key else "adobe"
                 c["note"] = "The PC sound AI couldn't make this one."
             else:
-                c["_jobs"] = js
+                c["_jobs"] = ok                       # a background can do without a piece
                 c["engine"] = "mmaudio"
     # best of several takes: a judge AI keeps the take that best matches the description
     groups = [{"prompt": c["sound_prompt"], "cands": j["cands"], "out": j["out"],
@@ -479,11 +488,38 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     static = {}
     if groups:
         static = S.run_pick(groups, lambda f, m: _say(progress, 0.78 + 0.07 * f, m), cancel)
-    # a background that still came out as static is left out: no background beats hash
+    # background pieces that came out as static are left out (no background beats hash);
+    # a background with no good piece left gets one more try with fresh pieces
+    retry = []
     for c, js in pc_cues + sao_cues:
-        if c["kind"] in BEDS and c.get("_jobs") and \
-                max(static.get(j["out"], 0.0) for j in c["_jobs"]) > 0.3:
-            c.pop("_jobs", None)
+        if c["kind"] in BEDS and c.get("_jobs"):
+            good = [j for j in c["_jobs"] if static.get(j["out"], 0.0) <= 0.3]
+            if good:
+                c["_jobs"] = good
+            else:
+                c.pop("_jobs", None)
+                retry.append(c)
+    if retry and use_pc:
+        _say(progress, 0.86, f"Remaking {len(retry)} background(s) that came out as static…")
+        again = [(c, _bed_jobs(c, gen, c["end"] - c["start"], takes, first=20)) for c in retry]
+        flat2 = [j for _, js in again for j in js]
+        errs2 = S.run_local(flat2, None, cancel)
+        bad2 = {flat2[i]["out"] for i in errs2}
+        groups2 = [{"prompt": c["sound_prompt"], "cands": j["cands"], "out": j["out"],
+                    "bed": True} for c, js in again for j in js
+                   if j["out"] not in bad2 and len(j["cands"]) > 1]
+        static2 = S.run_pick(groups2, None, cancel) if groups2 else {}
+        for c, js in again:
+            for j in js:
+                if j["out"] not in bad2 and len(j["cands"]) == 1 and \
+                        not Path(j["out"]).exists() and Path(j["cands"][0]).exists():
+                    shutil.copyfile(j["cands"][0], j["out"])
+            good = [j for j in js if j["out"] not in bad2 and Path(j["out"]).exists()
+                    and static2.get(j["out"], 0.0) <= 0.3]
+            if good:
+                c["_jobs"], c["engine"] = good, "mmaudio"
+    for c in retry:
+        if not c.get("_jobs"):
             c["source"], c["note"] = "adobe", ("Came out sounding like static, so it was left "
                                                "out. Try the Adobe wording if you want it.")
     for c, js in pc_cues + sao_cues:                     # single-take jobs
@@ -531,23 +567,42 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
 
 
 def _job(c, gen, video, k, length, at=None, takes=1):
-    out = gen / f"{c['id']}_{k}.wav"
+    neg = S.NEGATIVE_MUSIC if c["kind"] == "music" else \
+        (S.NEGATIVE_REACTION if is_reaction(c) else S.NEGATIVE)
     return {"video": video, "duration": round(length, 3), "prompt": c["sound_prompt"],
             "cands": [str(gen / f"{c['id']}_{k}_t{t}.wav") for t in range(takes)],
-            "negative": S.NEGATIVE_MUSIC if c["kind"] == "music" else S.NEGATIVE, "out": str(gen / f"{c['id']}_{k}.wav"),
+            "negative": neg, "out": str(gen / f"{c['id']}_{k}.wav"),
             "seed": _seed(c) + k, "at": at if at is not None else c["start"]}
+
+
+def _bed_jobs(c, gen, length, takes, first=0):
+    """A long background is made from several different pieces (different seeds) joined
+    with long crossfades, so it doesn't audibly repeat the same few seconds over and over.
+    Pieces get fewer takes each to keep the time down."""
+    n = max(1, min(6, math.ceil(length / S.MAX_GEN)))
+    t = takes if n == 1 else max(1, min(2, takes))
+    return [_job(c, gen, None, first + k, min(S.MAX_GEN, max(4, length)), takes=t)
+            for k in range(n)]
 
 
 def _shape(st, c, sounds, motion, mfps):
     length = c["end"] - c["start"]
     if c["source"] == "pc" and c.get("_jobs"):
+        bed = c["kind"] in BEDS
         parts = [S.load48(j["out"]) for j in c["_jobs"]]
+        if bed:                              # pieces at the same loudness before joining
+            parts = [S.normalise(p, -30.0)[0] if len(p) > S.SR else p for p in parts]
         a = parts[0]
-        xf = int(0.05 * S.SR)
+        xf = int((1.5 if bed else 0.05) * S.SR)
         for p in parts[1:]:
-            if len(a) > xf and len(p) > xf:
-                r = np.linspace(0, 1, xf, dtype=np.float32)[:, None]
-                a = np.concatenate([a[:-xf], a[-xf:] * (1 - r) + p[:xf] * r, p[xf:]])
+            x = min(xf, len(a) // 3, len(p) // 3)
+            if x > 8:
+                r = np.linspace(0, 1, x, dtype=np.float32)
+                if bed:
+                    fo, fi = np.cos(r * np.pi / 2)[:, None], np.sin(r * np.pi / 2)[:, None]
+                else:
+                    fo, fi = (1 - r)[:, None], r[:, None]
+                a = np.concatenate([a[:-x], a[-x:] * fo + p[:x] * fi, p[x:]])
             else:
                 a = np.concatenate([a, p])
         if c["kind"] in BEDS:
@@ -575,9 +630,9 @@ def _shape(st, c, sounds, motion, mfps):
     if c["kind"] in BEDS:
         import ss_mix
         a = _duck(a, place, ss_mix.merge_regions(st.get("speech", []), gap=ss_mix.HOLD_GAP),
-                  ramp=0.6)
-    else:                                    # effects step back while someone talks
-        a = _duck(a, place, st.get("speech", []), dip_db=-3.0, ramp=0.15)
+                  dip_db=-3.0, ramp=0.6)
+    else:                                    # effects step back a little while someone talks
+        a = _duck(a, place, st.get("speech", []), dip_db=-2.0, ramp=0.15)
     lvl = "background" if c["kind"] in BEDS else c["level"]
     a, g = S.normalise(a, S.target_lufs(c["level"], st.get("movie_type", ""), c["kind"]),
                        None if c["kind"] == "music" else lvl)
