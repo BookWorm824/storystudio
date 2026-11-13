@@ -296,6 +296,137 @@ def documents_dir():
     return str(Path.home() / "Documents")
 
 
+def _known_folder(folder_id, fallback):
+    if os.name == "nt":
+        try:
+            import ctypes
+            import uuid as _uuid
+            fid = _uuid.UUID(folder_id)
+            buf = ctypes.c_wchar_p()
+            guid = (ctypes.c_byte * 16).from_buffer_copy(fid.bytes_le)
+            if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(guid), 0, None,
+                                                           ctypes.byref(buf)) == 0:
+                p = buf.value
+                ctypes.windll.ole32.CoTaskMemFree(buf)
+                if p and os.path.isdir(p):
+                    return p
+        except Exception:
+            pass
+    return str(Path.home() / fallback)
+
+
+def desktop_dir():
+    """The Desktop the user really sees (often OneDrive's)."""
+    return _known_folder("{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}", "Desktop")
+
+
+def _tail(path, lines, skip=()):
+    try:
+        text = Path(path).read_text(encoding="utf8", errors="replace").splitlines()
+    except OSError:
+        return []
+    return [x for x in text if not any(s in x for s in skip)][-lines:]
+
+
+def problem_report():
+    """One text file on the Desktop with everything needed to work out what went wrong on
+    this computer: the version, what the computer has, the settings (no keys) and the last
+    part of StoryStudio's own notes. Returns its path."""
+    import platform
+    import time
+    out = ["StoryStudio problem report", "=" * 60, time.strftime("Made %Y-%m-%d %H:%M"), ""]
+
+    def add(label, fn):
+        try:
+            out.append(f"{label}: {fn()}")
+        except Exception as ex:
+            out.append(f"{label}: (couldn't tell: {type(ex).__name__})")
+
+    add("StoryStudio version", lambda: json.loads(
+        (APP_DIR / "version.json").read_text(encoding="utf8")).get("version"))
+    add("Windows", platform.platform)
+    add("Python", lambda: sys.version.split()[0])
+    add("Processor cores", os.cpu_count)
+
+    def memory():
+        import ctypes
+
+        class MEM(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + \
+                       [(n, ctypes.c_ulonglong) for n in ("total", "avail", "tp", "ap", "tv",
+                                                          "av", "aev")]
+        m = MEM()
+        m.length = ctypes.sizeof(MEM)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+        return f"{m.total / 2 ** 30:.0f} GB, {m.avail / 2 ** 30:.0f} GB free"
+    add("Memory", memory)
+
+    def card():
+        try:
+            r = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free",
+                                "--format=csv,noheader"], capture_output=True, text=True,
+                               timeout=8, **NOWIN)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip().replace("\n", " | ")
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return ("no NVIDIA graphics card found (sounds are made on the processor, which is "
+                "much slower)")
+    add("Graphics card", card)
+    add("Free disk space", lambda: f"{shutil.disk_usage(APP_DATA).free / 2 ** 30:.0f} GB "
+                                   f"on the drive with {APP_DATA}")
+
+    def tools():
+        import importlib.util
+        have = [n for n in ("torch", "mmaudio", "demucs", "sherpa_onnx", "soundfile", "scipy")
+                if importlib.util.find_spec(n) is not None]
+        return ", ".join(have) or "none"
+    add("AI parts installed", tools)
+    add("ffmpeg", lambda: "found" if Path(ffmpeg()).exists() else "MISSING")
+
+    def helper():
+        import ss_claude as C
+        import ss_gpt as G
+        return (f"Claude {'on this computer' if C.find_claude() else 'not installed'}; "
+                f"ChatGPT {'set up' if G.find() else 'not set up'}; using {C.provider()}")
+    add("AI helper", helper)
+
+    def settings():
+        s = load_settings()
+        return {k: (("(set)" if v else "(not set)") if "key" in k.lower() else v)
+                for k, v in s.items() if k not in ("recent", "last_folder")}
+    add("Settings", settings)
+
+    def section(title, lines):
+        if lines:
+            out.extend(["", title, "-" * 60] + lines)
+    section("The last things StoryStudio noted (newest at the bottom)",
+            _tail(APP_DATA / "storysound_log.txt", 400))
+    logs = ("generated/pc_worker_log.txt", "generated/pick.log", "generated/sao_jobs.log",
+            "worker_log.txt")
+    try:                                         # the helper programs' own notes: the two
+        runs = sorted((p for p in (APP_DATA / "work").iterdir() if p.is_dir()),   # newest runs
+                      key=lambda p: -max([(p / r).stat().st_mtime for r in logs
+                                          if (p / r).exists()] or [0]))
+        runs = [p for p in runs if any((p / r).exists() for r in logs)][:2]
+    except OSError:
+        runs = []
+    for run_dir in runs:
+        for rel in logs:
+            section(f"{run_dir.name}: {rel}",
+                    _tail(run_dir / rel, 40, skip=("too short", "Truncating", "HF_TOKEN",
+                                                   "iB/s]")))
+    section("Installing", _tail(APP_DATA / "install_log.txt", 30))
+    name = time.strftime("StoryStudio problem report %Y-%m-%d %H%M.txt")
+    path = Path(desktop_dir()) / name
+    try:
+        path.write_text("\n".join(str(x) for x in out), encoding="utf8")
+    except OSError:                              # no Desktop to write to: the StoryStudio folder
+        path = APP_DATA / name
+        path.write_text("\n".join(str(x) for x in out), encoding="utf8")
+    return str(path)
+
+
 def fmt_time(sec):
     sec = max(0.0, float(sec))
     m, s = divmod(sec, 60)

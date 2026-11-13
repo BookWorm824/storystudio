@@ -51,7 +51,8 @@ SLOW_ASKS = {"sb_redo", "sb_brainstorm", "sb_cast", "sb_talk"}
 PICK_LOCK = threading.Lock()            # one Windows file window at a time
 # never wait behind other actions: quick status calls, and file pickers (a Windows file window
 # left open must not freeze the rest of StoryStudio)
-NO_LOCK = {"job", "ping", "stop", "client_error", "update_check", "sb_pick_text", "sb_pick_song",
+NO_LOCK = {"job", "ping", "stop", "client_error", "update_check", "problem_report",
+           "sb_pick_text", "sb_pick_song",
            "pick_lyrics", "sb_open", "sb_result", "sb_styles", "sb_style_pics"}
 
 
@@ -249,6 +250,8 @@ def run_job(title, work, then, phases):
             work(job.progress, lambda: job.stop, job.phase)
         except StoryError as ex:
             job.failed, job.error = True, str(ex)
+            if str(ex) != "Stopped.":                # keep a note of what the user was told
+                log("job stopped with a message:", title, "->", ex)
         except Exception:
             log_error("job " + title)
             job.failed = True
@@ -662,6 +665,15 @@ def api(name, a):
                              "or still be syncing.")
         os.startfile(p)
         return {"ok": True}
+    if name == "problem_report":
+        path = core.problem_report()
+        try:                                     # show it, selected, in its folder
+            subprocess.Popen(["explorer", "/select,", path])
+        except OSError:
+            pass
+        return {"path": path, "name": Path(path).name,
+                "where": "your Desktop" if Path(path).parent != core.APP_DATA
+                else "the StoryStudio folder"}
     if name == "gpu":
         return {"gpu": E.gpu_free_gb()}
     if name == "ping":
@@ -762,8 +774,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = api(name, a)
             self._send(200, json.dumps(res))
         except StoryError as ex:
-            if slow:
-                log("script builder:", name, "said:", ex)
+            log("message shown:", name, "->", ex)
             self._send(200, json.dumps({"error": str(ex)}))
         except Exception:
             log_error("api " + name)

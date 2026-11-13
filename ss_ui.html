@@ -291,6 +291,17 @@ function toast(msg, err) {
 }
 function modal(html) { $("#layer").innerHTML = `<div class="scrim" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`; }
 function closeModal() { $("#layer").innerHTML = ""; }
+// something didn't finish: the message stays until it's read, with a way to send the details
+function showProblem(msg) {
+  modal(`<h2>That didn't finish</h2><div style="margin:10px 0 14px">${esc(msg)}</div>
+    <div class="sub" style="margin:0">If it keeps happening, save a problem report: one file with the details of what happened on this computer. Send that file to whoever helps you with StoryStudio.</div>
+    <div class="footerbar"><button class="btn" id="prbtn" onclick="problemReport()">Save a problem report</button><button class="btn primary" onclick="closeModal()">OK</button></div>`);
+}
+async function problemReport() {
+  const b = $("#prbtn"); if (b) { b.disabled = true; b.textContent = "Saving…"; }
+  try { const j = await api("problem_report"); toast(`Saved to ${j.where}: ${j.name}`); if (b) b.textContent = "Saved to " + j.where; }
+  catch (e) { if (b) { b.disabled = false; b.textContent = "Save a problem report"; } }
+}
 function reportError(msg) { fetch("/api/client_error", {method:"POST", headers:{"Content-Type":"application/json","X-Token":TOKEN}, body:JSON.stringify({msg:String(msg).slice(0, 3000)})}).catch(()=>{}); }
 window.addEventListener("error", e => reportError("window error: " + e.message + " at " + (e.filename || "") + ":" + (e.lineno || "")));
 window.addEventListener("unhandledrejection", e => reportError("unhandled: " + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
@@ -948,7 +959,7 @@ function watchJob(first) {
     draw(j);
     if (j.done) {
       clearInterval(polling); polling = null;
-      if (j.failed) { toast(j.error, true); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } goHome(); return; }
+      if (j.failed) { if (j.error === "Stopped.") toast(j.error, true); else setTimeout(() => showProblem(j.error), 50); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } goHome(); return; }
       if (j.then === "review") { R = (await api("review")).review; filter = ""; renderReview(); }
       else if (j.then === "done") renderDone();
       else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
@@ -1091,6 +1102,9 @@ async function openSettings() {
     <div class="sub" style="margin-top:-8px">How to get one: make a free account at huggingface.co, open <a href="https://huggingface.co/stabilityai/stable-audio-open-1.0" target="_blank">stable-audio-open-1.0</a> and click “Agree and access repository”, then create a “Read” token at huggingface.co/settings/tokens and paste it here.</div>
     <label style="display:block;margin-top:16px">Freesound key (optional) ${H.has_fs_key ? '<span class="chip good">saved</span>' : ""}</label>
     <input type="text" id="fsk" placeholder="${H.has_fs_key ? "Leave empty to keep the saved key" : "Paste your key"}">
+    <div class="card" style="padding:16px;margin-top:18px"><b>Something went wrong?</b>
+      <div class="sub" style="margin:6px 0 10px">This puts one file on your Desktop with the details of what happened on this computer (no keys or passwords). Send that file to whoever helps you with StoryStudio.</div>
+      <button class="btn" id="prbtn" onclick="problemReport()">Save a problem report</button></div>
     <div class="footerbar"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveKeys()">Save</button></div>`);
   try { drawAi((await api("ai_status")).ai); } catch (e) {}
 }

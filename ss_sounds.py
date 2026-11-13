@@ -99,6 +99,16 @@ def stop_watch(proc, cancel):
     return done.set
 
 
+def has_nvidia():
+    """This computer has an NVIDIA graphics card the sound AI can use."""
+    try:
+        r = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=8,
+                           **NOWIN)
+        return r.returncode == 0 and "GPU" in (r.stdout or "")
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def run_local(jobs, progress=None, cancel=None):
     """jobs: dicts for ss_mmaudio_worker (video/duration/prompt/out/seed). Returns
     {index: error text} for jobs that failed."""
@@ -114,11 +124,14 @@ def run_local(jobs, progress=None, cancel=None):
     # the graphics card is shared with Premiere and other apps: start with whatever fits,
     # and if it fills up, carry on with a smaller model, then on the processor
     attempts = [(os.environ.get("STORYSOUND_MMAUDIO", "auto"), "auto")]
+    no_card = not has_nvidia()
+    if no_card:                                      # no graphics card to use at all: the
+        attempts = [("small_44k", "cpu")]            # processor, one take per sound
     smaller = {"large_44k_v2": ("medium_44k", "cuda"), "medium_44k": ("small_44k", "cuda"),
                "small_44k": ("small_44k", "cpu")}
     status = {}                                      # index -> "done" | error text
     total = len(jobs)
-    back_to_gpu = 2                                  # times it may return to the card
+    back_to_gpu = 0 if no_card else 2                # times it may return to the card
     slow = False                                     # working on the processor right now
     while attempts:
         model, device = attempts.pop(0)
@@ -157,8 +170,10 @@ def run_local(jobs, progress=None, cancel=None):
                 log("pc sound AI loading", ev)
                 slow = ev.get("device") == "cpu"
             if e == "loading" and progress:
-                where = ("on the processor (slower, because the graphics card is busy)"
-                         if ev.get("device") == "cpu" else "on the graphics card")
+                where = ("on the graphics card" if ev.get("device") != "cpu" else
+                         "on the processor (slower: this computer has no NVIDIA graphics card)"
+                         if no_card else
+                         "on the processor (slower, because the graphics card is busy)")
                 progress(len(status) / total, f"Getting the sound-making AI ready {where}… "
                                               "(the first time it downloads its files)")
             elif e in ("done", "error"):
@@ -169,9 +184,11 @@ def run_local(jobs, progress=None, cancel=None):
                 if progress:
                     progress(len(status) / total,
                              f"Making sounds on this PC: {len(status)} of {total}" + (
-                                 ". Slow right now: another program (Premiere, Photoshop…) "
-                                 "is using the graphics card. It speeds up again when that "
-                                 "program is closed." if slow else ""))
+                                 (". This computer has no NVIDIA graphics card, so each "
+                                  "sound takes about a minute." if no_card else
+                                  ". Slow right now: another program (Premiere, Photoshop…) "
+                                  "is using the graphics card. It speeds up again when that "
+                                  "program is closed.") if slow else ""))
             elif e == "gpu_full":
                 full = ev.get("model") or model
                 log("graphics card full with", full, ev.get("reason", ""))

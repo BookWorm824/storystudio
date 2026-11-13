@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
+  "version": "1.5.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Steady electrical hum is now taken out of voice recordings and lip-sync clips, and cleaned voices stay exactly in step with the picture."
+  "notes": "New: Save a problem report (in Settings, and whenever something doesn't finish). Computers without an NVIDIA graphics card make sounds three times faster than before."
 }
