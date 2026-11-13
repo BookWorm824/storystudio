@@ -309,7 +309,7 @@ for {lo:.1f}s to {hi:.1f}s only. Give times in seconds from the start of the mov
         for c in res.get("cues", []):
             if c.get("kind") == "music" and not music:
                 continue
-            c["start"] = max(lo - 1, float(c["start"]))
+            c["start"] = min(hi, max(lo - 1, float(c["start"])))
             c["end"] = min(hi + 30, max(c["start"] + 0.2, float(c["end"])))
             plan["cues"].append(c)
     if progress:

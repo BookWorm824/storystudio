@@ -461,11 +461,12 @@ async function homeOpenList(path, b) {
   try { if (!SBD) { SBD = await api("sb_styles"); } await sbOpen(path); }
   catch (e) { b.disabled = false; b.textContent = "Open"; }
 }
-async function pickProject() { const j = await api("pick_project"); if (j.project) { P = j.project; renderHome(); } }
+let picking = false;                  // one file window at a time (a double-click opened two)
+async function pickProject() { if (picking) return; picking = true; try { const j = await api("pick_project"); if (j.project) { P = j.project; renderHome(); } } finally { picking = false; } }
 async function openProject(path) { toast("Opening and saving a copy…"); const j = await api("open_project", {path}); P = j.project; renderHome(); }
 async function switchSeq(uid) { const j = await api("open_project", {path:P.file, seq_uid:uid}); P = j.project; renderHome(); }
-async function pickStory() { const j = await api("pick_story"); P = j.project; renderHome(); }
-async function openPrevious() { const j = await api("open_previous"); R = j.review; renderReview(); }
+async function pickStory() { if (picking) return; picking = true; try { const j = await api("pick_story"); P = j.project; renderHome(); } finally { picking = false; } }
+async function openPrevious() { const j = await api("open_previous"); R = j.review; filter = ""; renderReview(); }
 
 // ---------------------------------------------------------------- setup: sound effects
 function seg(key, items) {
@@ -680,11 +681,11 @@ function renderBuilder(top) {
     steps.push(sbStep(n++, "Picture shape", `<div class="seg">${SBD.aspects.map(a => `<button class="${SBS.aspect===a?"on":""}" onclick="sbSet('aspect','${a}',true)">${a}</button>`).join("")}</div>`, "16:9 is the usual YouTube shape."));
   }
   $("#view").innerHTML = `
-    <div class="rhead"><div><h1>Script builder</h1><div class="sub" style="margin:0">Turns lyrics or a story into a shot list with a picture prompt and a MiniMax prompt for every shot.</div></div>
+    <div class="rhead" id="sbpage"><div><h1>Script builder</h1><div class="sub" style="margin:0">Turns lyrics or a story into a shot list with a picture prompt and a MiniMax prompt for every shot.</div></div>
 </div>
     ${SBD.recent.length ? `<div class="card" style="margin-bottom:14px"><h2 style="margin:0 0 10px">Your shot lists</h2>${pastLists()}</div>` : ""}
     <div class="sbsteps">${steps.join("")}</div>
-    ${SBS.kind ? (SBS.talk && SBS.talk.plan
+    ${SBS.kind ? (sbTalkFits()
       ? `<div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><span style="flex:1"></span><button class="btn" onclick="sbTalkOpen()">Keep talking it over</button><button class="btn primary big" onclick="sbStart()">Generate script ${arrow()}</button></div>
          <div class="sub" style="text-align:right;margin:8px 0 0">Uses the plan you talked over with ${aiName()}.</div>`
       : `<div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><span style="flex:1"></span><button class="btn" onclick="sbStart()">Skip, generate now</button><button class="btn primary big" onclick="sbTalkOpen()">Talk it over first ${arrow()}</button></div>
@@ -718,7 +719,7 @@ async function sbSongFile() { const j = await api("sb_pick_song"); if (j.seconds
 async function sbBrainstorm() {
   if (!SBS.text.trim()) return toast("Paste the lyrics first.", true);
   const b = $("#bsbtn"); b.disabled = true; b.textContent = "Thinking of ideas…";
-  try { const st = SBD.styles.find(s => s.id === SBS.style_id); const j = await api("sb_brainstorm", {text:SBS.text, notes:SBS.direction, style_name: st ? st.name : "", onscreen:SBS.onscreen}); SBS.ideas = j.ideas || []; } finally { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+  try { const st = SBD.styles.find(s => s.id === SBS.style_id); const j = await api("sb_brainstorm", {text:SBS.text, notes:SBS.direction, style_name: st ? st.name : "", onscreen:SBS.onscreen}); SBS.ideas = j.ideas || []; } finally { if ($("#sbpage")) sbTalkKeep(); }
 }
 function sbUseIdea(i) { SBS.direction = SBS.ideas[i].direction; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; toast("Added to the direction. Change it however you like."); }
 async function sbCast() {
@@ -729,7 +730,7 @@ async function sbCast() {
     const j = await api("sb_cast", {kind:SBS.kind, text:SBS.text, cast:SBS.cast, direction:SBS.direction, onscreen: SBS.kind === "music" ? SBS.onscreen : "main", style_name: st ? st.name : ""});
     if ((j.characters || []).length) SBS.cast = j.characters.map(c => `${c.name}: ${c.look}`).join("\n\n");
     else toast("Your direction doesn't need any recurring characters, so there's nothing to describe.");
-  } finally { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+  } finally { if ($("#sbpage")) sbTalkKeep(); }
 }
 async function sbSaveStyle() {
   const name = $("#nsname").value.trim(), style = $("#nsstyle").value.trim(), clean = $("#nsclean").value.trim();
@@ -743,7 +744,7 @@ async function sbStart() {
   if (SBS.kind === "music" && !(songSeconds(SBS.song) >= 5)) return toast("Enter how long the song is, for example 3:15.", true);
   if (!SBS.style_id) return toast("Choose an art style.", true);
   const spec = Object.assign(sbSpec(), {style_id:SBS.style_id, aspect:SBS.aspect, wording:SBS.wording, style_len:SBS.style_len,
-                                        agreed: (SBS.talk && SBS.talk.plan) || ""});
+                                        agreed: sbTalkFits() ? SBS.talk.plan : ""});
   const j = await api("sb_start", spec);
   watchJob(j.job);
 }
@@ -755,15 +756,23 @@ function sbSpec() {                    // what the AI needs to know, for talking
 }
 
 // talking the direction over before the whole script is written
+function sbTalkFits() {               // is the plan we talked over for the text that's here now?
+  if (!(SBS.talk && SBS.talk.plan)) return false;
+  const words = t => String(t || "").toLowerCase().match(/[a-z0-9']+/g) || [];
+  const was = words(SBS.talk.text).slice(0, 120), now = new Set(words(SBS.text));
+  if (!was.length) return true;
+  return was.filter(w => now.has(w)).length / was.length >= 0.7;   // small edits keep the plan; a new song doesn't
+}
 function sbTalkOpen() {
   if (!SBS.text.trim()) return toast("Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first.", true);
+  if (SBS.talk && SBS.talk.plan && !sbTalkFits()) SBS.talk = null;      // different lyrics: a new talk
   SBS.talkView = true;
   if (!SBS.talk) { SBS.talk = {heard:"", plan:"", questions:[], answers:[], note:"", rounds:[], edited:false, busy:false}; sbTalkAsk(); }
   renderBuilder(true);
 }
 function sbTalkKeep() { const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
 async function sbTalkAsk() {
-  const T = SBS.talk; T.busy = true; if (SBS.talkView) sbTalkKeep();
+  const T = SBS.talk; T.busy = true; T.text = SBS.text; if (SBS.talkView) sbTalkKeep();
   try {
     const j = await api("sb_talk", {spec: sbSpec(), rounds: T.rounds});
     if (SBS.talk !== T) return;          // started over meanwhile
@@ -771,8 +780,8 @@ async function sbTalkAsk() {
   } catch (e) {
     if (SBS.talk === T && T.rounds.length) {   // put the last answers back so nothing typed is lost
       const r = T.rounds.pop(); Object.assign(T, {questions: r.questions, answers: r.answers, note: r.note, plan: r.plan, edited: r.edited});
-    } else if (SBS.talk === T && !T.plan) { SBS.talk = null; SBS.talkView = false; renderBuilder(true); return; }
-  } finally { if (SBS.talk === T) { T.busy = false; if (SBS.talkView) sbTalkKeep(); } }
+    } else if (SBS.talk === T && !T.plan) { SBS.talk = null; SBS.talkView = false; if ($("#sbpage")) renderBuilder(true); return; }
+  } finally { if (SBS.talk === T) { T.busy = false; if (SBS.talkView && $("#sbpage")) sbTalkKeep(); } }
 }
 function sbTalkSend() {
   const T = SBS.talk;
@@ -797,7 +806,7 @@ function renderTalk(top) {
       <input type="text" class="sbin" placeholder="Or type your own answer (leave empty to let ${ai} decide)" value="${esc(T.answers[i] || "")}" oninput="SBS.talk.answers[${i}]=this.value"></div>`).join("");
   const said = T.rounds.map(r => r.questions.map((q, i) => r.answers[i] && r.answers[i].trim() ? `<div><b>${esc(q.q)}</b> ${esc(r.answers[i])}</div>` : "").join("") + (r.note && r.note.trim() ? `<div><b>You said:</b> ${esc(r.note)}</div>` : "")).join("");
   $("#view").innerHTML = `
-    <div class="rhead"><div><h1>Talk it over</h1><div class="sub" style="margin:0">${ai} asks about the direction before writing the whole script. Answer what you like and skip the rest. Nothing is built until you say so.</div></div></div>
+    <div class="rhead" id="sbpage"><div><h1>Talk it over</h1><div class="sub" style="margin:0">${ai} asks about the direction before writing the whole script. Answer what you like and skip the rest. Nothing is built until you say so.</div></div></div>
     ${first && T.busy ? busy : `
       ${T.heard ? `<div class="card"><h2 style="margin:0 0 6px">What ${ai} hears in it</h2><div>${esc(T.heard)}</div></div>` : ""}
       <div class="card"><h2 style="margin:0 0 4px">The plan so far</h2><div class="sub" style="margin:0 0 10px">This becomes the direction for every shot. Change any of it.</div>
@@ -917,7 +926,7 @@ async function sbCopyChar(i) { await navigator.clipboard.writeText(SBR.character
 function watchJob(first) {
   let shown = false;
   const draw = j => {
-    if (!shown) {
+    if (!shown || !$("#jt")) {
       $("#view").innerHTML = `<div class="working card"><h1 id="jt"></h1><div class="sub" id="jm"></div>
         <div class="bar"><i id="jb"></i></div><div class="row" style="justify-content:space-between"><span class="left" id="jl"></span><span class="sub" id="jp" style="margin:0"></span></div>
         <ul class="steps" id="js"></ul>
@@ -940,7 +949,7 @@ function watchJob(first) {
     if (j.done) {
       clearInterval(polling); polling = null;
       if (j.failed) { toast(j.error, true); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } goHome(); return; }
-      if (j.then === "review") { R = (await api("review")).review; renderReview(); }
+      if (j.then === "review") { R = (await api("review")).review; filter = ""; renderReview(); }
       else if (j.then === "done") renderDone();
       else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
       else if (j.then === "script") { SBR = (await api("sb_result")).result; renderScript(); $("main").scrollTop = 0; }
@@ -989,7 +998,8 @@ function play(id, btn) {
   if (audio && playingBtn === btn) { audio.pause(); return; }
   if (audio) audio.pause();
   audio = new Audio(c.audio + "&v=" + Date.now()); playingBtn = btn; btn.innerHTML = ICON.pause;
-  audio.onpause = audio.onended = () => { btn.innerHTML = ICON.play; };
+  const mine = audio;
+  audio.onpause = audio.onended = () => { btn.innerHTML = ICON.play; if (audio === mine) { audio = null; playingBtn = null; } };
   audio.play();
 }
 function openMenu(ev, id) {

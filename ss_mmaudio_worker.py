@@ -75,6 +75,11 @@ def main():
 
     take_times = []
     for i, job in enumerate(spec["jobs"]):
+        if device == "cpu" and spec.get("watch_gpu") and i > 0 and _gpu_is_free(torch):
+            # the program that filled the graphics card has let go of it: hand the rest of
+            # the sounds back to the app, which carries on the fast way
+            say(event="gpu_free", index=i)
+            sys.exit(4)
         try:
             rng = torch.Generator(device=device)
             rng.manual_seed(int(job.get("seed", 42)))
@@ -130,6 +135,14 @@ def _crawling(torch, take_times, duration):
         return False
     # on a free card a take needs well under 2 s per second of sound
     return min(recent) > 4.0 and free < 0.5
+
+
+def _gpu_is_free(torch, need_gb=5.6):
+    """Enough free graphics memory again for the usual model, with room to spare."""
+    try:
+        return torch.cuda.is_available() and torch.cuda.mem_get_info()[0] / 2 ** 30 >= need_gb
+    except Exception:
+        return False
 
 
 def _is_gpu_error(ex):

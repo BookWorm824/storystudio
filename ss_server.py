@@ -94,8 +94,9 @@ def project_view():
             "seq_uid": st["seq_uid"], "thumb": media_url(st.get("thumb")),
             "previous": st.get("previous", {}).get("stage") in ("sounds", "finished",
                                                                   "balanced") or
+            # ("planned": a run that was stopped while its sounds were being made)
             (st.get("previous", {}).get("cues", 0) > 0 and
-             st.get("previous", {}).get("stage") in ("karaoke", "feedback")),
+             st.get("previous", {}).get("stage") in ("karaoke", "feedback", "planned")),
             "previous_feedback": bool(st.get("previous", {}).get("feedback"))}
 
 
@@ -257,8 +258,8 @@ def run_job(title, work, then, phases):
             job.done = True
             try:
                 import storysound as E
-                if S.st:
-                    E.save(S.st)
+                if S.st and S.st.get("stage") != "opened":   # nothing to keep from a
+                    E.save(S.st)                             # project that was only opened
             except Exception:
                 pass
     threading.Thread(target=go, daemon=True).start()
@@ -534,7 +535,7 @@ def api(name, a):
                 if info else None, "current": ss_update.local_version()}
     if name == "update_now":
         import ss_update
-        if S.job and not S.job.done:
+        if (S.job and not S.job.done) or S.asking > 0:
             raise StoryError("StoryStudio is busy. Update when it has finished.")
         info = ss_update.check(timeout=10)
         if not info:
@@ -565,7 +566,7 @@ def api(name, a):
     if name == "feedback":
         return {"feedback": feedback_view()}
     if name == "open_previous_feedback":
-        prev = E.load(S.st["work"])
+        prev = E.load(S.st["work"], "feedback")
         if not prev.get("feedback"):
             raise StoryError("There's no feedback from last time for this project.")
         prev["thumb"] = S.st.get("thumb")
@@ -584,7 +585,7 @@ def api(name, a):
         E.save(S.st)
         return {"feedback": feedback_view()}
     if name == "open_previous":
-        prev = E.load(S.st["work"])
+        prev = E.load(S.st["work"], "cues")
         prev["story"] = S.st.get("story") or prev.get("story")
         prev["thumb"] = S.st.get("thumb")
         S.st = prev
@@ -827,8 +828,12 @@ def main():
     # long time with nothing running. Edge slows a background window's check-ins to about
     # once a minute, so a short silence must never close StoryStudio: that left the window
     # open with nothing behind its buttons.
+    tick = time.time()
     while True:
         time.sleep(5)
+        if time.time() - tick > 60:            # the PC was asleep: the window hasn't had a
+            S.last_ping = time.time()          # chance to check in yet, so start counting again
+        tick = time.time()
         if S.restart:                          # updated: open the new version, close this one
             time.sleep(1.5)                    # let the window get its answer first
             import ss_update

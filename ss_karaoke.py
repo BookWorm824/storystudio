@@ -16,8 +16,32 @@ import numpy as np
 from ss_core import APP_DIR, MODELS, NOWIN, StoryError, ffmpeg, fmt_time, log, run, safe_name
 import ss_media as M
 
-SECTION = re.compile(r"^\s*[\[(].*[\])]\s*$")          # [Chorus], (Verse 2) ...
-REPEAT = re.compile(r"\s*[\[(]?\s*x\s*(\d)\s*[\])]?\s*$", re.I)
+SECTION = re.compile(r"^\s*\[.*\]\s*$")                # [Chorus], [anything]
+# a line in round brackets is a label only when it reads like one: "(Verse 2)", "(Chorus x2)".
+# Otherwise it is sung: "(Shine, shine)", "(Ooh) I love you (ooh)".
+PAREN_LABEL = re.compile(r"^\s*\(\s*(verse|chorus|pre[- ]?chorus|post[- ]?chorus|bridge|intro|"
+                         r"outro|hook|refrain|interlude|instrumental|solo|break|tag|ending|"
+                         r"spoken|repeat|x\s*\d)(?![a-z])[^()]*\)\s*$", re.I)
+# "x2" at the end of a line, on its own or in brackets ("max 2" is not a repeat)
+REPEAT = re.compile(r"(?:^|(?<=[\s\[(]))\s*[\[(]?\s*x\s*(\d)\s*[\])]?\s*$", re.I)
+ONES = ("ZERO ONE TWO THREE FOUR FIVE SIX SEVEN EIGHT NINE TEN ELEVEN TWELVE THIRTEEN FOURTEEN "
+        "FIFTEEN SIXTEEN SEVENTEEN EIGHTEEN NINETEEN").split()
+TENS = "TWENTY THIRTY FORTY FIFTY SIXTY SEVENTY EIGHTY NINETY".split()
+
+
+def number_words(n):
+    """How a number is sung, as letters for lining it up with the singing: 5 -> FIVE."""
+    if n < 20:
+        return ONES[n]
+    if n < 100:
+        return TENS[n // 10 - 2] + (ONES[n % 10] if n % 10 else "")
+    if n < 1000:
+        return ONES[n // 100] + "HUNDRED" + (number_words(n % 100) if n % 100 else "")
+    return "".join(ONES[int(d)] for d in str(n))
+
+
+def is_label(s):
+    return bool(SECTION.match(s) or PAREN_LABEL.match(s))
 
 
 def _section_key(label):
@@ -35,8 +59,8 @@ def _expand_sections(text):
         s = raw.strip()
         if not s:
             continue
-        if SECTION.match(s):
-            m = REPEAT.search(s.rstrip("])"))
+        if is_label(s):
+            m = REPEAT.search(s.rstrip("]) "))
             cur = {"key": _section_key(s), "times": int(m.group(1)) if m else 1, "lines": []}
             sections.append(cur)
         else:
@@ -77,6 +101,9 @@ def parse_lyrics(text):
         words = []
         for w in s.split():
             norm = re.sub(r"[^A-Za-z']", "", w).upper().strip("'")
+            digits = re.sub(r"\D", "", w)
+            if not norm and digits:                        # "5 little ducks", "1, 2, 3"
+                norm = number_words(int(digits[:6]))
             if norm:
                 words.append({"text": w, "norm": norm})
             elif words:                                    # "-", "&" ... stays with a word
@@ -120,12 +147,17 @@ def time_lyrics(st, lines, progress=None, cancel=None):
            "out": str(work / "timing.json"), "vocals_out": str(work / "vocals.wav"),
            "lines": [len(l["words"]) for l in lines]}
     (work / "job.json").write_text(json.dumps(job), encoding="utf8")
+    try:                                     # never read an earlier run's timings by mistake
+        (work / "timing.json").unlink()
+    except OSError:
+        pass
     import ss_sounds as S
     proc = subprocess.Popen([S.python_exe(), str(APP_DIR / "ss_karaoke_worker.py"),
                              str(work / "job.json")], stdout=subprocess.PIPE,
                             stderr=open(work / "worker_log.txt", "w", encoding="utf8"),
                             text=True, encoding="utf8", errors="replace", **NOWIN)
     fatal = ""
+    finished = S.stop_watch(proc, cancel)
     for line in proc.stdout:
         if cancel and cancel():
             proc.kill()
@@ -142,8 +174,19 @@ def time_lyrics(st, lines, progress=None, cancel=None):
         elif e == "fatal":
             fatal = ev.get("text", "")
     proc.wait()
+    finished()
+    if cancel and cancel():
+        raise StoryError("Stopped.")
     if fatal or not (work / "timing.json").exists():
         log("karaoke worker failed", fatal)
+        low = fatal.lower()
+        if "out of memory" in low:
+            raise StoryError("The graphics card ran out of room while lining up the lyrics. "
+                             "Close Premiere or other big programs and try again.")
+        if any(w in low for w in ("connection", "urlopen", "resolve", "timed out", "download",
+                                  "modulenotfound", "no module")):
+            raise StoryError("StoryStudio couldn't get the files it needs to line up the "
+                             "lyrics. Check the internet connection and try again.")
         raise StoryError("StoryStudio couldn't line the lyrics up with the song. Check that "
                          "the lyrics are in the order they're sung.")
     result = json.loads((work / "timing.json").read_text(encoding="utf8"))

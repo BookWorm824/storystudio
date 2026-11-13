@@ -57,7 +57,7 @@ class Project:
         self.home = Path(home) if home else self.path
         try:
             self.root = ET.fromstring(read_xml(self.path))
-        except (OSError, ET.ParseError):
+        except (OSError, EOFError, ET.ParseError):
             log_error("Project.load")
             raise StoryError("StoryStudio couldn't open that Premiere project. If Premiere has it "
                              "open, save it and try again.")
@@ -145,7 +145,10 @@ class Project:
                     video += self._track_items(tr, "video", ti, depth)
             elif grp.tag == "AudioTrackGroup":
                 for ti, tr in enumerate(self.refs(grp, "TrackGroup/Tracks/Track")):
-                    track_db = self._volume_db(self.ref(tr, "AudioTrack/ComponentOwner/Components"))
+                    chain = self.ref(tr, "AudioTrack/ComponentOwner/Components")
+                    if self._track_muted(chain):
+                        continue                # a muted track is not part of the movie's sound
+                    track_db = self._volume_db(chain)
                     for it in self._track_items(tr, "audio", ti, depth):
                         it["gain_db"] += track_db
                         it["track_db"] = track_db
@@ -193,6 +196,12 @@ class Project:
                     "id": it_el.get("ObjectID") or it_el.get("ObjectUID")}
             if kind == "audio":
                 item["gain_db"] = self._volume_db(self.ref(cti, "ComponentOwner/Components"))
+                try:                             # the clip's Audio Gain (a plain multiplier)
+                    g = float(clip.findtext("Gain") or 1.0)
+                    if g > 0 and abs(g - 1.0) > 1e-4:
+                        item["gain_db"] += 20 * math.log10(g)
+                except ValueError:
+                    pass
             if source is not None and "SequenceSource" in source.tag:
                 nested = self.ref(source, "SequenceSource/Sequence")
                 if nested is not None and depth < 4:
@@ -210,6 +219,22 @@ class Project:
             elif source is not None and "SequenceSource" not in source.tag:
                 items.append(item)          # missing media: kept so we can report it
         return items
+
+    def _track_muted(self, chain):
+        """The track's mute button (the "Mute" setting on its fader) is on."""
+        if chain is None:
+            return False
+        for comp in self.refs(chain, "ComponentChain/Components/Component"):
+            for p in self.refs(comp, "AudioComponent/Component/Params/Param"):
+                if p.findtext("Name") == "Mute":
+                    v = (p.findtext("CurrentValue") or "").strip().lower()
+                    if v in ("true", "false", ""):
+                        return v == "true"
+                    try:
+                        return float(v) > 0.5
+                    except ValueError:
+                        return False
+        return False
 
     def _volume_db(self, chain):
         """Gain in dB from an AudioComponentChain's volume filter (0 if unchanged)."""

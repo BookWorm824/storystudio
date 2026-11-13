@@ -89,12 +89,33 @@ def work_dir(project_path, seq_name):
     return d
 
 
+# an earlier run's sounds or edit notes are set aside, not lost, when a different kind of
+# job (karaoke, fix the audio, a stopped run, a freshly opened project) saves over them
+KEPT_ASIDE = {"cues": "state_sounds.json", "feedback": "state_feedback.json"}
+
+
 def save(st):
-    Path(st["work"], "state.json").write_text(json.dumps(st, indent=1), encoding="utf8")
+    f = Path(st["work"], "state.json")
+    try:
+        if f.exists():
+            old = json.loads(f.read_text(encoding="utf-8-sig"))
+            for key, name in KEPT_ASIDE.items():
+                if old.get(key) and not st.get(key):
+                    shutil.copyfile(f, f.with_name(name))
+    except (OSError, ValueError):
+        pass
+    f.write_text(json.dumps(st, indent=1), encoding="utf8")
 
 
-def load(work):
-    return json.loads(Path(work, "state.json").read_text(encoding="utf-8-sig"))
+def load(work, need=None):
+    """The saved run in this work folder. need="cues" or "feedback": the latest run that
+    has them (it may have been set aside by a later job of another kind)."""
+    st = json.loads(Path(work, "state.json").read_text(encoding="utf-8-sig"))
+    if need and not st.get(need):
+        alt = Path(work, KEPT_ASIDE[need])
+        if alt.exists():
+            st = json.loads(alt.read_text(encoding="utf-8-sig"))
+    return st
 
 
 def out_dir(st):
@@ -159,13 +180,12 @@ def open_project(path, seq_uid=None, snap=None):
         if not dst.exists():
             shutil.copy2(snap, dst)
         st["snapshot"] = str(dst)
-    old = Path(st["work"], "state.json")
-    if old.exists():                          # same project again: keep the old cues around
+    if Path(st["work"], "state.json").exists():   # same project again: keep the old cues around
         try:
-            prev = json.loads(old.read_text(encoding="utf-8-sig"))
+            prev = load(st["work"], "cues")
             st["previous"] = {"cues": len(prev.get("cues", [])), "stage": prev.get("stage"),
-                              "feedback": bool(prev.get("feedback"))}
-        except ValueError:
+                              "feedback": bool(load(st["work"], "feedback").get("feedback"))}
+        except (OSError, ValueError):
             pass
     return st
 
@@ -257,6 +277,7 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
                                                    "Reading the narration and music…"))
     _say(progress, at(0.4), "Listening to what is said…")
     import ss_mix
+    ss_mix.guess_tags(clips, dur)            # projects without Essential Sound tags
     dia = [c for c in clips if ss_mix.role_of([c]) == "dialog" or c["tag"].startswith("dialog")]
     speech_src = dia or clips
     words = []
@@ -281,8 +302,10 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
     originals = {}                           # cleaned copies from earlier runs -> originals
     for sf in WORK.glob("*/state.json"):
         try:
-            for o, n in (json.loads(sf.read_text(encoding="utf-8-sig")).get("audio_map")
-                         or {}).items():
+            prev = json.loads(sf.read_text(encoding="utf-8-sig"))
+            for o, n in (prev.get("audio_map") or {}).items():
+                originals[os.path.normcase(n)] = o
+            for n, o in (prev.get("part_files") or {}).items():   # one clip's own file
                 originals[os.path.normcase(n)] = o
         except (OSError, ValueError):
             pass
@@ -308,6 +331,7 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
     st["clips"] = clips
     st["audio_map"] = mapping
     st["clip_files"] = per_clip              # track item id -> its own balanced file
+    st["part_files"] = {per_clip[c["id"]]: c["file"] for c in clips if c.get("id") in per_clip}
     st["levels"] = report
     st["song_video"] = song_video
     if cancel and cancel():
@@ -405,12 +429,33 @@ def _seed(c):
                .hexdigest()[:6], 16)
 
 
+def sounds_dir(st, fresh=False):
+    """Where this run's sound files go: normally "sounds" (a new run replaces the last run's
+    files). But while Premiere has an earlier StoryStudio copy of this project open (it
+    leaves a .prlock file beside it), that copy is still playing those files, so a new run
+    gets its own folder inside "sounds" instead of changing them underneath it."""
+    od = out_dir(st)
+    if not fresh:
+        return Path(st.get("sounds_dir") or od / "sounds")
+    d = od / "sounds"
+    proj = Path(st["project"])
+    base = re.sub(r" \([^()]*\)$", "", proj.stem)
+    try:
+        in_use = any(f.name.startswith(base + " (") for f in proj.parent.glob("*.prlock"))
+    except OSError:
+        in_use = False
+    if in_use and d.exists() and any(d.glob("*.wav")):
+        d = d / time.strftime("run %Y-%m-%d %H%M")
+    st["sounds_dir"] = str(d)
+    return d
+
+
 def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     work = Path(st["work"])
     gen = work / "generated"
     gen.mkdir(exist_ok=True)
-    sounds = out_dir(st) / "sounds"
-    sounds.mkdir(exist_ok=True)
+    sounds = sounds_dir(st, fresh=ids is None or not any(c.get("file") for c in st["cues"]))
+    sounds.mkdir(parents=True, exist_ok=True)
     cues = [c for c in st["cues"] if ids is None or c["id"] in ids]
     use_pc = settings.get("use_local", True) and S.local_ready()
     fs_key = settings.get("freesound_key", "").strip() if settings.get("use_freesound") else ""
@@ -424,7 +469,7 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     takes = max(1, int(settings.get("best_of", 3))) if use_pc else 1
     hf_key = (settings.get("hf_key") or "").strip() if use_pc else ""
     # plan where each sound comes from
-    pc_jobs, pc_cues, sao_cues = [], [], []
+    pc_cues, sao_cues = [], []
     for c in cues:
         why_off = c.get("note", "") if not c.get("keep", True) else ""
         c["file"], c["source"], c["note"] = "", "", why_off
@@ -590,6 +635,11 @@ def _shape(st, c, sounds, motion, mfps):
     if c["source"] == "pc" and c.get("_jobs"):
         bed = c["kind"] in BEDS
         parts = [S.load48(j["out"]) for j in c["_jobs"]]
+        parts = [p for p in parts if len(p) > S.SR // 20]   # a piece that didn't come out
+        if not parts:
+            c["source"], c["file"] = "adobe", ""
+            c["note"] = "The PC sound AI couldn't make this one."
+            return
         if bed:                              # pieces at the same loudness before joining
             parts = [S.normalise(p, -30.0)[0] if len(p) > S.SR else p for p in parts]
         a = parts[0]
@@ -633,6 +683,9 @@ def _shape(st, c, sounds, motion, mfps):
                   dip_db=-3.0, ramp=0.6)
     else:                                    # effects step back a little while someone talks
         a = _duck(a, place, st.get("speech", []), dip_db=-2.0, ramp=0.15)
+    if len(a) < S.SR // 20:                  # nothing left to place
+        c["source"], c["file"], c["note"] = "adobe", "", "This one came out empty."
+        return
     lvl = "background" if c["kind"] in BEDS else c["level"]
     a, g = S.normalise(a, S.target_lufs(c["level"], st.get("movie_type", ""), c["kind"]),
                        None if c["kind"] == "music" else lvl)
@@ -720,7 +773,7 @@ def double_check(st, seq, settings, progress=None, cancel=None):
     owners = {}
     for sf in WORK.glob("*/state.json"):
         try:
-            prev = json.loads(sf.read_text(encoding="utf-8-sig"))
+            prev = load(sf.parent, "cues")
         except (OSError, ValueError):
             continue
         for c in prev.get("cues", []):
@@ -763,6 +816,8 @@ def finish(st, settings, progress=None, cancel=None, label="with sound"):
     work = Path(st["work"])
     od = out_dir(st)
     name = safe_name(st["seq_name"])
+    if label == "with sound":                # not an earlier "fix the audio" or karaoke run
+        st.pop("mode", None)
     kept = [c for c in st["cues"] if c.get("keep") and c.get("file") and Path(c["file"]).exists()]
 
     # preview mix
@@ -867,7 +922,8 @@ def copy_path(project, tag):
     label = ", ".join(tags)
     out = real.with_name(f"{stem} ({label}).prproj")
     n = 2
-    while out.with_suffix(".prlock").exists():
+    while out.with_suffix(".prlock").exists() or \
+            os.path.normcase(str(out)) == os.path.normcase(str(real)):
         out = real.with_name(f"{stem} ({label} {n}).prproj")
         n += 1
     return out

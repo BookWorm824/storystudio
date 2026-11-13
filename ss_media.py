@@ -38,9 +38,9 @@ def decode_raw(src, out_raw, start=0.0, length=None, speed=1.0, channels=2, rate
     cmd = [ffmpeg(), "-y", "-v", "error"]
     if start > 0.001:
         cmd += ["-ss", f"{start:.4f}"]
-    cmd += ["-i", str(src)]
     if length is not None:
-        cmd += ["-t", f"{length * speed:.4f}"]
+        cmd += ["-t", f"{length * speed:.4f}"]       # before -i: this much of the source
+    cmd += ["-i", str(src)]
     af = ["aresample=async=1:first_pts=0"]
     if abs(speed - 1.0) > 0.001:
         af.append(_atempo(speed))
@@ -293,8 +293,10 @@ def master(in_wav, out_wav, target=-14.0, true_peak=-1.5):
              f"loudnorm=I={target}:TP={true_peak}:LRA=11:print_format=json", "-f", "null",
              "-"], check=False)
     m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", r.stderr or "", re.S)
-    if m:
-        d = json.loads(m.group(0))
+    d = json.loads(m.group(0)) if m else {}
+    if "inf" in str(d.get("input_i", "")).lower():      # silence: nothing to set
+        af = "anull"
+    elif m:
         af = (f"loudnorm=I={target}:TP={true_peak}:LRA=11:measured_I={d['input_i']}:"
               f"measured_TP={d['input_tp']}:measured_LRA={d['input_lra']}:"
               f"measured_thresh={d['input_thresh']}:offset={d['target_offset']}:linear=true")
@@ -323,7 +325,8 @@ def stills(video, work, every=1.0, width=384):
     for f in out.glob("*.jpg"):
         f.unlink()
     run([ffmpeg(), "-y", "-v", "error", "-i", video, "-vf",
-         f"fps=1/{every},scale={width}:-2", "-q:v", "4", str(out / "s%05d.jpg")])
+         f"fps=1/{every},scale={width}:-2", "-q:v", "4",
+         str(out).replace("%", "%%") + os.sep + "s%05d.jpg"])
     files = sorted(out.glob("s*.jpg"))
     # frame k (1-based) is the picture at time (k-1)*every + every/2 roughly; use start
     return [((i * every), str(f)) for i, f in enumerate(files)]

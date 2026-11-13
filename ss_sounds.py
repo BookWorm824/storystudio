@@ -78,6 +78,27 @@ def local_ready():
 # ---------------------------------------------------------------------------
 # made on this PC
 # ---------------------------------------------------------------------------
+def stop_watch(proc, cancel):
+    """Stop has to work even while a helper program is silent (downloading its files,
+    separating a voice, a long take): check twice a second and end the program. Returns a
+    function to call when the program has finished."""
+    import threading
+    done = threading.Event()
+    if cancel:
+        def watch():
+            while not done.wait(0.5):
+                if proc.poll() is not None:
+                    return
+                if cancel():
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                    return
+        threading.Thread(target=watch, daemon=True).start()
+    return done.set
+
+
 def run_local(jobs, progress=None, cancel=None):
     """jobs: dicts for ss_mmaudio_worker (video/duration/prompt/out/seed). Returns
     {index: error text} for jobs that failed."""
@@ -97,20 +118,31 @@ def run_local(jobs, progress=None, cancel=None):
                "small_44k": ("small_44k", "cpu")}
     status = {}                                      # index -> "done" | error text
     total = len(jobs)
+    back_to_gpu = 2                                  # times it may return to the card
+    slow = False                                     # working on the processor right now
     while attempts:
         model, device = attempts.pop(0)
         todo = [i for i in range(total) if i not in status]
         if not todo:
             break
+        if device == "cpu":
+            # the slow way (about one take a minute): one take per sound instead of the best
+            # of several, or a long movie would take many hours
+            for i in todo:
+                if len(jobs[i].get("cands") or []) > 1:
+                    del jobs[i]["cands"][1:]
         spec = work / "pc_jobs.json"
         spec.write_text(json.dumps({"models_dir": str(MODELS / "mmaudio"),
                                     "jobs": [jobs[i] for i in todo], "model": model,
-                                    "device": device}), encoding="utf8")
+                                    "device": device,
+                                    "watch_gpu": device == "cpu" and back_to_gpu > 0}),
+                        encoding="utf8")
         errlog = open(work / "pc_worker_log.txt", "a", encoding="utf8")
         proc = subprocess.Popen([python_exe(), str(APP_DIR / "ss_mmaudio_worker.py"),
                                  str(spec)], stdout=subprocess.PIPE, stderr=errlog, text=True,
                                 encoding="utf8", errors="replace", **NOWIN)
-        full = None
+        full, freed = None, False
+        finished = stop_watch(proc, cancel)
         for line in proc.stdout:
             if cancel and cancel():
                 proc.kill()
@@ -123,6 +155,7 @@ def run_local(jobs, progress=None, cancel=None):
             e = ev.get("event")
             if e == "loading":
                 log("pc sound AI loading", ev)
+                slow = ev.get("device") == "cpu"
             if e == "loading" and progress:
                 where = ("on the processor (slower, because the graphics card is busy)"
                          if ev.get("device") == "cpu" else "on the graphics card")
@@ -135,17 +168,29 @@ def run_local(jobs, progress=None, cancel=None):
                     log("pc sound failed", ev)
                 if progress:
                     progress(len(status) / total,
-                             f"Making sounds on this PC: {len(status)} of {total}")
+                             f"Making sounds on this PC: {len(status)} of {total}" + (
+                                 ". Slow right now: another program (Premiere, Photoshop…) "
+                                 "is using the graphics card. It speeds up again when that "
+                                 "program is closed." if slow else ""))
             elif e == "gpu_full":
                 full = ev.get("model") or model
-                log("graphics card full with", full)
+                log("graphics card full with", full, ev.get("reason", ""))
+            elif e == "gpu_free":
+                freed = True
+                log("graphics card is free again: back to the fast way")
             elif e == "fatal":
                 proc.wait()
                 errlog.close()
                 raise StoryError(ev.get("text") or "The sound-making AI couldn't start.")
         proc.wait()
+        finished()
         errlog.close()
-        if full:
+        if cancel and cancel():
+            raise StoryError("Stopped.")
+        if freed and back_to_gpu > 0:
+            back_to_gpu -= 1
+            attempts.append(("auto", "auto"))
+        elif full:
             nxt = smaller.get(full if full in smaller else "large_44k_v2")
             if nxt and (nxt[1] == "cuda" or device != "cpu"):
                 attempts.append(nxt)
@@ -165,6 +210,7 @@ def _worker(script, spec_obj, spec_path, on_event, cancel=None):
     proc = subprocess.Popen([python_exe(), str(APP_DIR / script), str(spec_path)],
                             stdout=subprocess.PIPE, stderr=errlog, text=True, encoding="utf8",
                             errors="replace", **NOWIN)
+    finished = stop_watch(proc, cancel)
     try:
         for line in proc.stdout:
             if cancel and cancel():
@@ -177,7 +223,10 @@ def _worker(script, spec_obj, spec_path, on_event, cancel=None):
             on_event(ev)
     finally:
         proc.wait()
+        finished()
         errlog.close()
+    if cancel and cancel():
+        raise StoryError("Stopped.")
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +240,12 @@ def run_sao(jobs, token, progress=None, cancel=None):
     if not jobs:
         return {}, ""
     work = Path(jobs[0]["out"]).parent
+    for j in jobs:                                   # never reuse an old file by mistake
+        for f in [j["out"]] + list(j.get("cands") or []):
+            try:
+                Path(f).unlink()
+            except OSError:
+                pass
     status, problem = {}, [""]
 
     def on(ev):
@@ -352,6 +407,8 @@ def loop_to(a, length, xfade=1.5):
     """Repeat a (with crossfades) until it is `length` samples long."""
     if len(a) >= length:
         return a[:length]
+    if len(a) < SR // 20:                    # nothing to repeat: silence, never an endless loop
+        return np.zeros((max(0, length), 2), dtype=np.float32)
     xf = int(min(xfade * SR, len(a) * 0.3))
     out = a.copy()
     ramp = np.linspace(0, 1, xf, dtype=np.float32)[:, None]

@@ -102,10 +102,12 @@ def open_sign_in():
     if not exe:
         raise StoryError("Codex isn't installed yet.")
     if os.name == "nt":
-        subprocess.Popen(["cmd", "/c", "title Sign in to ChatGPT && echo Sign in with your "
-                          "ChatGPT account in the web page that opens. && echo When it says you "
-                          "are signed in, close this window and go back to StoryStudio. && echo."
-                          f" && \"{exe}\" login && pause"], env=_env(),
+        # one plain command line for cmd: a list would have Python escape the quotes round the
+        # program path as \" and cmd then can't find it (the window just flashed shut)
+        subprocess.Popen("cmd /c \"title Sign in to ChatGPT & echo Sign in with your "
+                         "ChatGPT account in the web page that opens. & echo When it says you "
+                         "are signed in, close this window and go back to StoryStudio. & echo."
+                         f" & \"{exe}\" login & pause\"", env=_env(),
                          creationflags=CONSOLE)
     else:
         subprocess.Popen([exe, "login"], env=_env())

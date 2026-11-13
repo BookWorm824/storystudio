@@ -23,6 +23,7 @@ from pathlib import Path
 APP = Path(__file__).resolve().parent
 RAW = os.environ.get("STORYSTUDIO_UPDATE_URL",
                      "https://raw.githubusercontent.com/BookWorm824/storystudio/main/")
+REPO = "BookWorm824/storystudio"
 NOWIN = {"creationflags": 0x08000000} if os.name == "nt" else {}
 
 
@@ -40,11 +41,32 @@ def local_version():
         return "0"
 
 
-def _get(name, timeout=20):
-    req = urllib.request.Request(RAW + name, headers={"User-Agent": "StoryStudio-updater",
-                                                      "Cache-Control": "no-cache"})
+def _get(name, timeout=20, base=None):
+    req = urllib.request.Request((base or RAW) + name,
+                                 headers={"User-Agent": "StoryStudio-updater",
+                                          "Cache-Control": "no-cache"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+
+
+def _pinned_base():
+    """The address of one exact snapshot of the published files. GitHub keeps each file of
+    the "main" address in its own short-lived cache, so right after a release some files can
+    still be the old ones; a snapshot address always gives files that belong together.
+    None when it can't be found (the "main" address is used then, as before)."""
+    if "STORYSTUDIO_UPDATE_URL" in os.environ:
+        return None
+    try:
+        req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/commits/main",
+                                     headers={"User-Agent": "StoryStudio-updater",
+                                              "Accept": "application/vnd.github.sha"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            sha = r.read().decode("ascii").strip()
+        if len(sha) == 40 and all(c in "0123456789abcdef" for c in sha):
+            return f"https://raw.githubusercontent.com/{REPO}/{sha}/"
+    except Exception:
+        pass
+    return None
 
 
 def check(timeout=8):
@@ -60,6 +82,16 @@ def check(timeout=8):
 
 def apply(info, progress=None):
     """Download and install the new version. Returns True when installed."""
+    base = _pinned_base()
+    if base:
+        try:                                 # the snapshot's own list of files and version
+            pinned = json.loads(_get("version.json", 20, base).decode("utf8"))
+            if _vt(pinned.get("version")) >= _vt(info.get("version")):
+                info = pinned
+            else:
+                base = None
+        except Exception:
+            base = None
     files = [f for f in info.get("files", []) if f and "/" not in f and "\\" not in f
              and not f.startswith(".")]
     if "version.json" not in files:
@@ -71,7 +103,7 @@ def apply(info, progress=None):
         for i, f in enumerate(files):
             if progress:
                 progress(i / len(files), f"Downloading {f}")
-            data = _get(f, timeout=60)
+            data = _get(f, timeout=60, base=base)
             (hold / f).write_bytes(data)
             if f.endswith((".py", ".pyw")):
                 py_compile.compile(str(hold / f), doraise=True)

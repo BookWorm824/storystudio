@@ -82,6 +82,51 @@ def already_clean(path):
     return "(storysound" in n or "(storystudio" in n or is_storysound_sound(path)
 
 
+NAME_HINTS = (("dialog", ("narrat", "voice over", "voiceover", "dialog", "lipsync", "lip sync",
+                            "lip-sync", "talking", "speech")),
+              ("music", ("music", "song", "theme", "instrumental", "soundtrack", "score",
+                         "suno")),
+              ("sfx", ("sfx", "sound effect", "foley", "ambien", "ambian", "whoosh")))
+
+
+def guess_tags(clips, duration):
+    """Clips with no Essential Sound tag (Dialogue / Music / SFX) get a best guess, so a
+    project that was never tagged is still treated as a narrated story: by the words in the
+    file or clip name, then by the track (a track with many clips that fill a good part of
+    the movie is the narration; a long clip is music). Tagged clips are left alone."""
+    by_track = {}
+    for c in clips:
+        if not c.get("tag") and not is_storysound_sound(c["file"]):
+            by_track.setdefault(c.get("track"), []).append(c)
+    for cs in by_track.values():
+        covered = sum(c["end"] - c["start"] for c in cs)
+        for c in cs:
+            name = f"{c.get('name', '')} {Path(c['file']).name}".lower()
+            hint = next((role for role, words in NAME_HINTS if any(w in name for w in words)),
+                        None)
+            if hint:
+                c["tag"] = hint
+            elif c["end"] - c["start"] > 45:                 # one long clip: music
+                c["tag"] = "music"
+            elif len(cs) > 3 and covered >= 0.25 * max(1.0, duration):
+                c["tag"] = "dialog"                          # many short clips: the narration
+            if c.get("tag"):
+                c["guessed"] = True
+    return clips
+
+
+def root_file(path, originals):
+    """The recording a cleaned copy was first made from (following every earlier run)."""
+    seen = set()
+    while True:
+        key = os.path.normcase(str(path))
+        nxt = (originals or {}).get(key)
+        if not nxt or key in seen or not os.path.exists(nxt):
+            return path
+        seen.add(key)
+        path = nxt
+
+
 def role_of(clips):
     tags = [c["tag"] for c in clips]
     if any(is_storysound_sound(c["file"]) for c in clips):
@@ -143,15 +188,12 @@ def process(clips, speech, work, out_dir, song_video=False, progress=None, origi
     mapping, report, per_clip = {}, [], {}
     dia_levels, music_moves, sfx_moves = [], [], []
     for fi, (src, cs) in enumerate(by_file.items()):
-        role = role_of(cs)
+        # a cleaned copy from an earlier run: start again from the original recording
+        # (however many runs ago that was), so nothing gets cleaned or lowered twice
+        read_src = root_file(src, originals)
+        role = "sfx" if is_storysound_sound(read_src) else role_of(cs)
         if role == "keep":
             continue
-        # a cleaned copy from an earlier run: start again from the original recording, so
-        # nothing gets cleaned or lowered twice
-        read_src = src
-        orig = (originals or {}).get(os.path.normcase(src))
-        if orig and os.path.exists(orig):
-            read_src = orig
         clean = read_src != src or not already_clean(src)
         if progress:
             progress(fi / max(1, len(by_file)),
@@ -283,10 +325,10 @@ def process(clips, speech, work, out_dir, song_video=False, progress=None, origi
                     f.unlink()
                 except OSError:
                     pass
-        except StoryError:
-            raise
-        except Exception:
-            log_error(f"process {src}")
+        except Exception as ex:
+            if isinstance(ex, StoryError) and str(ex) == "Stopped.":
+                raise
+            log_error(f"process {src}")                # one bad file doesn't stop the run
             report.append(f"Couldn't clean up {Path(src).name}; it was left as it is.")
     # what changed, in plain words
     if dia_levels:

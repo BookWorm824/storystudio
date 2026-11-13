@@ -279,6 +279,9 @@ class Writer:
             elif t == "SubClip" or t == "MasterClip":
                 self.setx(el, "Name", name)
             elif t == "AudioClip":
+                g = el.find("Gain")
+                if g is not None:
+                    g.text = "1.0"
                 c = el.find("Clip")
                 self.setx(c, "ClipID", _guid())
                 if c.find("OutPoint") is not None:
