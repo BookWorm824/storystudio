@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
+  "version": "1.5.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "A full check-up: about 30 fixes. The sound machine says when the graphics card is busy and speeds back up by itself, a stopped run can be picked up again, and earlier sounds are never lost."
+  "notes": "Steady electrical hum is now taken out of voice recordings and lip-sync clips, and cleaned voices stay exactly in step with the picture."
 }

@@ -309,6 +309,15 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
                 originals[os.path.normcase(n)] = o
         except (OSError, ValueError):
             pass
+    video_map = {}                           # lip-sync clips with hum: cleaned copies
+    try:
+        video_map = ss_mix.clean_video_voices(
+            clips, work, out_dir(st) / "audio", originals,
+            lambda f, m: _say(progress, at(0.8), m))
+    except StoryError:
+        raise
+    except Exception:
+        log_error("lip-sync voice cleanup")
     mapping, report, set_levels, per_clip = ss_mix.process(
         clips, st["speech"] if dia else [], work, out_dir(st) / "audio", song_video,
         originals=originals, progress=lambda f, m: _say(progress, at(0.8 + 0.2 * f), m))
@@ -329,7 +338,14 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
         c["level_db"] = 0.0
     st["reset_items"] = reset
     st["clips"] = clips
-    st["audio_map"] = mapping
+    st["audio_map"] = dict(mapping, **video_map)
+    if video_map:
+        n = len(video_map)
+        report.insert(min(2, len(report)),
+                      f"{n} lip-sync clip{'s' if n != 1 else ''} had the same hum: "
+                      f"{'each now uses' if n != 1 else 'it now uses'} a copy with the very same "
+                      "picture and the cleaned voice. The clips stay where they are on your "
+                      "timeline.")
     st["clip_files"] = per_clip              # track item id -> its own balanced file
     st["part_files"] = {per_clip[c["id"]]: c["file"] for c in clips if c.get("id") in per_clip}
     st["levels"] = report
