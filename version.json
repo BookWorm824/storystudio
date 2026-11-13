@@ -1,5 +1,5 @@
 {
-  "version": "1.5.1",
+  "version": "1.6.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -25,5 +25,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "New: Save a problem report (in Settings, and whenever something doesn't finish). Computers without an NVIDIA graphics card make sounds three times faster than before."
+  "notes": "New in Settings: choose which Claude or ChatGPT model StoryStudio uses (every version your plan offers, or type any model's name)."
 }

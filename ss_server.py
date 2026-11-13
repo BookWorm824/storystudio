@@ -127,7 +127,10 @@ def ai_view():
     p = C.provider()
     return {"name": {"claude": "Claude", "chatgpt": "ChatGPT"}.get(p, ""), "provider": p or "",
             "claude": bool(C.find_claude()), "codex": bool(G.find()),
-            "choice": S.settings.get("ai", "auto")}
+            "choice": S.settings.get("ai", "auto"),
+            "claude_model": C.chosen_model(), "chatgpt_model": G.chosen_model(),
+            "claude_models": [{"id": i, "name": n, "note": t} for i, n, t in C.CLAUDE_MODELS],
+            "model_name": {"claude": C.model_label, "chatgpt": G.model_label}[p]() if p else ""}
 
 
 FB_LABEL = {"fix": "Please fix", "suggest": "Idea", "beat": "Beat", "good": "Nicely done"}
@@ -353,7 +356,18 @@ def api(name, a):
         import ss_gpt as G
         v = ai_view()
         v["chatgpt"] = G.status()
+        v["chatgpt_models"] = G.models()         # asked from the ChatGPT program: always current
+        v["model_name"] = ai_view()["model_name"]    # (now that the list has the names)
         return {"ai": v}
+    if name == "ai_model":
+        which = "chatgpt_model" if a.get("which") == "chatgpt" else "claude_model"
+        m = str(a.get("model") or "").strip()
+        if m and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,79}", m):
+            raise StoryError("That doesn't look like a model's name. Use the name exactly as "
+                             "Claude or ChatGPT writes it, for example claude-opus-5-5.")
+        S.settings[which] = m
+        core.save_settings(S.settings)
+        return {"ai": ai_view()}
     if name == "ai_choose":
         S.settings["ai"] = a.get("choice", "auto")
         core.save_settings(S.settings)

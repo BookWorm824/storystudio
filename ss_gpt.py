@@ -15,7 +15,49 @@ from pathlib import Path
 
 from ss_core import APP_DATA, NOWIN, StoryError, log
 
-MODEL = os.environ.get("STORYSTUDIO_CHATGPT_MODEL", "")       # empty: the plan's default
+_models = {}
+
+
+def chosen_model():
+    """The ChatGPT model picked in Settings ("" = the account's own default)."""
+    from ss_core import load_settings
+    return str(load_settings().get("chatgpt_model") or "").strip()
+
+
+def model():
+    """The model name handed to Codex ("" = leave it to the account's default)."""
+    return os.environ.get("STORYSTUDIO_CHATGPT_MODEL") or chosen_model()
+
+
+def models():
+    """Every model this ChatGPT account offers, asked from the Codex program itself, so the
+    list is always the current one: [{"id", "name", "note"}], best first. Empty when Codex
+    isn't installed or doesn't answer."""
+    if _models.get("list"):
+        return _models["list"]
+    exe = find()
+    if not exe:
+        return []
+    try:
+        r = subprocess.run([exe, "debug", "models"], capture_output=True, text=True,
+                           encoding="utf8", errors="replace", timeout=30, env=_env(), **NOWIN)
+        out = [{"id": m["slug"], "name": m.get("display_name") or m["slug"],
+                "note": (m.get("description") or "").strip()}
+               for m in json.loads(r.stdout).get("models", [])
+               if m.get("slug") and m.get("visibility", "list") == "list"]
+    except Exception as ex:
+        log("chatgpt model list failed:", type(ex).__name__, ex)
+        out = []
+    if out:
+        _models["list"] = out
+    return out
+
+
+def model_label(m=None):
+    m = chosen_model() if m is None else m
+    if not m:
+        return "your ChatGPT default"
+    return next((x["name"] for x in _models.get("list") or [] if x["id"] == m), m)
 CONSOLE = 0x00000010                                          # CREATE_NEW_CONSOLE
 
 
@@ -160,8 +202,8 @@ def ask(prompt, schema, system=None, images=None, timeout=1200):
                 ".\n\n" + full)
         for _, path in images:
             common.append(f"--image={path}")       # one per flag, so nothing after is swallowed
-    if MODEL:
-        common += ["-m", MODEL]
+    if model():
+        common += ["-m", model()]
     cmd = [exe, "exec", "-s", "read-only", "-C", str(empty), "--color", "never", *common,
            "--ephemeral", "-"]
     try:
@@ -195,5 +237,11 @@ def ask(prompt, schema, system=None, images=None, timeout=1200):
         if any(k in low for k in ("usage limit", "rate limit", "limit reached", "quota", "429")):
             raise StoryError("You've reached your ChatGPT usage limit for now. It resets after "
                              "a while.")
+        if model() and "model" in low and any(
+                k in low for k in ("not supported", "does not exist", "not found", "invalid",
+                                   "unsupported", "not available", "access")):
+            raise StoryError(f"ChatGPT couldn't use the model chosen in Settings "
+                             f"({model_label()}). It may not be part of your plan. Open "
+                             "Settings (the gear at the top) and pick another model.")
         raise StoryError("ChatGPT couldn't answer this time. Please try again.")
     return answer

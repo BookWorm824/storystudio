@@ -12,7 +12,47 @@ from pathlib import Path
 
 from ss_core import APP_DATA, NOWIN, StoryError, fmt_time, log
 
-MODEL = os.environ.get("STORYSOUND_CLAUDE_MODEL", "opus")
+DEFAULT_MODEL = "opus"
+# Every Claude model the user can pick in Settings: (id, name, note). "" is StoryStudio's
+# usual choice. A family name on its own ("opus", "fable"...) always means the newest of that
+# family that the Claude program on this computer knows; the dated ones pin one version.
+# Anything not listed can still be typed in ("Another model").
+CLAUDE_MODELS = [
+    ("", "Opus, always the newest", "StoryStudio's usual choice: strong and quick."),
+    ("fable", "Fable, always the newest", "The most capable. Slower, and uses more of "
+                                          "your plan."),
+    ("sonnet", "Sonnet, always the newest", "Faster and lighter on your plan."),
+    ("haiku", "Haiku, always the newest", "Fastest and lightest. Fine for simple jobs."),
+    ("claude-fable-5-2", "Fable 5.2", ""),
+    ("claude-fable-5-1", "Fable 5.1", ""),
+    ("claude-fable-5", "Fable 5", ""),
+    ("claude-opus-5-5", "Opus 5.5", ""),
+    ("claude-opus-5", "Opus 5", ""),
+    ("claude-opus-4-8", "Opus 4.8", ""),
+    ("claude-opus-4-7", "Opus 4.7", ""),
+    ("claude-opus-4-6", "Opus 4.6", ""),
+    ("claude-sonnet-5-5", "Sonnet 5.5", ""),
+    ("claude-sonnet-5", "Sonnet 5", ""),
+    ("claude-sonnet-4-6", "Sonnet 4.6", ""),
+    ("claude-haiku-5-5", "Haiku 5.5", ""),
+    ("claude-haiku-4-5", "Haiku 4.5", ""),
+]
+
+
+def chosen_model():
+    """The Claude model picked in Settings ("" = StoryStudio's usual choice)."""
+    from ss_core import load_settings
+    return str(load_settings().get("claude_model") or "").strip()
+
+
+def model():
+    """The model name handed to the Claude program."""
+    return os.environ.get("STORYSOUND_CLAUDE_MODEL") or chosen_model() or DEFAULT_MODEL
+
+
+def model_label(m=None):
+    m = chosen_model() if m is None else m
+    return next((name for i, name, _ in CLAUDE_MODELS if i == m), m)
 LONG_ARGS = 24_000
 
 
@@ -36,6 +76,13 @@ def _env():
 
 def _fail(text):
     low = (text or "").lower()
+    if "selected model" in low or ("model" in low and any(
+            k in low for k in ("may not exist", "not have access", "not found", "invalid model",
+                               "does not exist"))):
+        log("claude model refused:", model(), (text or "")[-300:])
+        raise StoryError(f"Claude couldn't use the model chosen in Settings "
+                         f"({model_label()}). It may not be part of your plan. Open Settings "
+                         "(the gear at the top) and pick another model.")
     if any(k in low for k in ("not logged in", "/login", "authenticat", "401")):
         raise StoryError("Claude isn't signed in. Open Claude, sign in, then try again.")
     if any(k in low for k in ("usage limit", "rate limit", "limit reached", "quota")):
@@ -97,7 +144,7 @@ def ask_claude(prompt, schema, system=None, images=None, timeout=1200):
     msg = json.dumps({"type": "user", "message": {"role": "user", "content": content}})
     cmd = [exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
            "--verbose", "--json-schema", json.dumps(schema), "--tools", "",
-           "--strict-mcp-config", "--model", MODEL, "--no-session-persistence"]
+           "--strict-mcp-config", "--model", model(), "--no-session-persistence"]
     if system:
         cmd += ["--system-prompt", system]
     try:

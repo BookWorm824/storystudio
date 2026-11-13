@@ -1108,6 +1108,24 @@ async function openSettings() {
     <div class="footerbar"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveKeys()">Save</button></div>`);
   try { drawAi((await api("ai_status")).ai); } catch (e) {}
 }
+let aiOther = {};                     // "Another model…" picked: show the box to type it in
+function modelPick(which, list, current, firstLabel) {
+  list = (list || []).filter(m => m.id);
+  const known = !current || list.some(m => m.id === current), other = aiOther[which] || !known;
+  const note = other ? "Type the model's name exactly as " + (which === "claude" ? "Claude" : "ChatGPT") + " writes it." : ((list.find(m => m.id === current) || {}).note || (!current && which === "claude" ? "StoryStudio's usual choice: strong and quick." : !current ? "Whatever your ChatGPT account uses by default." : ""));
+  return `<div class="field" style="margin-left:18px;flex-wrap:wrap">Model <select onchange="aiPick('${which}', this.value)">
+      <option value="" ${!current && !other ? "selected" : ""}>${esc(firstLabel)}</option>
+      ${list.map(m => `<option value="${esc(m.id)}" ${!other && m.id === current ? "selected" : ""}>${esc(m.name)}</option>`).join("")}
+      <option value="__other" ${other ? "selected" : ""}>Another model…</option></select>
+    ${other ? `<input type="text" style="width:220px;margin:0" value="${esc(known ? "" : current)}" placeholder="${which === "claude" ? "claude-opus-5-5" : "gpt-6.1-sol"}" onchange="aiModel('${which}', this.value)">` : ""}
+    ${note ? `<span class="sub" style="margin:0;flex-basis:100%">${esc(note)}</span>` : ""}</div>`;
+}
+function aiPick(which, v) { if (v === "__other") { aiOther[which] = true; drawAi(H.ai); } else { aiOther[which] = false; aiModel(which, v); } }
+async function aiModel(which, model) {
+  const j = await api("ai_model", {which, model: String(model || "").trim()});
+  aiOther[which] = false;              // a typed name that is on the list shows as that entry
+  drawAi(Object.assign({}, H.ai, j.ai)); toast("Saved. StoryStudio uses it from now on.");
+}
 function drawAi(ai) {
   const box = $("#aibox"); if (!box) return;
   H.ai = Object.assign(H.ai || {}, ai);
@@ -1118,9 +1136,11 @@ function drawAi(ai) {
   box.innerHTML = `<b>Your AI helper</b>
     <div class="sub" style="margin:4px 0 12px">Plans sounds and gives edit feedback. StoryStudio works with Claude or ChatGPT, using your own plan (no extra cost).</div>
     <div class="field" style="margin-top:0">Claude ${ai.claude ? '<span class="chip good">On this computer</span>' : '<span class="chip">Not installed</span>'}</div>
+    ${ai.claude ? modelPick("claude", ai.claude_models, ai.claude_model, "Opus, always the newest") : ""}
     <div class="field">ChatGPT ${gpt}</div>
+    ${ai.chatgpt === "ready" ? modelPick("chatgpt", ai.chatgpt_models, ai.chatgpt_model, "Your ChatGPT default") : ""}
     <div class="field">Use <div class="seg">${choice("auto","Automatic")}${choice("claude","Claude")}${choice("chatgpt","ChatGPT")}</div></div>
-    <div class="sub" style="margin:10px 0 0">${ai.name ? `Right now StoryStudio is using <b>${ai.name}</b>.` : "Neither is set up yet: set up ChatGPT above, or install Claude."}</div>`;
+    <div class="sub" style="margin:10px 0 0">${ai.name ? `Right now StoryStudio is using <b>${ai.name}</b>${ai.model_name ? ` (${esc(ai.model_name)})` : ""}.` : "Neither is set up yet: set up ChatGPT above, or install Claude."}</div>`;
 }
 async function aiChoose(v) { const j = await api("ai_choose", {choice:v}); drawAi(Object.assign({}, H.ai, j.ai)); }
 async function aiSignIn() { await api("ai_sign_in_chatgpt"); toast("A sign-in window opened. Sign in there, then come back here.", false); setTimeout(async () => drawAi((await api("ai_status")).ai), 20000); }
