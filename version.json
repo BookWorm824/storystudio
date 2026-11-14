@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -26,5 +26,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "New: sound effects made by Fal (add your Fal key in Settings). They are made by watching each clip, so they land in step with the picture. Fewer meaningless little sounds."
+  "notes": "Settings now scrolls, and your Fal key saves the moment you paste it."
 }
