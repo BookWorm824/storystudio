@@ -49,6 +49,9 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
     prepare = (0 if st.get("export") else 8 + shots * 0.5) + 15 + d * 0.15
     sheets = math.ceil(d / (1.0 if d <= 420 else 2.0) / 20)
     plan = 90 + math.ceil(sheets / 10) * 60
+    n_look = len([s for s in st.get("shots") or [] if s.get("name") != "black"]) or \
+        max(4, round(d / 5))
+    plan += 30 + n_look * 0.6 + math.ceil(math.ceil(n_look / 6) / 3) * 40   # close look
     per_min = {"light": 7, "normal": 13, "lots": 24}.get(settings.get("busy", "normal"), 13)
     n = n_cues if n_cues is not None else max(4, round(d / 60 * per_min))
     beds = max(1, round(n * 0.3))
@@ -267,10 +270,24 @@ def analyze(st, settings, progress=None, cancel=None):
     try:                                     # second read: sounds the story still needs
         plan["cues"] += C.check_missing(story, seq_info, st["lines"], plan["cues"],
                                         bool(settings.get("add_music")),
-                                        lambda f, m: _say(progress, 0.95 + 0.04 * f, m))
+                                        lambda f, m: _say(progress, 0.93 + 0.03 * f, m))
     except StoryError:
         log("missing-sounds check skipped")
     st["plan_notes"] = plan.get("notes", "")
+    st["look"] = plan.get("look", "")
+    if cancel and cancel():
+        raise StoryError("Stopped.")
+    try:                                     # third: a close look at every shot
+        note = close_look(st, plan["cues"], story, settings, cancel,
+                          lambda f, m: _say(progress, 0.96 + 0.035 * f, m))
+        if note:
+            st["plan_notes"] = (st["plan_notes"] + " " + note).strip()
+    except StoryError as e:
+        log("close look skipped:", e)
+    except Exception:
+        log_error("close look")
+    if cancel and cancel():
+        raise StoryError("Stopped.")
     st["movie_type"] = plan.get("movie_type", "")
     st["look"] = plan.get("look", "")
     st["cues"] = tidy_cues(plan["cues"], dur, st["cuts"])
@@ -438,9 +455,106 @@ def tidy_cues(cues, dur, cuts):
             continue
         merged.append(c)
     for i, c in enumerate(merged):
-        c.update(id=f"c{i + 1:03d}", keep=True, source="", file="", place_at=c["start"],
-                 note="")
+        c.update(id=f"c{i + 1:03d}", keep=not c.get("not_seen"), source="", file="",
+                 place_at=c["start"], note=NOT_SEEN if c.get("not_seen") else "")
     return merged
+
+
+LOOK_MIN = 0.6          # shots shorter than this (seconds) aren't looked at closely
+LOOK_STEP = 0.15        # seconds between close-up stills (longer shots get fewer per second)
+NOT_SEEN = ("The close look didn't find this on screen, so it's switched off. Tick it if you "
+            "want it anyway.")
+
+
+def close_look(st, cues, story, settings, cancel=None, progress=None):
+    """Sharp stills of every shot a few tenths of a second apart; the AI times each planned
+    sound to the exact moment, corrects what it is, switches off ones that don't happen,
+    and adds sounds of visible actions that were missed. Changes cues in place (and appends
+    the missed ones); returns a short plain note for the user."""
+    import ss_claude as C
+    from concurrent.futures import ThreadPoolExecutor
+    work = Path(st["work"])
+    shots = [s for s in st.get("shots") or [] if s.get("name") != "black" and
+             s["end"] - s["start"] >= LOOK_MIN]
+    if not shots or not st.get("picture"):
+        return ""
+    effects = [c for c in cues if c["kind"] not in BEDS]
+    for k, c in enumerate(effects):
+        c["look_id"] = f"s{k + 1}"
+
+    def stills(i):
+        s = shots[i]
+        a, b = float(s["start"]), float(s["end"])
+        n = int(max(8, min(32, round((b - a) / LOOK_STEP))))
+        try:
+            frames = M.burst(st["picture"], a, b, n, work, f"shot{i:03d}")
+        except Exception:
+            log_error("close-look stills")
+            return None
+        if not frames:
+            return None
+        sheets = M.contact_sheets(frames, work / "close", per_sheet=16, cols=4,
+                                  label=f"shot{i:03d}_", fmt=lambda t: f"{t:.2f}s")
+        mine = [dict(id=c["look_id"], start=c["start"], end=c["end"], kind=c["kind"],
+                     what=c["what"], sound_prompt=c["sound_prompt"])
+                for c in effects if a <= c["start"] < b]
+        return {"start": a, "end": b, "name": s.get("name") or "", "n": len(frames),
+                "sheets": sheets, "sounds": mine}
+    _say(progress, 0.0, "Taking close-up pictures of every shot…")
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        jobs = [j for j in ex.map(stills, range(len(shots))) if j]
+    if not jobs or (cancel and cancel()):
+        return ""
+    res = C.close_look(jobs, st["seq_name"], story, st.get("look", ""),
+                       settings.get("busy", "normal"), progress, cancel)
+    moved = fixed = unseen = 0
+    by_id = {c["look_id"]: c for c in effects}
+    span = {c["id"]: (j["start"], j["end"]) for j in jobs for c in j["sounds"]}
+    for i, a in res["sounds"].items():
+        c = by_id.get(i)
+        if not c:
+            continue
+        lo, hi = a.get("lo", span[i][0]), a.get("hi", span[i][1])
+        try:
+            new, new_end = float(a["start"]), float(a["end"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if lo - 0.3 <= new <= hi and abs(new - c["start"]) <= 2.5:
+            d = new - c["start"]
+            if not new + 0.15 <= new_end <= max(hi, c["end"] + d) + 3:
+                new_end = c["end"] + d
+            if abs(d) >= 0.05:
+                moved += 1
+            c["start"], c["end"] = round(new, 3), round(max(new + 0.15, new_end), 3)
+            c["timed_by_look"] = True
+        w = (a.get("what") or "").strip()
+        if a.get("seen") != "not there" and w and w.lower() != c["what"].strip().lower() and \
+                (a.get("sound_prompt") or "").strip():
+            c.update(what=w, sound_prompt=a["sound_prompt"].strip(),
+                     search_words=(a.get("search_words") or c.get("search_words", "")).strip(),
+                     adobe_prompt=(a.get("adobe_prompt") or c.get("adobe_prompt", "")).strip())
+            fixed += 1
+        if a.get("seen") == "not there" and not c.get("added_by_check"):
+            c["not_seen"] = True
+            unseen += 1
+    for c in effects:
+        c.pop("look_id", None)
+    missed = res["missed"]
+    for c in missed:
+        c.setdefault("suno_prompt", "")
+    cues.extend(missed)
+    log("close look:", len(jobs), "shots;", moved, "moved,", fixed, "corrected,", unseen,
+        "not seen,", len(missed), "added")
+    if not res["sounds"] and not missed:
+        return ""
+    bits = [f"{moved} sounds moved to the exact moment"]
+    if fixed:
+        bits.append(f"{fixed} described better")
+    if missed:
+        bits.append(f"{len(missed)} more found")
+    if unseen:
+        bits.append(f"{unseen} not seen on screen (switched off)")
+    return f"{C.ai_name()} took a close look at {len(jobs)} shots: " + ", ".join(bits) + "."
 
 
 # wordless reactions: a laugh or a sigh IS a voice, so only words are kept out of them
@@ -733,7 +847,7 @@ def shot_cues(st):
     The plan's own effects are kept in st["planned_effects"]."""
     if any(c["kind"] == "shot" for c in st["cues"]):
         return st["cues"]
-    effects = [c for c in st["cues"] if c["kind"] not in BEDS]
+    effects = [c for c in st["cues"] if c["kind"] not in BEDS and c.get("keep", True)]
     beds = [c for c in st["cues"] if c["kind"] in BEDS]
     st["planned_effects"] = effects
     spans = []                                   # shots, tiny ones joined to the one before

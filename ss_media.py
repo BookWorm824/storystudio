@@ -332,7 +332,23 @@ def stills(video, work, every=1.0, width=384):
     return [((i * every), str(f)) for i, f in enumerate(files)]
 
 
-def contact_sheets(frames, work, per_sheet=20, cols=5, label=""):
+def burst(video, t0, t1, n, work, name, width=480):
+    """n sharp stills spread evenly from t0 to t1 (a close look at one shot), as
+    [(time, path)] with each still's exact time in the movie."""
+    out = Path(work) / "close" / name
+    out.mkdir(parents=True, exist_ok=True)
+    for f in out.glob("*.jpg"):
+        f.unlink()
+    step = max(0.04, (t1 - t0) / max(1, n))
+    first = t0 + step / 2
+    run([ffmpeg(), "-y", "-v", "error", "-ss", f"{first:.3f}", "-i", video,
+         "-t", f"{max(0.05, t1 - t0):.3f}", "-vf", f"fps=1/{step:.4f}:round=near,"
+         f"scale={width}:-2", "-q:v", "3", str(out).replace("%", "%%") + os.sep + "f%03d.jpg"])
+    files = sorted(out.glob("f*.jpg"))[:n]
+    return [(round(first + i * step, 2), str(f)) for i, f in enumerate(files)]
+
+
+def contact_sheets(frames, work, per_sheet=20, cols=5, label="", fmt=None):
     """Grid images of (time, path) stills with the time printed on each."""
     from PIL import Image, ImageDraw, ImageFont
     out = Path(work) / "sheets"
@@ -352,8 +368,8 @@ def contact_sheets(frames, work, per_sheet=20, cols=5, label=""):
         for i, (im, (t, _)) in enumerate(zip(ims, chunk)):
             x, y = (i % cols) * w, (i // cols) * h
             sheet.paste(im, (x, y))
-            txt = fmt_time(t)
-            d.rectangle([x, y, x + 92, y + 28], fill="black")
+            txt = fmt(t) if fmt else fmt_time(t)
+            d.rectangle([x, y, x + 10 + d.textlength(txt, font=font), y + 28], fill="black")
             d.text((x + 5, y + 2), txt, fill="yellow", font=font)
         p = out / f"{label}sheet{k // per_sheet:03d}.jpg"
         sheet.save(p, quality=80)

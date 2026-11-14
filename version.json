@@ -1,5 +1,5 @@
 {
-  "version": "1.8.1",
+  "version": "1.9.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -26,5 +26,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "New on the sound screen: a spending limit for Fal. The most important shots get their sounds first and it stops at your limit."
+  "notes": "The sound plan now takes a close look at every shot: each sound is timed to the exact moment, and sounds that don't happen on screen are switched off."
 }

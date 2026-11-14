@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ss_core import APP_DATA, NOWIN, StoryError, fmt_time, log
+from ss_core import APP_DATA, NOWIN, StoryError, fmt_time, log, log_error
 
 DEFAULT_MODEL = "opus"
 # Every Claude model the user can pick in Settings: (id, name, note). "" is StoryStudio's
@@ -420,6 +420,130 @@ and don't add filler. {MUSIC_OFF if not music else ''} Give times in seconds."""
         out.append(c)
     if progress:
         progress(1.0, f"Found {len(out)} more sounds the story needs.")
+    return out
+
+
+LOOK_SOUND = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "seen": {"type": "string", "enum": ["on screen", "off screen", "not there"],
+                 "description": "on screen = you can see what makes it; off screen = heard "
+                                "but not meant to be seen; not there = the pictures show it "
+                                "doesn't happen in this shot"},
+        "start": {"type": "number", "description": "exact second the sound begins"},
+        "end": {"type": "number", "description": "second the sound stops"},
+        "what": {"type": "string"},
+        "sound_prompt": {"type": "string"},
+        "search_words": {"type": "string"},
+        "adobe_prompt": {"type": "string"},
+    },
+    "required": ["id", "seen", "start", "end", "what", "sound_prompt", "search_words",
+                 "adobe_prompt"],
+    "additionalProperties": False,
+}
+LOOK_SCHEMA = {
+    "type": "object",
+    "properties": {"sounds": {"type": "array", "items": LOOK_SOUND},
+                   "missed": {"type": "array", "items": CUE}},
+    "required": ["sounds", "missed"],
+    "additionalProperties": False,
+}
+
+
+def _look_once(grp, name, story, look, busy):
+    parts, images = [], []
+    for k, s in enumerate(grp):
+        step = (s["end"] - s["start"]) / max(1, s["n"])
+        planned = "\n".join(
+            f"  id {c['id']}: {c['start']:.2f}-{c['end']:.2f}s {c['kind']}: {c['what']} "
+            f"(sound: {c['sound_prompt']})" for c in s["sounds"]) or "  (no sounds planned yet)"
+        fname = f" (file: {s['name']})" if s.get("name") else ""
+        parts.append(f"SHOT {k + 1}: {s['start']:.2f}s to {s['end']:.2f}s, a still every "
+                     f"{step:.2f}s{fname}\n"
+                     f"Planned sounds in this shot:\n{planned}")
+        for j, (a, b, p) in enumerate(s["sheets"]):
+            images.append((f"Shot {k + 1}, stills {a:.2f}s to {b:.2f}s:", p))
+    prompt = f"""Movie: "{name}" ({look or 'story'} look). This is a CLOSE LOOK at {len(grp)} \
+shots. Each shot's stills are close together, and the exact time in seconds is printed in \
+yellow on every still.
+
+THE STORY (for context):
+{(story or '').strip()[:8000] or '(no script)'}
+
+{chr(10).join(parts)}
+
+For EVERY planned sound above, answer with its id:
+- seen: "on screen" if you can see what makes it, "off screen" if it is heard but not meant to \
+be seen (birds, a dog in the next room, distant thunder, a wordless reaction from someone out \
+of frame), "not there" only if these pictures clearly show it doesn't happen in ANY of these \
+shots. If it really happens in another shot of this request (the plan was a little early or \
+late), say "on screen" and give the time where it happens.
+- start: the exact second the sound begins: the still where the foot lands, the door starts \
+to move, the lid hits, the hand touches the paper. Read it from the times on the stills; you \
+may choose a time between two stills. For a sound that goes on (rustling, writing, walking) \
+give when it starts.
+- end: when it stops (a short hit lasts about 0.3 to 1 second).
+- what, sound_prompt, search_words, adobe_prompt: repeat them unchanged, or correct them if \
+the pictures show something different (what is really being handled, what it is made of, how \
+hard, how fast). Same style as the originals: "what" is a short label for the storyteller, \
+with no notes or comments in brackets.
+
+Then "missed": sounds of things you can SEE making a noise in these shots that are not \
+planned (a cup set down, a door closing, a page turning, a pencil scratching on paper, \
+footsteps of someone walking in frame). Only clear visible actions with times read from the \
+stills; no ambience, no music, no voices with words, no filler. {BUSY.get(busy, BUSY['normal'])}"""
+    return ask(prompt, LOOK_SCHEMA, system=SYSTEM, images=images, timeout=900)
+
+
+def close_look(shots, name, story, look, busy="normal", progress=None, cancel=None,
+               per_request=6, workers=3):
+    """A second, closer look at each shot (stills a few tenths of a second apart): every
+    planned sound is timed to the exact moment, corrected or found not to be there, and
+    sounds of visible actions that were missed are added. shots: [{"start", "end", "name",
+    "n", "sheets": [(a, b, path)], "sounds": [cue with "id"]}].
+    Returns {"sounds": {id: answer}, "missed": [cue]}."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    groups = [shots[i:i + per_request] for i in range(0, len(shots), per_request)]
+    out = {"sounds": {}, "missed": []}
+    lock, done = threading.Lock(), [0]
+
+    def one(grp):
+        if cancel and cancel():
+            return
+        try:
+            res = _look_once(grp, name, story, look, busy)
+        except StoryError as e:
+            log("close look skipped for", len(grp), "shots:", e)
+            res = {}
+        except Exception:
+            log_error("close look")
+            res = {}
+        lo, hi = grp[0]["start"], grp[-1]["end"]
+        ids = {c["id"] for s in grp for c in s["sounds"]}
+        with lock:
+            for a in res.get("sounds", []):
+                if a.get("id") in ids:
+                    out["sounds"][a["id"]] = dict(a, lo=lo, hi=hi)   # what it could see
+            for c in res.get("missed", []):
+                try:
+                    t = float(c["start"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if c.get("kind") in ("music", "ambience") or not lo <= t < hi:
+                    continue
+                c["start"], c["end"] = t, max(t + 0.2, float(c.get("end") or t + 0.5))
+                c["added_by_look"] = True
+                out["missed"].append(c)
+            done[0] += 1
+            if progress:
+                progress(done[0] / len(groups), f"{ai_name()} is taking a close look at "
+                                                f"each shot ({done[0]} of {len(groups)})…")
+    if progress:
+        progress(0.0, f"{ai_name()} is taking a close look at each shot…")
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(one, groups))
     return out
 
 
