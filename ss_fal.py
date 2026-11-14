@@ -26,12 +26,17 @@ QUEUE = os.environ.get("STORYSTUDIO_FAL_QUEUE", "https://queue.fal.run/")
 REST = os.environ.get("STORYSTUDIO_FAL_REST", "https://rest.fal.ai")
 CDN = os.environ.get("STORYSTUDIO_FAL_CDN", "https://v3.fal.media")
 
-SFX_VIDEO = "mirelo-ai/sfx-v1.5/video-to-audio"       # watches the clip: effects in step
+SFX_VIDEO = "mirelo-ai/sfx-v1.5/video-to-audio"       # watches a short clip
+SFX_SHOT = "mirelo-ai/sfx2.0/video-to-audio"          # watches a whole shot (up to 10 min)
 SFX_TEXT = "fal-ai/elevenlabs/sound-effects/v2"       # from a description
-# Fal's listed prices, dollars per second of sound (November 2026). Only for the estimate
-# shown to the user; Fal's own billing page is what counts.
-PRICE = {SFX_VIDEO: 0.01, SFX_TEXT: 0.002}
-VIDEO_MAX, TEXT_MAX = 10.0, 22.0                      # longest sound per request, seconds
+# Fal's listed prices, dollars per second of sound per version (November 2026). Only for the
+# estimate shown to the user; Fal's own billing page is what counts.
+PRICE = {SFX_VIDEO: 0.01, SFX_SHOT: 0.01, SFX_TEXT: 0.002}
+if time.strftime("%Y-%m-%d") > "2026-12-13":          # Mirelo SFX 2.0's listed price change
+    PRICE[SFX_SHOT] = 0.015
+VIDEO_MAX, TEXT_MAX, SHOT_MAX = 10.0, 22.0, 600.0     # longest sound per request, seconds
+# never in a shot's sound: the narration, voices and music are already in the movie
+SHOT_NEGATIVE = "music, singing, humming, speech, talking, voices, narration, words"
 WORKERS = 4
 
 
@@ -183,6 +188,27 @@ class Fal:
             self.fetch(a["url"], dest)
         return duration * n
 
+    def from_shot(self, clip, prompt, duration, dests, negative="", cancel=None):
+        """The sound of a whole shot, made by watching all of it, so every sound in it is
+        timed by the sound maker itself and lines up with the picture. One version per path
+        in dests (1 to 4). Returns seconds billed."""
+        duration = max(1.0, min(SHOT_MAX, float(duration)))
+        n = max(1, min(4, len(dests)))
+        payload = {"video_url": self.upload(clip), "duration": round(duration, 2),
+                   "num_samples": n, "preserve_speech": False, "upload_audio_format": "wav",
+                   "negative_prompt": negative or SHOT_NEGATIVE}
+        if prompt:
+            payload["text_prompt"] = prompt[:500]
+        res = self.run(SFX_SHOT, payload, cancel, timeout=1800)
+        audio = res.get("audio") or []
+        if isinstance(audio, dict):
+            audio = [audio]
+        if not audio:
+            raise FalError("no sound came back")
+        for a, dest in zip(audio, dests):
+            self.fetch(a["url"], dest)
+        return duration * min(n, len(audio))
+
     def from_text(self, prompt, duration, dest, loop=False, cancel=None):
         """A sound made from its description. Returns seconds billed."""
         duration = max(0.5, min(TEXT_MAX, float(duration)))
@@ -211,7 +237,7 @@ def run_jobs(jobs, key, progress=None, cancel=None):
                 Path(f).unlink()
             except OSError:
                 pass
-    errors, done, used = {}, [0], {SFX_VIDEO: 0.0, SFX_TEXT: 0.0}
+    errors, done, used = {}, [0], {SFX_VIDEO: 0.0, SFX_SHOT: 0.0, SFX_TEXT: 0.0}
     lock = threading.Lock()
     stop = []                                        # a problem that ends the whole run
 
@@ -220,7 +246,12 @@ def run_jobs(jobs, key, progress=None, cancel=None):
             return
         j = jobs[i]
         try:
-            if j.get("video"):
+            if j.get("shot"):
+                secs = fal.from_shot(j["video"], j["prompt"], j["duration"], j["cands"],
+                                     j.get("negative") or SHOT_NEGATIVE, cancel)
+                with lock:
+                    used[SFX_SHOT] += secs
+            elif j.get("video"):
                 if len(j["cands"]) < 2:              # Mirelo always makes at least two
                     j["cands"].append(str(Path(j["cands"][0]).with_name(
                         Path(j["cands"][0]).stem + "b.wav")))
@@ -261,6 +292,7 @@ def run_jobs(jobs, key, progress=None, cancel=None):
     return errors, {"seconds": used, "cost": cost}
 
 
-def estimate(seconds_synced, seconds_text, samples=2):
+def estimate(seconds_synced, seconds_text, samples=2, shots=False):
     """Rough dollars for a run, from Fal's listed prices."""
-    return PRICE[SFX_VIDEO] * seconds_synced * samples + PRICE[SFX_TEXT] * seconds_text
+    per = PRICE[SFX_SHOT if shots else SFX_VIDEO]
+    return per * seconds_synced * samples + PRICE[SFX_TEXT] * seconds_text

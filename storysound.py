@@ -57,12 +57,19 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
     slow = 1.0 if gpu >= 7.0 else (2.0 if gpu >= 3.8 else 6.0)
     sounds = 0.0
     finish = 15 + d * 0.2
-    if uses_fal(settings):                   # made by Fal: a few at a time, no graphics card
+    if uses_fal(settings):                   # made by Fal, one sound per shot
         import ss_fal
-        spots = max(0, n - beds)
-        return {"prepare": prepare, "plan": plan, "sounds": 40 + n * 6.0, "finish": finish,
-                "busy_gpu": False, "n": n,
-                "cost": ss_fal.estimate(spots * 3.7, beds * min(ss_fal.TEXT_MAX, 15.0))}
+        shots = [s for s in st.get("shots") or [] if s.get("name") != "black"]
+        if shots:
+            seconds = sum(s["end"] - s["start"] for s in shots) * 0.75   # stills are skipped
+            n_shots = max(1, round(len(shots) * 0.75))
+        else:
+            seconds, n_shots = d * 0.7, max(4, round(d / 6))
+        versions = 2 if int(settings.get("best_of", 3)) > 1 else 1
+        return {"prepare": prepare, "plan": plan, "sounds": 60 + n_shots * 9.0,
+                "finish": finish, "busy_gpu": False, "n": n_shots + beds, "shots": n_shots,
+                "cost": ss_fal.estimate(seconds, beds * min(ss_fal.TEXT_MAX, 15.0),
+                                        samples=versions, shots=True)}
     if settings.get("use_local", True):
         spots = n - (beds if settings.get("hf_key") else 0)
         sounds = 45 + spots * 8.0 * takes * slow
@@ -507,8 +514,11 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             return errs
         return S.run_local(jobs, prog, cancel)
 
+    if use_fal and ids is None:              # Fal: one sound per shot, made by watching it
+        cues = st["cues"] = shot_cues(st)
     motion, mfps = M.motion_curve(st["picture"])
     takes = 2 if use_fal else (max(1, int(settings.get("best_of", 3))) if use_pc else 1)
+    shot_takes = 2 if int(settings.get("best_of", 3)) > 1 else 1
     hf_key = (settings.get("hf_key") or "").strip() if use_pc and not use_fal else ""
     if ids is None:
         st["fal_cost"] = 0.0
@@ -522,7 +532,17 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
         c.pop("text_only", None)
         c.pop("match", None)
         length = c["end"] - c["start"]
-        if c["kind"] in BEDS:
+        if c["kind"] == "shot":
+            if not use_fal:                                # shots are made by Fal only
+                c["source"], c["note"] = "adobe", "Add your Fal key in Settings to make this."
+                continue
+            c["source"] = "fal"
+            L = c["end"] - c["start"]
+            clip = M.cut_clip(st["picture"], c["start"], L, gen / f"{c['id']}_shot.mp4")
+            j = _job(c, gen, str(clip), 0, L, c["start"], takes=shot_takes)
+            j["shot"] = True
+            pc_cues.append((c, [j]))
+        elif c["kind"] in BEDS:
             if use_fal:                                    # one smooth loop, from its words
                 c["source"] = "fal"
                 pc_cues.append((c, _bed_jobs(c, gen, length, takes, fal=True)))
@@ -586,47 +606,17 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     if groups:
         static = S.run_pick(groups, lambda f, m: _say(progress, 0.78 + 0.07 * f, m), cancel,
                             scores=best)
-    # An effect whose best take still sounds nothing like its description is made again from
-    # the description alone. Effects are made against the picture so they land in step with
-    # it, but when the picture barely moves (a still shot, a slow AI clip) the picture wins
-    # and the sound comes out as nothing much: a door that doesn't creak, ice that doesn't
-    # clink. Without the picture the sound AI follows the words.
-    weak = []
+    # How well each effect matches its description (the judge's score). Effects are never
+    # made again from the words alone: without the picture they lose their sync. One that
+    # sounds nothing like it is switched off instead, and the list marks the unsure ones.
+    # A shot's sound holds many sounds at once, so its score is only kept for the list.
     for c, js in pc_cues:
         if c["kind"] in BEDS or not c.get("_jobs"):
             continue
         got = [best.get(j["out"]) for j in c["_jobs"]]
         if got and all(g is not None for g in got):
-            c["_match"] = float(np.mean(got))
-            if c["_match"] < S.REDO_BELOW:
-                weak.append(c)
-    if weak and make_here:
-        _say(progress, 0.85, f"Making {len(weak)} sound(s) again that didn't come out right…")
-        again = []
-        for c in weak:
-            j = _job(c, gen, None, 30, min(S.MAX_GEN, max(1.5, c["end"] - c["start"] + 0.7)),
-                     takes=takes)
-            j["seed"] += 500
-            again.append((c, j))
-        flat3 = [j for _, j in again]
-        errs3 = run_ai(flat3, lambda f, m: _say(
-            progress, 0.85, f"Making sounds again that didn't come out right: "
-                            f"{int(round(f * len(flat3)))} of {len(flat3)}"))
-        bad3 = {flat3[i]["out"] for i in errs3}
-        best3 = {}
-        g3 = [{"prompt": c["sound_prompt"], "cands": j["cands"], "out": j["out"], "bed": False}
-              for c, j in again if j["out"] not in bad3 and len(j["cands"]) > 1]
-        if g3:
-            S.run_pick(g3, None, cancel, scores=best3)
-        for c, j in again:
-            s = best3.get(j["out"])
-            if s is not None and s > c["_match"] and Path(j["out"]).exists():
-                c["_jobs"], c["_match"], c["text_only"] = [j], s, True
-    for c, js in pc_cues:
-        if "_match" in c:
-            m = c.pop("_match")
-            c["match"] = round(m, 3)
-            if m < S.DROP_BELOW:                     # nothing like it: better left out
+            c["match"] = round(float(np.mean(got)), 3)
+            if c["kind"] != "shot" and c["match"] < S.DROP_BELOW:
                 c["keep"], c["note"] = False, NOT_RIGHT
     # background pieces that came out as static are left out (no background beats hash);
     # a background with no good piece left gets one more try with fresh pieces
@@ -718,6 +708,55 @@ def _job(c, gen, video, k, length, at=None, takes=1):
             "seed": _seed(c) + k, "at": at if at is not None else c["start"]}
 
 
+SHOT_MIN = 1.2                               # a shot shorter than this joins its neighbour
+
+
+def shot_cues(st):
+    """The sound plan as one job per shot: each shot on the timeline whose planned effects
+    are sounds gets one sound, made by watching that whole shot (so the sound maker times
+    every sound in it itself). The planned effects become the shot's description; shots with
+    nothing to hear (a still under the narration) are skipped. Backgrounds stay as they are.
+    The plan's own effects are kept in st["planned_effects"]."""
+    if any(c["kind"] == "shot" for c in st["cues"]):
+        return st["cues"]
+    effects = [c for c in st["cues"] if c["kind"] not in BEDS]
+    beds = [c for c in st["cues"] if c["kind"] in BEDS]
+    st["planned_effects"] = effects
+    spans = []                                   # shots, tiny ones joined to the one before
+    for s in st.get("shots") or []:
+        a, b = float(s["start"]), float(s["end"])
+        if s.get("name") == "black" or b - a < 0.05:
+            continue
+        if spans and (b - a < SHOT_MIN or spans[-1][1] - spans[-1][0] < SHOT_MIN) and \
+                abs(spans[-1][1] - a) < 0.05:
+            spans[-1][1] = b
+        else:
+            spans.append([a, b])
+    out = []
+    for a, b in spans:
+        mine = [c for c in effects if min(b, c["end"]) - max(a, c["start"]) >
+                min(0.3, 0.5 * (c["end"] - c["start"]))]
+        if not mine or b - a < 1.0:
+            continue
+        mine.sort(key=lambda c: c["start"])
+        prompt = "; ".join(dict.fromkeys(c["sound_prompt"].strip().rstrip(".") for c in mine))
+        what = ", ".join(dict.fromkeys(c["what"] for c in mine))
+        out.append({"kind": "shot", "start": round(a, 3), "end": round(b, 3),
+                    "what": f"Shot {fmt_time(a)}: {what}"[:140], "sound_prompt": prompt[:500],
+                    "search_words": "", "suno_prompt": "", "synced": True,
+                    "adobe_prompt": "; ".join(c.get("adobe_prompt", "") for c in mine)[:600],
+                    "level": "medium" if any(c.get("level") in ("medium", "loud")
+                                             for c in mine) else "soft",
+                    "includes": [c["what"] for c in mine]})
+    cues = sorted(beds + out, key=lambda c: (c["start"], c["end"]))
+    for i, c in enumerate(cues):
+        c.update(id=f"c{i + 1:03d}", keep=c.get("keep", True), source="", file="",
+                 place_at=c["start"], note="")
+    log("sound plan as shots:", len(out), "shots with sounds from", len(effects),
+        "planned effects;", len(beds), "backgrounds")
+    return cues
+
+
 def uses_fal(settings):
     """The Fal key, when Fal is to make the sounds (a key is saved and it isn't switched
     off); "" otherwise."""
@@ -744,7 +783,13 @@ def _bed_jobs(c, gen, length, takes, first=0, fal=False):
 
 def _shape(st, c, sounds, motion, mfps):
     length = c["end"] - c["start"]
-    if c["source"] in ("pc", "fal") and c.get("_jobs"):
+    if c["kind"] == "shot" and c.get("_jobs"):
+        a = S.load48(c["_jobs"][0]["out"])
+        n = int(round(length * S.SR))
+        a = a[:n] if len(a) >= n else np.concatenate([a, np.zeros((n - len(a), 2), np.float32)])
+        a = S.fades(a, 0.004, 0.012)             # no click at the cuts; timing untouched
+        place = c["start"]
+    elif c["source"] in ("pc", "fal") and c.get("_jobs"):
         bed = c["kind"] in BEDS
         parts = [S.load48(j["out"]) for j in c["_jobs"]]
         parts = [p for p in parts if len(p) > S.SR // 20]   # a piece that didn't come out
@@ -769,10 +814,6 @@ def _shape(st, c, sounds, motion, mfps):
                 a = np.concatenate([a, p])
         if c["kind"] in BEDS:
             a, place = _bed(st, c, a)
-        elif c.get("text_only"):                  # made from the words: starts at its moment
-            a = a[S.lead_silence(a):]
-            a = S.fades(S.trim_tail(a[: int((length + 1.0) * S.SR)]), 0.005, 0.12)
-            place = c["start"]
         else:
             place = c["_jobs"][0]["at"]               # made against the picture: in sync
             a = S.fades(S.trim_tail(a), 0.005, 0.12)
@@ -802,8 +843,8 @@ def _shape(st, c, sounds, motion, mfps):
     if len(a) < S.SR // 20:                  # nothing left to place
         c["source"], c["file"], c["note"] = "adobe", "", "This one came out empty."
         return
-    lvl = "background" if c["kind"] in BEDS else c["level"]
-    a, g = S.normalise(a, S.target_lufs(c["level"], st.get("movie_type", ""), c["kind"]),
+    lvl = "background" if c["kind"] in BEDS else (c.get("level") or "soft")
+    a, g = S.normalise(a, S.target_lufs(lvl, st.get("movie_type", ""), c["kind"]),
                        None if c["kind"] == "music" else lvl)
     name = safe_name(f"{c['id']} - {c['what']}")[:70] + ".wav"
     path = sounds / name
@@ -1102,6 +1143,8 @@ def write_list(st, kept, path):
                "adobe": "not made yet"}.get(c.get("source"), "")
         lines.append(f"{mark} {fmt_time(c.get('place_at', c['start']))}–{fmt_time(c['end'])}  "
                      f"{c['what']}  ({src})")
+        if c.get("includes"):
+            lines.append("    In this shot: " + "; ".join(c["includes"]))
         if c["kind"] == "music" and c.get("suno_prompt"):
             lines.append(f"    Suno wording: {c['suno_prompt']}  (about "
                          f"{c['end'] - c['start']:.0f} seconds; the version made here is a "

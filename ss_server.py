@@ -28,7 +28,8 @@ KIND_NAMES = {"ambience": "Background", "footsteps": "Footsteps", "action": "Act
               "impact": "Bump / hit", "whoosh": "Whoosh", "animal": "Animal",
               "nature": "Nature", "weather": "Weather", "water": "Water",
               "vehicle": "Vehicle", "household": "Household", "magic": "Magic",
-              "cartoon": "Cartoon", "crowd": "Crowd", "music": "Music", "other": "Other"}
+              "cartoon": "Cartoon", "crowd": "Crowd", "music": "Music", "other": "Other",
+              "shot": "Shot sounds"}
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +173,9 @@ def cue_view(c):
             "note": c.get("note", ""), "credit": c.get("credit", ""),
             "volume": c.get("gain_extra", 0), "added": bool(c.get("added_by_check")),
             # the judge wasn't sure this one sounds like its description: worth a listen
-            "unsure": bool(c.get("file")) and c.get("match") is not None and c["match"] < 0.16}
+            "unsure": c.get("kind") != "shot" and bool(c.get("file")) and
+            c.get("match") is not None and c["match"] < 0.16,
+            "frame": round(1.0 / float((S.st or {}).get("fps") or 24.0), 4)}
 
 
 def review_view():
@@ -412,6 +415,7 @@ def api(name, a):
         e = E.estimate(S.st, choices(a), gpu_gb=a.get("gpu"))
         total = e["prepare"] + e["plan"] + e["sounds"] + e["finish"]
         return {"text": E.nice_minutes(total), "sounds": e["n"], "busy_gpu": e["busy_gpu"],
+                "shots": e.get("shots"),
                 "cost": round(e["cost"], 2) if "cost" in e else None}
     if name == "save_settings":
         for k in ("busy", "add_music", "use_local", "use_freesound", "best_of", "sound_source"):

@@ -491,8 +491,8 @@ async function setupSounds(keepScroll) {
     <div class="card panel">
       <h2>Add sound effects</h2>
       <div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"]])}</div>
-      ${H.has_fal_key ? `<div class="opt"><div><label class="t">Who makes the sounds</label><div class="hint">${opts.sound_source === "pc" ? "The sound AI on this PC. Free, but the sounds are rougher." : "Fal watches each clip and makes the sound to match it, so it lands in step with the picture. Uses the credit on your Fal account."}</div></div>${seg("sound_source",[["auto","Fal"],["pc","This PC (free)"]])}</div>` : `<div class="opt"><div><label class="t">Better sounds with Fal</label><div class="hint">Add your Fal key and the sounds are made by Fal instead of this PC: clearer, and in step with the picture.</div></div><div class="swrow"><span class="chip">No key yet</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
-      ${H.has_fal_key && opts.sound_source !== "pc" ? "" : `<div class="opt"><div><label class="t">Quality</label><div class="hint">Best makes 3 versions of each sound and keeps the one that fits.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>`}
+      ${H.has_fal_key ? `<div class="opt"><div><label class="t">Who makes the sounds</label><div class="hint">${opts.sound_source === "pc" ? "The sound AI on this PC. Free, but the sounds are rougher." : "Fal watches each whole shot and makes its sounds while watching, so every sound lands in step with the picture. Uses the credit on your Fal account."}</div></div>${seg("sound_source",[["auto","Fal"],["pc","This PC (free)"]])}</div>` : `<div class="opt"><div><label class="t">Better sounds with Fal</label><div class="hint">Add your Fal key and the sounds are made by Fal instead of this PC: clearer, and in step with the picture.</div></div><div class="swrow"><span class="chip">No key yet</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
+      ${H.has_fal_key && opts.sound_source !== "pc" ? `<div class="opt"><div><label class="t">Versions</label><div class="hint">Best makes 2 versions of each shot's sound and keeps the one that fits. Quick makes 1 and costs half.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>` : `<div class="opt"><div><label class="t">Quality</label><div class="hint">Best makes 3 versions of each sound and keeps the one that fits.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>`}
       <div class="opt"><div><label class="t">Background music</label><div class="hint">For parts with no music. Gives you Suno wording plus a rough version.</div></div><div class="swrow">${sw("add_music")}<span class="sub" style="margin:0">${opts.add_music?"On":"Off: you make music in Suno"}</span></div></div>
       ${H.has_fal_key && opts.sound_source !== "pc" ? "" : `<div class="opt"><div><label class="t">Make sounds on this PC</label><div class="hint">Free. Watches each moment so sounds line up.</div></div><div class="swrow">${sw("use_local")}</div></div>
       <div class="opt"><div><label class="t">Long natural backgrounds</label><div class="hint">Stable Audio Open: needs a free Hugging Face key (in Settings).</div></div><div class="swrow"><span class="chip ${H.has_hf_key?"good":""}">${H.has_hf_key?"Key added: on":"No key yet"}</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
@@ -504,7 +504,7 @@ async function setupSounds(keepScroll) {
   if (!keepScroll) $("#setup").scrollIntoView({behavior:"smooth"});
   if (H.gpu === undefined) { try { H.gpu = (await api("gpu")).gpu; } catch(e) { H.gpu = 0; } }
   const e = await api("estimate", Object.assign({gpu:H.gpu}, opts));
-  $("#est").innerHTML = `About <b>&nbsp;${e.text.replace("about ","")}&nbsp;</b> for about ${e.sounds} sounds.${e.cost != null ? ` Fal will charge your account about <b>&nbsp;$${e.cost < 1 ? e.cost.toFixed(2) : Math.round(e.cost)}</b>.` : ""}${e.busy_gpu ? ' <span class="chip warn">Graphics card busy: closing Premiere makes it faster</span>' : ""}`;
+  $("#est").innerHTML = `About <b>&nbsp;${e.text.replace("about ","")}&nbsp;</b> ${e.shots ? `for about ${e.shots} shots with sound, plus backgrounds.` : `for about ${e.sounds} sounds.`}${e.cost != null ? ` Fal will charge your account about <b>&nbsp;$${e.cost < 1 ? e.cost.toFixed(2) : Math.round(e.cost)}</b>.` : ""}${e.busy_gpu ? ' <span class="chip warn">Graphics card busy: closing Premiere makes it faster</span>' : ""}`;
 }
 function arrow() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'; }
 async function startSounds() { const j = await api("start_sounds", opts); watchJob(j.job); }
@@ -1020,7 +1020,7 @@ function openMenu(ev, id) {
   ev.stopPropagation(); closeMenu();
   const c = cueById(id), m = document.createElement("div"); m.className = "menu"; m.id = "menu";
   const items = [];
-  if (c.made) items.push(["Watch it with the movie", `watch('${id}')`], ["A bit earlier", `nudge('${id}',-0.1)`], ["A bit later", `nudge('${id}',0.1)`], ["Quieter", `louder('${id}',-3)`], ["Louder", `louder('${id}',3)`], ["-"]);
+  if (c.made) items.push(["Watch it with the movie", `watch('${id}')`], ["1 frame earlier", `nudge('${id}',-${c.frame || 0.0417})`], ["1 frame later", `nudge('${id}',${c.frame || 0.0417})`], ["A bit earlier (0.1 s)", `nudge('${id}',-0.1)`], ["A bit later (0.1 s)", `nudge('${id}',0.1)`], ["Quieter", `louder('${id}',-3)`], ["Louder", `louder('${id}',3)`], ["-"]);
   items.push(["Try a different one", `remake('${id}')`], ["Change it in my words…", `changeIt('${id}')`], ["-"], [c.suno ? "Copy Suno wording" : "Copy Adobe wording", `copyWording('${id}')`]);
   m.innerHTML = items.map(([t, f]) => t === "-" ? "<hr>" : `<button onclick="closeMenu();${f}">${t}</button>`).join("");
   document.body.appendChild(m);
@@ -1030,7 +1030,7 @@ function openMenu(ev, id) {
 }
 function closeMenu() { const m = $("#menu"); if (m) m.remove(); }
 async function watch(id) { toast("Making a little preview…"); const j = await api("watch", {id}); modal(`<h2>${esc(cueById(id).what)}</h2><video src="${j.video}" controls autoplay></video><div class="footerbar"><span></span><button class="btn" onclick="closeModal()">Close</button></div>`); }
-async function nudge(id, by) { const j = await api("nudge", {id, by}); Object.assign(cueById(id), j.cue); renderReview(); toast(by < 0 ? "Moved 0.1 s earlier" : "Moved 0.1 s later"); }
+async function nudge(id, by) { const j = await api("nudge", {id, by}); Object.assign(cueById(id), j.cue); renderReview(); toast(Math.abs(by) < 0.09 ? (by < 0 ? "Moved 1 frame earlier" : "Moved 1 frame later") : (by < 0 ? "Moved 0.1 s earlier" : "Moved 0.1 s later")); }
 async function louder(id, db) { const j = await api("louder", {id, db}); Object.assign(cueById(id), j.cue); toast(db < 0 ? "A bit quieter" : "A bit louder"); }
 async function remake(id) { const j = await api("remake", {id}); watchJob(j.job); }
 function changeIt(id) {
