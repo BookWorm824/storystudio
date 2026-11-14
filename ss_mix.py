@@ -362,7 +362,16 @@ def process(clips, speech, work, out_dir, song_video=False, progress=None, origi
         # a cleaned copy from an earlier run: start again from the original recording
         # (however many runs ago that was), so nothing gets cleaned or lowered twice
         read_src = root_file(src, originals)
-        role = "sfx" if is_storysound_sound(read_src) else role_of(cs)
+        if is_storysound_sound(read_src):
+            # Sounds StoryStudio made are already set the way the sound machine wants them
+            # (and the storyteller may have adjusted them since): they are left exactly as
+            # they are. Levelling them again here turned the backgrounds down a second time
+            # and scattered the effects. A copy that an earlier "fix the audio" did re-level
+            # goes back to the sound as it was made.
+            if os.path.normcase(str(read_src)) != os.path.normcase(str(src)):
+                mapping[src] = str(read_src)
+            continue
+        role = role_of(cs)
         if role == "keep":
             continue
         clean = read_src != src or not already_clean(src)

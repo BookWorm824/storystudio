@@ -295,8 +295,15 @@ def run_sao(jobs, token, progress=None, cancel=None):
 # ---------------------------------------------------------------------------
 # picking the best take
 # ---------------------------------------------------------------------------
-def run_pick(groups, progress=None, cancel=None):
-    """groups: [{prompt, cands, out}]. Copies the best-scoring take of each to out."""
+# how well a sound matches its description, as the judge scores it: a sound scored against
+# a WRONG description lands around 0.0 (three in four under 0.16), a good match 0.3 to 0.7
+REDO_BELOW = 0.16             # the best take is no better than a wrong sound: make it again
+DROP_BELOW = 0.06             # still nothing like it: switched off rather than put in the movie
+
+
+def run_pick(groups, progress=None, cancel=None, scores=None):
+    """groups: [{prompt, cands, out}]. Copies the best-scoring take of each to out. When
+    `scores` (a dict) is given, it is filled with {out: the winning take's match score}."""
     if not groups:
         return {}
     work = Path(groups[0]["out"]).parent
@@ -308,6 +315,9 @@ def run_pick(groups, progress=None, cancel=None):
             done[0] += 1
             if ev.get("flat") is not None:
                 flat[groups[ev["index"]]["out"]] = ev["flat"]
+            got = [s for s in ev.get("scores") or [] if s is not None]
+            if scores is not None and got and not ev.get("error"):
+                scores[groups[ev["index"]]["out"]] = max(got)
             if progress:
                 progress(done[0] / len(groups),
                          f"Listening to each take and keeping the best: {done[0]} of "
@@ -409,6 +419,16 @@ def onset(a, frac=0.12):
         return 0
     idx = np.argmax(env > pk * frac)
     return max(0, int(idx) - int(0.01 * SR))
+
+
+def lead_silence(a, thresh_db=-55.0):
+    """Index where real silence at the start of a sound ends (0 if it starts straight away).
+    Unlike onset(), quiet content before a louder moment is kept."""
+    env = np.abs(a).max(axis=1)
+    nz = np.nonzero(env > 10 ** (thresh_db / 20))[0]
+    if len(nz) == 0:
+        return 0
+    return max(0, int(nz[0]) - int(0.01 * SR))
 
 
 def trim_tail(a, thresh_db=-55.0):

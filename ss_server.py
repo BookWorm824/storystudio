@@ -170,7 +170,9 @@ def cue_view(c):
             "audio": media_url(c.get("file")), "prompt": c.get("sound_prompt", ""),
             "adobe": c.get("adobe_prompt", ""), "suno": c.get("suno_prompt", ""),
             "note": c.get("note", ""), "credit": c.get("credit", ""),
-            "volume": c.get("gain_extra", 0), "added": bool(c.get("added_by_check"))}
+            "volume": c.get("gain_extra", 0), "added": bool(c.get("added_by_check")),
+            # the judge wasn't sure this one sounds like its description: worth a listen
+            "unsure": bool(c.get("file")) and c.get("match") is not None and c["match"] < 0.16}
 
 
 def review_view():

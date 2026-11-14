@@ -304,7 +304,8 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
         try:
             prev = json.loads(sf.read_text(encoding="utf-8-sig"))
             for o, n in (prev.get("audio_map") or {}).items():
-                originals[os.path.normcase(n)] = o
+                if not ss_mix.is_storysound_sound(n):
+                    originals[os.path.normcase(n)] = o
             for n, o in (prev.get("part_files") or {}).items():   # one clip's own file
                 originals[os.path.normcase(n)] = o
         except (OSError, ValueError):
@@ -440,6 +441,10 @@ def _snap(t, cuts, reach):
 # ---------------------------------------------------------------------------
 # 3. make the sounds
 # ---------------------------------------------------------------------------
+NOT_RIGHT = ("The sound AI couldn't make this one sound right, so it's switched off. Play it "
+             "to check, or use “Try a different one”.")
+
+
 def _seed(c):
     return int(hashlib.md5((c["sound_prompt"] + c.get("seed_salt", "")).encode())
                .hexdigest()[:6], 16)
@@ -488,7 +493,11 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     pc_cues, sao_cues = [], []
     for c in cues:
         why_off = c.get("note", "") if not c.get("keep", True) else ""
+        if why_off == NOT_RIGHT:                     # it is about to be made again
+            why_off = ""
         c["file"], c["source"], c["note"] = "", "", why_off
+        c.pop("text_only", None)
+        c.pop("match", None)
         length = c["end"] - c["start"]
         if c["kind"] in BEDS:
             if hf_key:                                     # long natural backgrounds
@@ -546,9 +555,52 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
                "bed": c["kind"] in BEDS}
               for c, js in pc_cues + sao_cues if c.get("_jobs") for j in c["_jobs"]
               if len(j.get("cands") or []) > 1]
-    static = {}
+    static, best = {}, {}
     if groups:
-        static = S.run_pick(groups, lambda f, m: _say(progress, 0.78 + 0.07 * f, m), cancel)
+        static = S.run_pick(groups, lambda f, m: _say(progress, 0.78 + 0.07 * f, m), cancel,
+                            scores=best)
+    # An effect whose best take still sounds nothing like its description is made again from
+    # the description alone. Effects are made against the picture so they land in step with
+    # it, but when the picture barely moves (a still shot, a slow AI clip) the picture wins
+    # and the sound comes out as nothing much: a door that doesn't creak, ice that doesn't
+    # clink. Without the picture the sound AI follows the words.
+    weak = []
+    for c, js in pc_cues:
+        if c["kind"] in BEDS or not c.get("_jobs"):
+            continue
+        got = [best.get(j["out"]) for j in c["_jobs"]]
+        if got and all(g is not None for g in got):
+            c["_match"] = float(np.mean(got))
+            if c["_match"] < S.REDO_BELOW:
+                weak.append(c)
+    if weak and use_pc:
+        _say(progress, 0.85, f"Making {len(weak)} sound(s) again that didn't come out right…")
+        again = []
+        for c in weak:
+            j = _job(c, gen, None, 30, min(S.MAX_GEN, max(1.5, c["end"] - c["start"] + 0.7)),
+                     takes=takes)
+            j["seed"] += 500
+            again.append((c, j))
+        flat3 = [j for _, j in again]
+        errs3 = S.run_local(flat3, lambda f, m: _say(
+            progress, 0.85, f"Making sounds again that didn't come out right: "
+                            f"{int(round(f * len(flat3)))} of {len(flat3)}"), cancel)
+        bad3 = {flat3[i]["out"] for i in errs3}
+        best3 = {}
+        g3 = [{"prompt": c["sound_prompt"], "cands": j["cands"], "out": j["out"], "bed": False}
+              for c, j in again if j["out"] not in bad3 and len(j["cands"]) > 1]
+        if g3:
+            S.run_pick(g3, None, cancel, scores=best3)
+        for c, j in again:
+            s = best3.get(j["out"])
+            if s is not None and s > c["_match"] and Path(j["out"]).exists():
+                c["_jobs"], c["_match"], c["text_only"] = [j], s, True
+    for c, js in pc_cues:
+        if "_match" in c:
+            m = c.pop("_match")
+            c["match"] = round(m, 3)
+            if m < S.DROP_BELOW:                     # nothing like it: better left out
+                c["keep"], c["note"] = False, NOT_RIGHT
     # background pieces that came out as static are left out (no background beats hash);
     # a background with no good piece left gets one more try with fresh pieces
     retry = []
@@ -673,6 +725,10 @@ def _shape(st, c, sounds, motion, mfps):
                 a = np.concatenate([a, p])
         if c["kind"] in BEDS:
             a, place = _bed(st, c, a)
+        elif c.get("text_only"):                  # made from the words: starts at its moment
+            a = a[S.lead_silence(a):]
+            a = S.fades(S.trim_tail(a[: int((length + 1.0) * S.SR)]), 0.005, 0.12)
+            place = c["start"]
         else:
             place = c["_jobs"][0]["at"]               # made against the picture: in sync
             a = S.fades(S.trim_tail(a), 0.005, 0.12)
