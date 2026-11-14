@@ -66,10 +66,17 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
         else:
             seconds, n_shots = d * 0.7, max(4, round(d / 6))
         versions = 2 if int(settings.get("best_of", 3)) > 1 else 1
-        return {"prepare": prepare, "plan": plan, "sounds": 60 + n_shots * 9.0,
+        cost = ss_fal.estimate(seconds, beds * min(ss_fal.TEXT_MAX, 15.0), samples=versions,
+                               shots=True)
+        try:
+            limit = max(0.0, float(settings.get("fal_limit") or 0))
+        except (TypeError, ValueError):
+            limit = 0.0
+        share = min(1.0, limit / cost) if limit and cost else 1.0
+        return {"prepare": prepare, "plan": plan, "sounds": 60 + n_shots * share * 9.0,
                 "finish": finish, "busy_gpu": False, "n": n_shots + beds, "shots": n_shots,
-                "cost": ss_fal.estimate(seconds, beds * min(ss_fal.TEXT_MAX, 15.0),
-                                        samples=versions, shots=True)}
+                "cost": min(cost, limit) if limit else cost, "full_cost": cost,
+                "limit": limit, "share": share}
     if settings.get("use_local", True):
         spots = n - (beds if settings.get("hf_key") else 0)
         sounds = 45 + spots * 8.0 * takes * slow
@@ -516,6 +523,10 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
 
     if use_fal and ids is None:              # Fal: one sound per shot, made by watching it
         cues = st["cues"] = shot_cues(st)
+        within_limit(st, settings)
+    elif ids is not None:                    # "make the missing": the user chose to spend it
+        for c in cues:
+            c.pop("over_limit", None)
     motion, mfps = M.motion_curve(st["picture"])
     takes = 2 if use_fal else (max(1, int(settings.get("best_of", 3))) if use_pc else 1)
     shot_takes = 2 if int(settings.get("best_of", 3)) > 1 else 1
@@ -535,6 +546,9 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
         if c["kind"] == "shot":
             if not use_fal:                                # shots are made by Fal only
                 c["source"], c["note"] = "adobe", "Add your Fal key in Settings to make this."
+                continue
+            if c.get("over_limit"):
+                c["source"], c["note"] = "adobe", OVER_LIMIT
                 continue
             c["source"] = "fal"
             L = c["end"] - c["start"]
@@ -755,6 +769,72 @@ def shot_cues(st):
     log("sound plan as shots:", len(out), "shots with sounds from", len(effects),
         "planned effects;", len(beds), "backgrounds")
     return cues
+
+
+OVER_LIMIT = ("Left out to stay within your spending limit (the more important shots went "
+              "first). “Make the missing” makes it if you want it after all.")
+# how much each kind of planned sound matters to a viewer, for the spending limit: things
+# you see and expect to hear first, gentle textures last
+WEIGHT = {"impact": 3.0, "footsteps": 3.0, "household": 3.0, "vehicle": 3.0, "animal": 3.0,
+          "cartoon": 2.5, "water": 2.5, "action": 2.0, "magic": 2.0, "crowd": 1.5,
+          "nature": 1.5, "weather": 1.5, "whoosh": 1.0, "other": 1.0}
+
+
+def shot_importance(c, effects):
+    """How much a shot's sound matters: its most important planned sound counts in full,
+    the others a little. Loud/medium sounds count more; wordless voice sounds less."""
+    ws = []
+    for e in effects:
+        if not (min(c["end"], e["end"]) - max(c["start"], e["start"]) > 0):
+            continue
+        w = WEIGHT.get(e.get("kind"), 1.0)
+        if e.get("level") in ("medium", "loud"):
+            w *= 1.5
+        if is_reaction(e):
+            w *= 0.6
+        if e.get("added_by_check"):                  # a sound the story itself mentions
+            w *= 1.3
+        ws.append(w)
+    if not ws:
+        return 0.0
+    ws.sort(reverse=True)
+    return ws[0] + 0.3 * sum(ws[1:])
+
+
+def within_limit(st, settings):
+    """With a spending limit, the most important shots are made until the limit is reached
+    (backgrounds are counted first: they are cheap); the rest are marked over_limit."""
+    try:
+        limit = float(settings.get("fal_limit") or 0)
+    except (TypeError, ValueError):
+        limit = 0.0
+    shots = [c for c in st["cues"] if c["kind"] == "shot"]
+    for c in shots:
+        c.pop("over_limit", None)
+    if limit <= 0 or not shots:
+        return
+    import ss_fal
+    versions = 2 if int(settings.get("best_of", 3)) > 1 else 1
+    beds = sum(min(ss_fal.TEXT_MAX, max(4.0, c["end"] - c["start"]))
+               for c in st["cues"] if c["kind"] in BEDS)
+    left = limit - beds * ss_fal.PRICE[ss_fal.SFX_TEXT]
+    effects = st.get("planned_effects") or []
+    order = sorted(shots, key=lambda c: (-shot_importance(c, effects), c["end"] - c["start"]))
+    spent, made = 0.0, 0
+    for c in order:
+        cost = (c["end"] - c["start"]) * versions * ss_fal.PRICE[ss_fal.SFX_SHOT]
+        if spent + cost <= left:
+            spent += cost
+            made += 1
+        else:
+            c["over_limit"] = True
+    log("spending limit", limit, "->", made, "of", len(shots), "shots")
+    if made == len(shots):                    # the limit was enough for everything
+        st.pop("limit_note", None)
+        return
+    st["limit_note"] = (f"Your spending limit of ${limit:.2f} covered {made} of {len(shots)} "
+                        "shots; the most important ones were made first.")
+    st["notice"] = st["limit_note"]           # shown at the top of the sound list
 
 
 def uses_fal(settings):
@@ -1135,6 +1215,8 @@ def write_list(st, kept, path):
     if st.get("fal_cost"):
         lines += [f"Sounds made with Fal on your account: about ${st['fal_cost']:.2f} (Fal's "
                   "billing page has the exact amount).", ""]
+    if st.get("limit_note"):
+        lines += [st["limit_note"], ""]
     lines += ["Each sound: time, what it is, where it came from, and wording you can paste "
               "into Adobe's sound effect generator.", ""]
     for c in st["cues"]:

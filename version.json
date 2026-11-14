@@ -1,5 +1,5 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -26,5 +26,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "With Fal, sounds are now made shot by shot: Fal watches each whole shot and times every sound in it, so effects line up with the picture. Nudge a sound by one frame in the sound list."
+  "notes": "New on the sound screen: a spending limit for Fal. The most important shots get their sounds first and it stops at your limit."
 }

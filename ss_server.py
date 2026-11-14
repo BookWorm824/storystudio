@@ -336,7 +336,7 @@ def api(name, a):
     if name == "hello":
         return {"settings": {k: S.settings.get(k) for k in (
                     "busy", "add_music", "use_local", "use_freesound", "best_of",
-                    "sound_source")},
+                    "sound_source", "fal_limit")},
                 "has_fs_key": bool(S.settings.get("freesound_key")),
                 "has_hf_key": bool(S.settings.get("hf_key")),
                 "has_fal_key": bool(S.settings.get("fal_key")),
@@ -415,12 +415,19 @@ def api(name, a):
         e = E.estimate(S.st, choices(a), gpu_gb=a.get("gpu"))
         total = e["prepare"] + e["plan"] + e["sounds"] + e["finish"]
         return {"text": E.nice_minutes(total), "sounds": e["n"], "busy_gpu": e["busy_gpu"],
-                "shots": e.get("shots"),
+                "shots": e.get("shots"), "limit": e.get("limit"),
+                "full_cost": round(e["full_cost"], 2) if e.get("full_cost") else None,
+                "share": e.get("share"),
                 "cost": round(e["cost"], 2) if "cost" in e else None}
     if name == "save_settings":
         for k in ("busy", "add_music", "use_local", "use_freesound", "best_of", "sound_source"):
             if k in a:
                 S.settings[k] = a[k]
+        if "fal_limit" in a:
+            try:
+                S.settings["fal_limit"] = max(0.0, round(float(a["fal_limit"] or 0), 2))
+            except (TypeError, ValueError):
+                S.settings["fal_limit"] = 0.0
         for k in ("freesound_key", "hf_key", "fal_key"):
             if a.get(k) is not None and a.get(k) != "":
                 S.settings[k] = a[k].strip()
