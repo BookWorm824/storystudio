@@ -1,5 +1,5 @@
 {
-  "version": "1.6.1",
+  "version": "1.7.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -22,8 +22,9 @@
     "ss_script.py",
     "ss_styles.json",
     "ss_style_pics.json",
+    "ss_fal.py",
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Sounds that come out wrong are made again from their description. Fix the audio no longer changes the sound machine's own sounds."
+  "notes": "New: sound effects made by Fal (add your Fal key in Settings). They are made by watching each clip, so they land in step with the picture. Fewer meaningless little sounds."
 }

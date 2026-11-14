@@ -165,7 +165,7 @@ def cue_view(c):
             "end": fmt_time(c["end"]), "what": c["what"],
             "kind": KIND_NAMES.get(c["kind"], c["kind"]), "kind_id": c["kind"],
             "keep": bool(c.get("keep")), "made": bool(c.get("file")),
-            "source": {"pc": "Made on this PC", "freesound": "Freesound",
+            "source": {"pc": "Made on this PC", "fal": "Made with Fal", "freesound": "Freesound",
                        "adobe": "Not made"}.get(c.get("source", ""), ""),
             "audio": media_url(c.get("file")), "prompt": c.get("sound_prompt", ""),
             "adobe": c.get("adobe_prompt", ""), "suno": c.get("suno_prompt", ""),
@@ -332,9 +332,11 @@ def api(name, a):
     import storysound as E
     if name == "hello":
         return {"settings": {k: S.settings.get(k) for k in (
-                    "busy", "add_music", "use_local", "use_freesound", "best_of")},
+                    "busy", "add_music", "use_local", "use_freesound", "best_of",
+                    "sound_source")},
                 "has_fs_key": bool(S.settings.get("freesound_key")),
                 "has_hf_key": bool(S.settings.get("hf_key")),
+                "has_fal_key": bool(S.settings.get("fal_key")),
                 "recent": [{"path": p, "name": Path(p).stem, "folder": Path(p).parent.name}
                            for p in S.settings.get("recent", []) if os.path.exists(p)],
                 "project": project_view(), "ai": ai_view(), "needs": missing_tools(),
@@ -409,12 +411,13 @@ def api(name, a):
             return {}
         e = E.estimate(S.st, choices(a), gpu_gb=a.get("gpu"))
         total = e["prepare"] + e["plan"] + e["sounds"] + e["finish"]
-        return {"text": E.nice_minutes(total), "sounds": e["n"], "busy_gpu": e["busy_gpu"]}
+        return {"text": E.nice_minutes(total), "sounds": e["n"], "busy_gpu": e["busy_gpu"],
+                "cost": round(e["cost"], 2) if "cost" in e else None}
     if name == "save_settings":
-        for k in ("busy", "add_music", "use_local", "use_freesound", "best_of"):
+        for k in ("busy", "add_music", "use_local", "use_freesound", "best_of", "sound_source"):
             if k in a:
                 S.settings[k] = a[k]
-        for k in ("freesound_key", "hf_key"):
+        for k in ("freesound_key", "hf_key", "fal_key"):
             if a.get(k) is not None and a.get(k) != "":
                 S.settings[k] = a[k].strip()
         core.save_settings(S.settings)

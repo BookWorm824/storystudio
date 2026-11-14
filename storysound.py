@@ -56,6 +56,13 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
     gpu = gpu_free_gb() if gpu_gb is None else gpu_gb
     slow = 1.0 if gpu >= 7.0 else (2.0 if gpu >= 3.8 else 6.0)
     sounds = 0.0
+    finish = 15 + d * 0.2
+    if uses_fal(settings):                   # made by Fal: a few at a time, no graphics card
+        import ss_fal
+        spots = max(0, n - beds)
+        return {"prepare": prepare, "plan": plan, "sounds": 40 + n * 6.0, "finish": finish,
+                "busy_gpu": False, "n": n,
+                "cost": ss_fal.estimate(spots * 3.7, beds * min(ss_fal.TEXT_MAX, 15.0))}
     if settings.get("use_local", True):
         spots = n - (beds if settings.get("hf_key") else 0)
         sounds = 45 + spots * 8.0 * takes * slow
@@ -65,7 +72,6 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
             sounds += 25 + n * 0.6
     else:
         sounds = n * 3.0
-    finish = 15 + d * 0.2
     return {"prepare": prepare, "plan": plan, "sounds": sounds, "finish": finish,
             "busy_gpu": slow > 1.0, "n": n}
 
@@ -480,15 +486,32 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     cues = [c for c in st["cues"] if ids is None or c["id"] in ids]
     use_pc = settings.get("use_local", True) and S.local_ready()
     fs_key = settings.get("freesound_key", "").strip() if settings.get("use_freesound") else ""
-    if not use_pc and not fs_key:
+    # Fal (the storyteller's own account) makes every sound when its key is in Settings:
+    # effects by watching the clip, so they land in step; backgrounds from a description
+    fal_key = uses_fal(settings)
+    use_fal = bool(fal_key)
+    make_here = use_pc or use_fal
+    if not make_here and not fs_key:
         for c in cues:
             c.update(source="adobe", file="")
         save(st)
         return st
+    src = "fal" if use_fal else "pc"
+    spent = [0.0]
+
+    def run_ai(jobs, prog=None):
+        if use_fal:
+            import ss_fal
+            errs, used = ss_fal.run_jobs(jobs, fal_key, prog, cancel)
+            spent[0] += used["cost"]
+            return errs
+        return S.run_local(jobs, prog, cancel)
 
     motion, mfps = M.motion_curve(st["picture"])
-    takes = max(1, int(settings.get("best_of", 3))) if use_pc else 1
-    hf_key = (settings.get("hf_key") or "").strip() if use_pc else ""
+    takes = 2 if use_fal else (max(1, int(settings.get("best_of", 3))) if use_pc else 1)
+    hf_key = (settings.get("hf_key") or "").strip() if use_pc and not use_fal else ""
+    if ids is None:
+        st["fal_cost"] = 0.0
     # plan where each sound comes from
     pc_cues, sao_cues = [], []
     for c in cues:
@@ -500,7 +523,10 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
         c.pop("match", None)
         length = c["end"] - c["start"]
         if c["kind"] in BEDS:
-            if hf_key:                                     # long natural backgrounds
+            if use_fal:                                    # one smooth loop, from its words
+                c["source"] = "fal"
+                pc_cues.append((c, _bed_jobs(c, gen, length, takes, fal=True)))
+            elif hf_key:                                   # long natural backgrounds
                 c["source"] = "pc"
                 sao_cues.append((c, [_job(c, gen, None, 0, min(S.SAO_MAX, max(8, length)),
                                           takes=takes)]))
@@ -509,8 +535,8 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             elif use_pc:
                 c["source"] = "pc"
                 pc_cues.append((c, _bed_jobs(c, gen, length, takes)))
-        elif use_pc:
-            c["source"] = "pc"
+        elif make_here:
+            c["source"] = src
             jobs, t, k = [], max(0.0, c["start"] - 0.3), 0
             end = min(st["duration"], c["end"] + 0.4)
             while t < end - 0.2 and k < 6:                # long actions: several pieces
@@ -540,16 +566,17 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     # run the PC jobs in one go (the model loads once)
     flat = [j for _, js in pc_cues for j in js]
     if flat:
-        errs = S.run_local(flat, lambda f, m: _say(progress, 0.23 + 0.55 * f, m), cancel)
+        errs = run_ai(flat, lambda f, m: _say(progress, 0.23 + 0.55 * f, m))
         bad = {flat[i]["out"] for i in errs}
         for c, js in pc_cues:
             ok = [j for j in js if j["out"] not in bad]
             if not ok or (c["kind"] not in BEDS and len(ok) < len(js)):
-                c["source"] = "freesound" if fs_key else "adobe"
-                c["note"] = "The PC sound AI couldn't make this one."
+                c["source"] = "freesound" if fs_key and not use_fal else "adobe"
+                c["note"] = ("Fal couldn't make this one." if use_fal else
+                             "The PC sound AI couldn't make this one.")
             else:
                 c["_jobs"] = ok                       # a background can do without a piece
-                c["engine"] = "mmaudio"
+                c["engine"] = "fal" if use_fal else "mmaudio"
     # best of several takes: a judge AI keeps the take that best matches the description
     groups = [{"prompt": c["sound_prompt"], "cands": j["cands"], "out": j["out"],
                "bed": c["kind"] in BEDS}
@@ -573,7 +600,7 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             c["_match"] = float(np.mean(got))
             if c["_match"] < S.REDO_BELOW:
                 weak.append(c)
-    if weak and use_pc:
+    if weak and make_here:
         _say(progress, 0.85, f"Making {len(weak)} sound(s) again that didn't come out right…")
         again = []
         for c in weak:
@@ -582,9 +609,9 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             j["seed"] += 500
             again.append((c, j))
         flat3 = [j for _, j in again]
-        errs3 = S.run_local(flat3, lambda f, m: _say(
+        errs3 = run_ai(flat3, lambda f, m: _say(
             progress, 0.85, f"Making sounds again that didn't come out right: "
-                            f"{int(round(f * len(flat3)))} of {len(flat3)}"), cancel)
+                            f"{int(round(f * len(flat3)))} of {len(flat3)}"))
         bad3 = {flat3[i]["out"] for i in errs3}
         best3 = {}
         g3 = [{"prompt": c["sound_prompt"], "cands": j["cands"], "out": j["out"], "bed": False}
@@ -612,11 +639,12 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             else:
                 c.pop("_jobs", None)
                 retry.append(c)
-    if retry and use_pc:
+    if retry and make_here:
         _say(progress, 0.86, f"Remaking {len(retry)} background(s) that came out as static…")
-        again = [(c, _bed_jobs(c, gen, c["end"] - c["start"], takes, first=20)) for c in retry]
+        again = [(c, _bed_jobs(c, gen, c["end"] - c["start"], takes, first=20, fal=use_fal))
+                 for c in retry]
         flat2 = [j for _, js in again for j in js]
-        errs2 = S.run_local(flat2, None, cancel)
+        errs2 = run_ai(flat2)
         bad2 = {flat2[i]["out"] for i in errs2}
         groups2 = [{"prompt": c["sound_prompt"], "cands": j["cands"], "out": j["out"],
                     "bed": True} for c, js in again for j in js
@@ -630,7 +658,7 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             good = [j for j in js if j["out"] not in bad2 and Path(j["out"]).exists()
                     and static2.get(j["out"], 0.0) <= 0.3]
             if good:
-                c["_jobs"], c["engine"] = good, "mmaudio"
+                c["_jobs"], c["engine"] = good, ("fal" if use_fal else "mmaudio")
     for c in retry:
         if not c.get("_jobs"):
             c["source"], c["note"] = "adobe", ("Came out sounding like static, so it was left "
@@ -674,6 +702,8 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
         c.pop("_jobs", None)
         c.pop("_fs", None)
     st["stage"] = "sounds"
+    if use_fal:
+        st["fal_cost"] = round(float(st.get("fal_cost") or 0.0) + spent[0], 2)
     save(st)
     _say(progress, 1.0, "All sounds are ready to review.")
     return st
@@ -688,10 +718,24 @@ def _job(c, gen, video, k, length, at=None, takes=1):
             "seed": _seed(c) + k, "at": at if at is not None else c["start"]}
 
 
-def _bed_jobs(c, gen, length, takes, first=0):
+def uses_fal(settings):
+    """The Fal key, when Fal is to make the sounds (a key is saved and it isn't switched
+    off); "" otherwise."""
+    if settings.get("sound_source", "auto") == "pc":
+        return ""
+    return str(settings.get("fal_key") or "").strip()
+
+
+def _bed_jobs(c, gen, length, takes, first=0, fal=False):
     """A long background is made from several different pieces (different seeds) joined
     with long crossfades, so it doesn't audibly repeat the same few seconds over and over.
-    Pieces get fewer takes each to keep the time down."""
+    Pieces get fewer takes each to keep the time down. With Fal it is one piece that is
+    made to loop smoothly."""
+    if fal:
+        import ss_fal
+        j = _job(c, gen, None, first, min(ss_fal.TEXT_MAX, max(4, length)), takes=1)
+        j["loop"] = True
+        return [j]
     n = max(1, min(6, math.ceil(length / S.MAX_GEN)))
     t = takes if n == 1 else max(1, min(2, takes))
     return [_job(c, gen, None, first + k, min(S.MAX_GEN, max(4, length)), takes=t)
@@ -700,7 +744,7 @@ def _bed_jobs(c, gen, length, takes, first=0):
 
 def _shape(st, c, sounds, motion, mfps):
     length = c["end"] - c["start"]
-    if c["source"] == "pc" and c.get("_jobs"):
+    if c["source"] in ("pc", "fal") and c.get("_jobs"):
         bed = c["kind"] in BEDS
         parts = [S.load48(j["out"]) for j in c["_jobs"]]
         parts = [p for p in parts if len(p) > S.SR // 20]   # a piece that didn't come out
@@ -1047,12 +1091,15 @@ def write_list(st, kept, path):
         lines += [st["plan_notes"], ""]
     if st.get("levels"):
         lines += ["Volume:"] + [f"  • {x}" for x in st["levels"]] + [""]
+    if st.get("fal_cost"):
+        lines += [f"Sounds made with Fal on your account: about ${st['fal_cost']:.2f} (Fal's "
+                  "billing page has the exact amount).", ""]
     lines += ["Each sound: time, what it is, where it came from, and wording you can paste "
               "into Adobe's sound effect generator.", ""]
     for c in st["cues"]:
         mark = "✓" if c in kept else "–"
-        src = {"pc": "made on this PC", "freesound": "Freesound", "adobe": "not made yet"
-               }.get(c.get("source"), "")
+        src = {"pc": "made on this PC", "fal": "made with Fal", "freesound": "Freesound",
+               "adobe": "not made yet"}.get(c.get("source"), "")
         lines.append(f"{mark} {fmt_time(c.get('place_at', c['start']))}–{fmt_time(c['end'])}  "
                      f"{c['what']}  ({src})")
         if c["kind"] == "music" and c.get("suno_prompt"):

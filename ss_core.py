@@ -62,6 +62,8 @@ DEFAULTS = {
     "add_music": False,        # the user makes music in Suno; StoryStudio only on request
     "best_of": 3,              # takes per sound; a judge AI keeps the best one
     "hf_key": "",              # Hugging Face key: Stable Audio Open for backgrounds
+    "fal_key": "",             # Fal.ai key: sounds made by Fal on the user's own account
+    "sound_source": "auto",    # auto (Fal when its key is saved) / pc (always this PC)
     "style": "auto",           # auto / cartoon / realistic
     "loudness_target": -14.0,  # YouTube
     "last_folder": "",

@@ -238,9 +238,15 @@ knock, a car arriving, rain starting, a horse calling for her foal. Animal chara
 their voices at the moments they react (calls, whinnies, nickers, bleats, barks), and people \
 get wordless reactions where the story has them (a soft chuckle, a happy laugh, a gasp, a \
 sigh).
-- FILL THE MOVIE. There should be no dead air: every moment has its place's background, and \
-foley carries on through the narration too (kept soft under the voice), not only in the gaps. \
-Wordless reactions (laughs, chuckles, sighs, gasps) sound best in the small gaps between lines.
+- NO DEAD AIR, BUT EVERY SOUND EARNS ITS PLACE. Every moment has its place's background. On \
+top of that, add an effect only where a viewer would expect to hear something and would \
+recognise it: a door, footsteps, a vehicle, an animal, water, dishes, a pencil writing, a trunk \
+opening, something put down or dropped, a hug or a pat that is the point of the shot. Do NOT add \
+sounds for small movements that make no real sound: hands gesturing, a sleeve or sweater \
+shifting, someone leaning, turning, swallowing or breathing, a photo being held. Those come out \
+as meaningless noise and make the story worse. Effects carry on through the narration too (kept \
+soft under the voice). Wordless reactions (a laugh, a chuckle, a gasp) only where the story or \
+the picture clearly has one, in the small gaps between lines.
 - Match the look: cartoon/animated pictures get lighter, playful, slightly exaggerated sounds \
 (boing, swish, pop) but still natural, never silly over a serious moment; realistic pictures \
 get natural sounds.
@@ -276,7 +282,9 @@ BUSY = {
     "normal": "Normal amount: ambience for each place plus the clearly visible actions (roughly "
               "one spot effect every 5-10 seconds where there is action).",
     "lots": "Make it rich, like a feature film: ambience, and foley for nearly every visible "
-            "movement and action, all the way through (soft under the narration).",
+            "action that really makes a sound, all the way through (soft under the "
+            "narration). Rich means more of the sounds that belong, never noise for its own "
+            "sake.",
 }
 
 

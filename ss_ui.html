@@ -491,10 +491,11 @@ async function setupSounds(keepScroll) {
     <div class="card panel">
       <h2>Add sound effects</h2>
       <div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"]])}</div>
-      <div class="opt"><div><label class="t">Quality</label><div class="hint">Best makes 3 versions of each sound and keeps the one that fits.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>
+      ${H.has_fal_key ? `<div class="opt"><div><label class="t">Who makes the sounds</label><div class="hint">${opts.sound_source === "pc" ? "The sound AI on this PC. Free, but the sounds are rougher." : "Fal watches each clip and makes the sound to match it, so it lands in step with the picture. Uses the credit on your Fal account."}</div></div>${seg("sound_source",[["auto","Fal"],["pc","This PC (free)"]])}</div>` : `<div class="opt"><div><label class="t">Better sounds with Fal</label><div class="hint">Add your Fal key and the sounds are made by Fal instead of this PC: clearer, and in step with the picture.</div></div><div class="swrow"><span class="chip">No key yet</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
+      ${H.has_fal_key && opts.sound_source !== "pc" ? "" : `<div class="opt"><div><label class="t">Quality</label><div class="hint">Best makes 3 versions of each sound and keeps the one that fits.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>`}
       <div class="opt"><div><label class="t">Background music</label><div class="hint">For parts with no music. Gives you Suno wording plus a rough version.</div></div><div class="swrow">${sw("add_music")}<span class="sub" style="margin:0">${opts.add_music?"On":"Off: you make music in Suno"}</span></div></div>
-      <div class="opt"><div><label class="t">Make sounds on this PC</label><div class="hint">Free. Watches each moment so sounds line up.</div></div><div class="swrow">${sw("use_local")}</div></div>
-      <div class="opt"><div><label class="t">Long natural backgrounds</label><div class="hint">Stable Audio Open: needs a free Hugging Face key (in Settings).</div></div><div class="swrow"><span class="chip ${H.has_hf_key?"good":""}">${H.has_hf_key?"Key added: on":"No key yet"}</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>
+      ${H.has_fal_key && opts.sound_source !== "pc" ? "" : `<div class="opt"><div><label class="t">Make sounds on this PC</label><div class="hint">Free. Watches each moment so sounds line up.</div></div><div class="swrow">${sw("use_local")}</div></div>
+      <div class="opt"><div><label class="t">Long natural backgrounds</label><div class="hint">Stable Audio Open: needs a free Hugging Face key (in Settings).</div></div><div class="swrow"><span class="chip ${H.has_hf_key?"good":""}">${H.has_hf_key?"Key added: on":"No key yet"}</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
       <div class="footerbar">
         <div class="est" id="est">Working out the time…</div>
         <button class="btn primary big" onclick="startSounds()">Find sounds ${arrow()}</button>
@@ -503,7 +504,7 @@ async function setupSounds(keepScroll) {
   if (!keepScroll) $("#setup").scrollIntoView({behavior:"smooth"});
   if (H.gpu === undefined) { try { H.gpu = (await api("gpu")).gpu; } catch(e) { H.gpu = 0; } }
   const e = await api("estimate", Object.assign({gpu:H.gpu}, opts));
-  $("#est").innerHTML = `About <b>&nbsp;${e.text.replace("about ","")}&nbsp;</b> for about ${e.sounds} sounds.${e.busy_gpu ? ' <span class="chip warn">Graphics card busy: closing Premiere makes it faster</span>' : ""}`;
+  $("#est").innerHTML = `About <b>&nbsp;${e.text.replace("about ","")}&nbsp;</b> for about ${e.sounds} sounds.${e.cost != null ? ` Fal will charge your account about <b>&nbsp;$${e.cost < 1 ? e.cost.toFixed(2) : Math.round(e.cost)}</b>.` : ""}${e.busy_gpu ? ' <span class="chip warn">Graphics card busy: closing Premiere makes it faster</span>' : ""}`;
 }
 function arrow() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'; }
 async function startSounds() { const j = await api("start_sounds", opts); watchJob(j.job); }
@@ -1099,6 +1100,9 @@ async function openSettings() {
   modal(`<h2>Settings</h2>
     <div id="aibox" class="card" style="padding:16px;margin-bottom:18px"><b>Your AI helper</b><div class="sub" style="margin:6px 0 0">Checking for Claude and ChatGPT…</div></div>
     <p class="sub">Keys are kept on this computer only.</p>
+    <label>Fal key, for better sound effects ${H.has_fal_key ? '<span class="chip good">saved</span>' : ""}</label>
+    <input type="password" id="falk" autocomplete="off" placeholder="${H.has_fal_key ? "Leave empty to keep the saved key" : "Paste your Fal key"}">
+    <div class="sub" style="margin-top:-8px;margin-bottom:16px">With this, sound effects are made by Fal instead of the sound AI on this PC: clearer, and made by watching each clip so they land in step with the picture. Fal charges your own Fal account, a few dollars for a story with lots of sounds. To get a key: sign in at fal.ai, open Keys, press “Add key” and copy it.</div>
     <label>Hugging Face key, for Stable Audio Open backgrounds ${H.has_hf_key ? '<span class="chip good">saved</span>' : ""}</label>
     <input type="text" id="hfk" placeholder="${H.has_hf_key ? "Leave empty to keep the saved key" : "Paste your key"}">
     <div class="sub" style="margin-top:-8px">How to get one: make a free account at huggingface.co, open <a href="https://huggingface.co/stabilityai/stable-audio-open-1.0" target="_blank">stable-audio-open-1.0</a> and click “Agree and access repository”, then create a “Read” token at huggingface.co/settings/tokens and paste it here.</div>
@@ -1148,8 +1152,8 @@ async function aiChoose(v) { const j = await api("ai_choose", {choice:v}); drawA
 async function aiSignIn() { await api("ai_sign_in_chatgpt"); toast("A sign-in window opened. Sign in there, then come back here.", false); setTimeout(async () => drawAi((await api("ai_status")).ai), 20000); }
 async function aiInstall() { closeModal(); const j = await api("ai_install_chatgpt"); watchJob(j.job); }
 async function saveKeys() {
-  const hf = $("#hfk").value.trim(), fs = $("#fsk").value.trim();
-  await api("save_settings", {hf_key:hf, freesound_key:fs, use_freesound: fs ? true : undefined});
+  const hf = $("#hfk").value.trim(), fs = $("#fsk").value.trim(), fal = $("#falk").value.trim();
+  await api("save_settings", {hf_key:hf, freesound_key:fs, fal_key:fal, use_freesound: fs ? true : undefined});
   closeModal(); toast("Saved"); H = await api("hello");
 }
 
