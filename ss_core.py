@@ -65,6 +65,8 @@ DEFAULTS = {
     "fal_key": "",             # Fal.ai key: sounds made by Fal on the user's own account
     "sound_source": "auto",    # auto (Fal when its key is saved) / pc (always this PC)
     "fal_limit": 0,            # most dollars to spend on Fal per run (0 = no limit)
+    "karaoke_rows": 2,         # lyrics on 2 lines (classic) or 1 (keeps the picture clear)
+    "karaoke_style": "kids",   # kids (big, bold, gold) / elegant (fine, soft, glowing)
     "style": "auto",           # auto / cartoon / realistic
     "loudness_target": -14.0,  # YouTube
     "last_folder": "",

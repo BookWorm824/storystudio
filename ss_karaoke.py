@@ -246,13 +246,35 @@ def _fill_gaps(lines):
 # ---------------------------------------------------------------------------
 # drawing: classic two-row karaoke; each word fills with colour as it is sung
 # ---------------------------------------------------------------------------
-STYLE = {"base": (255, 255, 255, 255), "fill": (255, 196, 64, 255),
-         "outline": (20, 14, 30, 255), "shadow": (0, 0, 0, 140)}
+STYLES = {
+    # big, bold and gold, with a strong outline: easy for children to follow
+    "kids": {"fonts": ("seguibl.ttf", "segoeuib.ttf", "arialbd.ttf"), "size": 0.085,
+             "min": 0.045, "base": (255, 255, 255, 255), "fill": (255, 196, 64, 255),
+             "outline": (20, 14, 30, 255), "stroke": 14, "min_stroke": 2, "shadow": (0, 0, 0, 140),
+             "blur": 3, "drop": 3, "chars": (24, 16),
+             "rows": {2: ((0.745, 0.875), (0.70, 0.78)), 1: ((0.86,), (0.76,))}},
+    # finer serif letters, smaller and lower; sung words turn bright with a soft gold glow
+    "elegant": {"fonts": ("constan.ttf", "georgia.ttf", "pala.ttf", "times.ttf"),
+                "size": 0.062, "min": 0.034, "base": (255, 255, 255, 115),
+                "fill": (255, 248, 232, 255), "glow": (255, 196, 90, 235), "outline": (0, 0, 0, 80), "stroke": 45, "min_stroke": 1,
+                "shadow": (0, 0, 0, 200), "blur": 6, "drop": 2, "chars": (34, 22),
+                "rows": {2: ((0.80, 0.885), (0.74, 0.80)), 1: ((0.885,), (0.79,))}},
+}
+STYLE = STYLES["kids"]
 
 
-def _font(size):
+def style_of(settings):
+    s = STYLES.get((settings or {}).get("karaoke_style"), STYLES["kids"])
+    try:
+        rows = 1 if int((settings or {}).get("karaoke_rows", 2)) == 1 else 2
+    except (TypeError, ValueError):
+        rows = 2
+    return s, rows
+
+
+def _font(size, names=STYLE["fonts"]):
     from PIL import ImageFont
-    for name in ("seguibl.ttf", "segoeuib.ttf", "arialbd.ttf"):
+    for name in names:
         try:
             return ImageFont.truetype(name, size)
         except OSError:
@@ -260,21 +282,23 @@ def _font(size):
     return ImageFont.load_default()
 
 
-def _line_images(line, W, H):
-    """The line drawn twice (white, and gold), plus where each word sits."""
+def _line_images(line, W, H, style=None):
+    """The line drawn twice (before and while it's sung), plus where each word sits."""
     from PIL import Image, ImageDraw, ImageFilter
-    size = int(min(W, H) * 0.085)                     # big, easy-to-read words
+    S = style or STYLE
+    size = int(min(W, H) * S["size"])
     text = " ".join(w["text"] for w in line["words"])
     while True:
-        font = _font(size)
+        font = _font(size, S["fonts"])
         tw = font.getlength(text)
-        if tw <= W * 0.9 or size <= int(min(W, H) * 0.045):
+        if tw <= W * 0.9 or size <= int(min(W, H) * S["min"]):
             break
         size -= 2
-    stroke = max(2, size // 14)
+    stroke = max(S["min_stroke"], size // S["stroke"])
     asc, desc = font.getmetrics()
-    h = asc + desc + stroke * 2 + 8
-    w_img = int(tw) + stroke * 2 + 8
+    pad = S["blur"] * 2 + (size // 5 if S.get("glow") else 0)
+    h = asc + desc + stroke * 2 + 8 + pad
+    w_img = int(tw) + stroke * 2 + 8 + pad
     xs, x = [], stroke + 4
     for i, wd in enumerate(line["words"]):
         piece = wd["text"] + (" " if i < len(line["words"]) - 1 else "")
@@ -285,13 +309,21 @@ def _line_images(line, W, H):
     for key in ("base", "fill"):
         im = Image.new("RGBA", (w_img, h), (0, 0, 0, 0))
         sh = Image.new("RGBA", (w_img, h), (0, 0, 0, 0))
-        ImageDraw.Draw(sh).text((stroke + 4 + 3, stroke + 3), text, font=font,
-                                fill=STYLE["shadow"], stroke_width=stroke,
-                                stroke_fill=STYLE["shadow"])
-        sh = sh.filter(ImageFilter.GaussianBlur(3))
+        ImageDraw.Draw(sh).text((stroke + 4 + S["drop"], stroke + S["drop"]), text,
+                                font=font, fill=S["shadow"], stroke_width=stroke,
+                                stroke_fill=S["shadow"])
+        sh = sh.filter(ImageFilter.GaussianBlur(S["blur"]))
         im.alpha_composite(sh)
-        ImageDraw.Draw(im).text((stroke + 4, stroke), text, font=font, fill=STYLE[key],
-                                stroke_width=stroke, stroke_fill=STYLE["outline"])
+        if key == "fill" and S.get("glow"):           # a soft golden glow behind sung words
+            gl = Image.new("RGBA", (w_img, h), (0, 0, 0, 0))
+            ImageDraw.Draw(gl).text((stroke + 4, stroke), text, font=font, fill=S["glow"],
+                                    stroke_width=stroke + max(2, size // 20),
+                                    stroke_fill=S["glow"])
+            gl = gl.filter(ImageFilter.GaussianBlur(max(4, size // 9)))
+            im.alpha_composite(gl)
+            im.alpha_composite(gl)
+        ImageDraw.Draw(im).text((stroke + 4, stroke), text, font=font, fill=S[key],
+                                stroke_width=stroke, stroke_fill=S["outline"])
         imgs[key] = im
     return imgs["base"], imgs["fill"], xs
 
@@ -351,14 +383,14 @@ def short_lines(lines, max_chars=24):
 LEAD = 0.5          # seconds each pair of lines shows before its first word is sung
 
 
-def _visibility(lines):
+def _visibility(lines, rows=2):
     """When each line appears and disappears, and which row it uses.
     Lines come in pages of two, read top to bottom like a book: the top line is sung, then
     the bottom one, then both change together. A row only ever holds one line, so words
-    are never drawn on top of words."""
+    are never drawn on top of words. With one row, every line is a page of its own."""
     pages, i, n = [], 0, len(lines)
     while i < n:
-        if i + 1 < n and lines[i + 1]["start"] - lines[i]["end"] < 2.5:
+        if rows == 2 and i + 1 < n and lines[i + 1]["start"] - lines[i]["end"] < 2.5:
             pages.append([i, i + 1])
             i += 2
         else:
@@ -380,17 +412,65 @@ def _visibility(lines):
     return vis
 
 
-def render_overlay(st, out_mov, fps=None, progress=None, cancel=None):
+def _layout(st, settings):
+    W, H = int(st.get("width") or 1920), int(st.get("height") or 1080)
+    S, n_rows = style_of(settings)
+    wide = W >= H
+    rows = tuple(H * y for y in S["rows"][n_rows][0 if wide else 1])
+    return W, H, S, n_rows, rows, S["chars"][0 if wide else 1]
+
+
+def sample(st, settings, out):
+    """One still showing how the lyrics will look (a frame of the movie if there is one)."""
+    from PIL import Image
+    W, H, S, n_rows, rows, chars = _layout(st, settings)
+    bg = None
+    work = Path(st["work"]) if st.get("work") else None
+    pic = next((p for p in (st.get("picture"), st.get("export"),
+                            work and work / "picture.mp4") if p and Path(p).exists()), None)
+    if pic:                                            # a frame of the movie
+        try:
+            t = float(st.get("duration") or 20) * 0.4
+            frame = Path(out).with_suffix(".frame.jpg")
+            run([ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(pic),
+                 "-frames:v", "1", "-vf", f"scale={W}:{H}", str(frame)])
+            bg = Image.open(frame).convert("RGBA")
+        except Exception:
+            bg = None
+    if bg is None and st.get("thumb") and Path(st["thumb"]).exists():   # the project card
+        try:
+            bg = Image.open(st["thumb"]).convert("RGBA").resize((W, H))
+        except Exception:
+            bg = None
+    if bg is None:
+        bg = Image.new("RGBA", (W, H), (38, 52, 84, 255))
+    words = "Twinkle twinkle little star how I wonder what you are".split()
+    lines = []
+    for k, chunk in enumerate((words[:4], words[4:])):
+        ws = [{"text": w, "start": k * 3 + i * 0.5, "end": k * 3 + i * 0.5 + 0.45}
+              for i, w in enumerate(chunk)]
+        lines.append({"words": ws})
+    for row, line in enumerate(lines[:n_rows]):
+        base, fill, xs = _line_images(line, W, H, S)
+        layer = base.copy()
+        if row == 0:                                   # the first line half sung
+            cut = int(xs[1][1])
+            layer.paste(fill.crop((0, 0, cut, fill.height)), (0, 0))
+        bg.alpha_composite(layer, ((W - layer.width) // 2, int(rows[row] - layer.height / 2)))
+    bg.convert("RGB").resize((640, int(640 * H / W))).save(out, quality=85)
+    return str(out)
+
+
+def render_overlay(st, out_mov, fps=None, progress=None, cancel=None, settings=None):
     """A video the length of the movie with a see-through background and the lyrics."""
     from PIL import Image
-    W, H = int(st.get("width") or 1920), int(st.get("height") or 1080)
-    lines = short_lines(st["karaoke"]["lines"], 24 if W >= H else 16)
+    W, H, S, n_rows, rows, chars = _layout(st, settings)
+    lines = short_lines(st["karaoke"]["lines"], chars)
     st["karaoke"]["shown"] = len(lines)
     fps = fps or float(st.get("fps") or 24.0)
     dur = float(st["duration"])
-    imgs = [_line_images(l, W, H) for l in lines]
-    vis = _visibility(lines)
-    rows = (H * 0.745, H * 0.875) if W >= H else (H * 0.70, H * 0.78)
+    imgs = [_line_images(l, W, H, S) for l in lines]
+    vis = _visibility(lines, n_rows)
     n = int(math.ceil(dur * fps))
     cmd = [ffmpeg(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
            f"{W}x{H}", "-r", f"{fps:.6f}", "-i", "-", "-c:v", "qtrle", "-pix_fmt", "argb",
@@ -488,7 +568,8 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     od = E.out_dir(st)
     name = safe_name(st["seq_name"])
     overlay = od / f"{name} - karaoke lyrics.mov"
-    render_overlay(st, overlay, seq["fps"], lambda f, m: say(0.52 + 0.3 * f, m), cancel)
+    render_overlay(st, overlay, seq["fps"], lambda f, m: say(0.52 + 0.3 * f, m), cancel,
+                   settings)
     say(0.83, "Making the preview…")
     preview = od / f"{name} - karaoke (preview).mp4"
     song = Path(st["work"]) / "karaoke" / "song.wav"

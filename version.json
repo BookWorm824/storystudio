@@ -1,5 +1,5 @@
 {
-  "version": "1.9.0",
+  "version": "1.10.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -26,5 +26,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "The sound plan now takes a close look at every shot: each sound is timed to the exact moment, and sounds that don't happen on screen are switched off."
+  "notes": "Karaoke: choose one line or two lines on screen, and a look: For kids (big and gold) or Elegant (fine letters that glow softly). A sample shows how it will look."
 }

@@ -416,13 +416,17 @@ function renderPlan() {
       <div class="sub" style="margin:6px 0 0">You'll check the sounds before they go in; after you press “Put them in my movie”, StoryStudio carries on by itself.</div>`;
     if (id === "fix") body = `<div class="sub" style="margin:0">Cleans and balances everything${PICK.includes("sounds") ? ", including the new sound effects" : ""}.</div>`;
     if (id === "karaoke") body = `<textarea id="plan_lyrics" rows="8" class="sbin" placeholder="Paste the lyrics here…" oninput="H.lyrics=this.value">${esc(keep)}</textarea>
-      <div class="row" style="margin-top:8px"><button class="btn" onclick="planLoadLyrics()">${ICON.folder} Load from a file…</button></div>`;
+      <div class="row" style="margin-top:8px"><button class="btn" onclick="planLoadLyrics()">${ICON.folder} Load from a file…</button></div>
+      <div style="margin-top:10px"><div class="opt"><div><label class="t">Lines on screen</label><div class="hint">One line keeps more of the picture clear.</div></div>${kSeg("karaoke_rows",[[2,"Two lines"],[1,"One line"]],2)}</div>
+      <div class="opt"><div><label class="t">Look</label><div class="hint">For kids: big, bold, gold words. Elegant: finer letters that glow softly as they're sung.</div></div>${kSeg("karaoke_style",[["kids","For kids"],["elegant","Elegant"]],"kids")}</div>
+      <div style="margin-top:10px"><img id="ksample" alt="How the lyrics will look" style="display:block;width:100%;max-width:520px;border-radius:12px;border:1px solid var(--line);min-height:60px;background:var(--bg2)"></div></div>`;
     if (id === "feedback") body = `<div class="opt"><div><label class="t">This is a</label></div>${fbSeg("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"]])}</div>`;
     return `<div class="planstep"><div class="sbn">${i + 1}</div><div style="flex:1;min-width:0"><b>${STEPS[id]}</b>${body ? `<div style="margin-top:8px">${body}</div>` : ""}</div></div>`;
   }).join("");
   $("#setup").innerHTML = `<div class="card panel"><h2>Your plan</h2>${parts}
     <div class="footerbar"><span class="sub" style="margin:0">Each step works on the copy the step before made. Your project isn't changed.</span>
     <button class="btn primary big" onclick="startChain()">Start ${PICK.length} step${PICK.length > 1 ? "s" : ""} ${arrow()}</button></div></div>`;
+  if (PICK.includes("karaoke")) kSample();
 }
 async function planLoadLyrics() { const j = await api("pick_lyrics"); if (j.text) { H.lyrics = j.text; $("#plan_lyrics").value = j.text; } }
 async function startChain() {
@@ -445,7 +449,7 @@ async function runStep() {
   try {
     if (id === "sounds") j = await api("start_sounds", CHAIN.opts);
     if (id === "fix") j = await api("start_fix_audio", CHAIN.opts);
-    if (id === "karaoke") j = await api("start_karaoke", {lyrics: CHAIN.lyrics});
+    if (id === "karaoke") j = await api("start_karaoke", Object.assign({lyrics: CHAIN.lyrics}, kChoices()));
     if (id === "feedback") j = await api("start_feedback", CHAIN.fb);
   } catch (e) { stopChain(); return; }
   watchJob(j.job);
@@ -524,22 +528,36 @@ function setupFix() {
 async function startFix() { const j = await api("start_fix_audio", opts); watchJob(j.job); }
 
 // ---------------------------------------------------------------- setup: karaoke
-function setupKaraoke() {
+function kSeg(key, items, dflt) {
+  const cur = opts[key] == null ? dflt : opts[key];
+  return `<div class="seg">${items.map(([v,t]) => `<button class="${cur==v?"on":""}" onclick="kOpt('${key}',${esc(JSON.stringify(v))})">${t}</button>`).join("")}</div>`;
+}
+function kChoices() { return {karaoke_rows: opts.karaoke_rows || 2, karaoke_style: opts.karaoke_style || "kids"}; }
+function kOpt(k, v) { opts[k] = v; if ($("#lyrics")) { H.lyrics = $("#lyrics").value; setupKaraoke(true); } else renderPlan(); }
+async function kSample() {
+  if (!$("#ksample")) return;
+  try { const j = await api("karaoke_sample", kChoices()); if ($("#ksample")) $("#ksample").src = j.image; } catch (e) {}
+}
+function setupKaraoke(keep) {
   $("#setup").innerHTML = `
     <div class="card panel">
       <h2>Karaoke lyrics</h2>
       <p class="sub" style="margin-bottom:8px">Paste the song's lyrics in the order they're sung. Labels like [Chorus] are fine: a label with nothing under it repeats that section, and [Chorus x2] repeats it twice. Add (x2) at the end of a line that's sung twice. Lines that aren't sung where they're written are left out, and StoryStudio tells you which.</p>
       <textarea id="lyrics" rows="12" style="width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:14px;resize:vertical" placeholder="Paste the lyrics here…">${esc(H.lyrics || "")}</textarea>
+      <div style="margin-top:12px"><div class="opt"><div><label class="t">Lines on screen</label><div class="hint">One line keeps more of the picture clear.</div></div>${kSeg("karaoke_rows",[[2,"Two lines"],[1,"One line"]],2)}</div>
+      <div class="opt"><div><label class="t">Look</label><div class="hint">For kids: big, bold, gold words. Elegant: finer letters that glow softly as they're sung.</div></div>${kSeg("karaoke_style",[["kids","For kids"],["elegant","Elegant"]],"kids")}</div>
+      <div style="margin-top:10px"><img id="ksample" alt="How the lyrics will look" style="display:block;width:100%;max-width:520px;border-radius:12px;border:1px solid var(--line);min-height:60px;background:var(--bg2)"></div></div>
       <div class="footerbar">
         <div class="row"><button class="btn" onclick="loadLyrics()">${ICON.folder} Load from a file…</button>
-        <span class="sub" style="margin:0">Every word lights up in gold as it's sung. You'll get a copy of your project ending in “(karaoke)”.</span></div>
+        <span class="sub" style="margin:0">Every word lights up as it's sung. You'll get a copy of your project ending in “(karaoke)”.</span></div>
         <button class="btn primary big" onclick="startKaraoke()">Make karaoke ${arrow()}</button>
       </div>
     </div>`;
-  $("#setup").scrollIntoView({behavior:"smooth"});
+  if (!keep) $("#setup").scrollIntoView({behavior:"smooth"});
+  kSample();
 }
 async function loadLyrics() { const j = await api("pick_lyrics"); if (j.text) $("#lyrics").value = j.text; }
-async function startKaraoke() { H.lyrics = $("#lyrics").value; const j = await api("start_karaoke", {lyrics: H.lyrics}); watchJob(j.job); }
+async function startKaraoke() { H.lyrics = $("#lyrics").value; const j = await api("start_karaoke", Object.assign({lyrics: H.lyrics}, kChoices())); watchJob(j.job); }
 
 // ---------------------------------------------------------------- setup: edit feedback
 let fbOpts = {kind:"auto", claude:true};
@@ -1062,7 +1080,7 @@ async function runAgain(editLyrics) {
   if (o.mode === "karaoke") {
     H.lyrics = o.lyrics || H.lyrics;
     if (editLyrics || !H.lyrics) { renderHome(); setupKaraoke(); return; }
-    const k = await api("start_karaoke", {lyrics: H.lyrics}); watchJob(k.job); return;
+    const k = await api("start_karaoke", Object.assign({lyrics: H.lyrics}, kChoices())); watchJob(k.job); return;
   }
   renderHome();
   if (o.mode === "audio") setupFix(); else setupSounds();
