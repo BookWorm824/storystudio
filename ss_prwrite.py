@@ -31,6 +31,25 @@ TRACK_TAGS = {"AudioClipTrack", "AudioComponentChain", "AudioFilterComponent",
 AUDIO_ONLY = {".wav", ".mp3", ".aif", ".aiff", ".m4a", ".aac", ".flac", ".ogg"}
 
 
+def _plain_speed(clip):
+    """A copied clip plays at normal speed, forwards: the shot it was copied from may have
+    been sped up, slowed down or reversed in Premiere (no PlaybackSpeed means 100%)."""
+    if clip is None:
+        return
+    for x in list(clip):
+        if x.tag == "PlaybackSpeed" or "backward" in x.tag.lower() or                 "reverse" in x.tag.lower():
+            clip.remove(x)
+
+
+def _speed_of(w, track_item):
+    try:
+        sub = w.get(track_item, "ClipTrackItem/SubClip")
+        clip = w.get(sub, "Clip") if sub is not None else None
+        return abs(float(clip.findtext("Clip/PlaybackSpeed") or 1) - 1) > 1e-6
+    except (TypeError, ValueError, AttributeError):
+        return True
+
+
 def _guid():
     return str(uuid.uuid4())
 
@@ -164,11 +183,12 @@ class Writer:
                 continue                                   # stereo only
             chain = self.get(el, "ClipTrackItem/ComponentOwner/Components")
             plain = chain is not None and chain.findtext("DefaultVol") == "true"
-            best.append((ext != want_ext, ext != ".wav", not plain, el, ext))
+            best.append((ext != want_ext, ext != ".wav", not plain, _speed_of(self, el), el,
+                         ext))
         if not best:
             return None, None
-        best.sort(key=lambda b: b[:3])
-        return best[0][3], best[0][4]
+        best.sort(key=lambda b: b[:4])
+        return best[0][4], best[0][5]
 
     # --- adding --------------------------------------------------------------
     def add_track(self, seq, name=None):
@@ -284,6 +304,7 @@ class Writer:
                     g.text = "1.0"
                 c = el.find("Clip")
                 self.setx(c, "ClipID", _guid())
+                _plain_speed(c)
                 if c.find("OutPoint") is not None:
                     self.setx(c, "OutPoint", D)
                     self.setx(c, "InPoint", 0)
@@ -762,7 +783,8 @@ def _video_group(w, seq):
 
 
 def _video_template(w):
-    """A video-only clip (a shot with no sound) to copy from."""
+    """A video-only clip (a shot with no sound) to copy from, one at normal speed if any."""
+    found = None
     for el in w.root:
         if el.tag != "VideoClipTrackItem":
             continue
@@ -777,8 +799,10 @@ def _video_template(w):
             continue
         path = media.findtext("ActualMediaFilePath") or media.findtext("FilePath") or ""
         if Path(path).suffix.lower() in VIDEO_FILES:
-            return el
-    return None
+            if not _speed_of(w, el):
+                return el                      # a shot at normal speed: best to copy
+            found = found if found is not None else el
+    return found
 
 
 def _set_param(w, comp, name, value):
@@ -879,6 +903,7 @@ def add_overlay(project_path, seq_uid, file_path, start, dur, width, height, fps
         elif t == "VideoClip":
             c = el.find("Clip")
             w.setx(c, "ClipID", _guid())
+            _plain_speed(c)                    # the lyrics must play at 100%, or they drift
             if c.find("OutPoint") is not None:
                 w.setx(c, "OutPoint", D)
                 w.setx(c, "InPoint", 0)
