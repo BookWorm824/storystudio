@@ -1,5 +1,5 @@
 {
-  "version": "1.10.1",
+  "version": "1.10.2",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -26,5 +26,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Fixed: karaoke lyrics drifting in Premiere. The lyrics clip copied a sped-up shot's speed; it now always plays at 100%."
+  "notes": "Fixed: StoryStudio no longer closes by itself while its window is hidden behind Premiere."
 }

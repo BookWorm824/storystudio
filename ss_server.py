@@ -740,8 +740,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.end_headers()
+            self.wfile.write(data)
+        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+            pass                                   # the window went away (closed or reloaded)
 
     def do_GET(self):
         S.last_ping = time.time()
@@ -846,6 +849,38 @@ def find_edge():
     return None
 
 
+def window_open(profile):
+    """Is StoryStudio's window still open? It runs in Edge with StoryStudio's own profile, so
+    any Edge process using that profile means yes (even when Edge has frozen the hidden
+    window and it can't check in). None if this can't be told."""
+    key = f"--user-data-dir={profile}".lower()
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if (p.info.get("name") or "").lower() != "msedge.exe":
+                continue
+            try:
+                if any(key in a.lower() for a in p.cmdline()):
+                    return True
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+        return False
+    except ImportError:
+        pass
+    except Exception:
+        log_error("window check")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
+                            "ForEach-Object { $_.CommandLine }"], capture_output=True,
+                           text=True, timeout=30, **core.NOWIN)
+        if r.returncode == 0:
+            return key in (r.stdout or "").lower()
+    except Exception:
+        pass
+    return None
+
+
 def main():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
@@ -876,11 +911,13 @@ def main():
         webbrowser.open(url)
     opened = time.time()
     log("StoryStudio window at", url)
-    # When does StoryStudio close? When its window is really closed (the Edge window we
-    # opened has exited and stopped checking in), or after the window has been silent for a
-    # long time with nothing running. Edge slows a background window's check-ins to about
-    # once a minute, so a short silence must never close StoryStudio: that left the window
-    # open with nothing behind its buttons.
+    # When does StoryStudio close? When its window is really closed: the Edge window we
+    # opened has exited, or (when Edge handed the window to one already running, or the
+    # window has gone quiet) no Edge process is using StoryStudio's window profile any more.
+    # Silence alone is not enough: Edge slows or freezes a hidden window (while working in
+    # Premiere) for a long time, and closing then left the window open with nothing behind
+    # its buttons. Only after many hours of silence with no way to tell does it give up.
+    checked = 0.0
     tick = time.time()
     while True:
         time.sleep(5)
@@ -897,9 +934,20 @@ def main():
         if window is not None and window.poll() is not None and time.time() - opened <= 20:
             window = None        # Edge handed the window to one already open: can't watch it
         closed = window is not None and window.poll() is not None
-        if not busy and ((closed and quiet > 30) or quiet > 15 * 60):
-            log("StoryStudio closing: window", "closed" if closed else "silent")
+        if busy:
+            continue
+        if closed and quiet > 30:
+            log("StoryStudio closing: window closed")
             break
+        if quiet > 90 and time.time() - checked > 60:
+            checked = time.time()
+            open_now = window_open(profile) if edge else None
+            if open_now is False:
+                log("StoryStudio closing: window closed (no StoryStudio window in Edge)")
+                break
+            if open_now is None and quiet > 8 * 3600:
+                log("StoryStudio closing: window silent for hours")
+                break
     srv.shutdown()
 
 
