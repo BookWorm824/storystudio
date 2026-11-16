@@ -74,7 +74,9 @@ def allowed_media(path):
     project (its folder and the StoryStudio/StorySound output folders)."""
     p = Path(path).resolve()
     roots = [APP_DATA]
-    if S.st:
+    if S.st and S.st.get("video"):
+        roots.append(Path(S.st["video"]).parent)
+    elif S.st:
         proj = Path(S.st["project"]).parent
         roots += [proj / "StoryStudio", proj / "StorySound", proj.parent]
     return any(str(p).lower().startswith(str(r.resolve()).lower()) for r in roots)
@@ -82,7 +84,7 @@ def allowed_media(path):
 
 def project_view():
     st = S.st
-    if not st:
+    if not st or st.get("video"):
         return None
     i = st["info"]
     return {"name": Path(st["project"]).stem, "file": st["project"],
@@ -196,7 +198,8 @@ def outputs_view():
             "levels": (st or {}).get("levels", []), "mode": (st or {}).get("mode", ""),
             "snapshot_time": (st or {}).get("snapshot_time", ""),
             "overlay": out.get("overlay", ""), "lyrics": (st or {}).get("lyrics_text", ""),
-            "source": (st or {}).get("project", ""), "seq_uid": (st or {}).get("seq_uid", "")}
+            "source": (st or {}).get("project", ""), "seq_uid": (st or {}).get("seq_uid", ""),
+            "video_out": out.get("video_out", ""), "video_source": (st or {}).get("video", "")}
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +405,24 @@ def api(name, a):
         S.st["thumb"] = make_thumb(S.st)
         recent_add(str(Path(path).resolve()))
         return {"project": project_view()}
+    if name == "pick_video":
+        import ss_karaoke as K
+        f = native_pick("Choose your video", [("Videos", K.VIDEO_FILES), ("All", "*.*")],
+                        S.settings.get("last_video_folder") or S.settings.get("last_folder"))
+        if not f:
+            return {"video": None}
+        a = {"path": f}
+        name = "open_video"
+    if name == "open_video":
+        import ss_karaoke as K
+        st = K.open_video(a["path"])
+        S.settings["last_video_folder"] = str(Path(a["path"]).parent)
+        core.save_settings(S.settings)
+        S.st = st
+        return {"video": {"name": Path(st["video"]).name, "path": st["video"],
+                          "duration": fmt_time(st["duration"]),
+                          "size": f"{st['width']}×{st['height']}",
+                          "thumb": media_url(st.get("thumb"))}}
     if name == "pick_story":
         f = native_pick("Choose your story or script",
                         [("Story or script", "*.docx *.txt *.md *.rtf *.pdf"), ("All", "*.*")],

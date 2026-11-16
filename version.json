@@ -1,5 +1,5 @@
 {
-  "version": "1.10.2",
+  "version": "1.11.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -26,5 +26,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Fixed: StoryStudio no longer closes by itself while its window is hidden behind Premiere."
+  "notes": "New: karaoke lyrics on a finished video file (MP4), no Premiere project needed. You get a new video ending in (karaoke) next to yours."
 }

@@ -339,13 +339,16 @@ async function setupTools() { const j = await api("setup_tools"); watchJob(j.job
 function renderHome() {
   if (!P) {
     $("#view").innerHTML = readyCard() + `
-      <h1>Welcome back</h1><p class="sub">Open a Premiere project to get started. StoryStudio works on its own copy, so you can keep editing.</p>
+      <h1>Welcome back</h1><p class="sub">Open a Premiere project to get started (StoryStudio works on its own copy, so you can keep editing), or put karaoke lyrics on a finished video.</p>
       <div class="hero">
+        <div style="display:flex;flex-direction:column;gap:12px">
         <button class="drop" onclick="pickProject()">
           ${ICON.folder.replace('<svg','<svg style="width:54px;height:54px;color:var(--accent)"')}
           <h2 style="margin:6px 0 4px">Open a Premiere project</h2>
           <div class="sub" style="margin:0">Choose a .prproj file</div>
         </button>
+        <button class="btn" style="justify-content:center;padding:14px" onclick="pickVideo()">${ICON.mic || ""} Karaoke lyrics on a video file (MP4)</button>
+        </div>
         <div class="card"><button class="btn primary" style="width:100%;justify-content:center;margin-bottom:16px" onclick="openBuilder()">${ICON.film} Plan a new video: script builder</button>${(H.shotlists||[]).length ? `<h2>Your shot lists</h2><div class="pastlist" style="margin-bottom:18px">${H.shotlists.map(r => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots</small></div><button class="btn small" onclick='homeOpenList(${esc(JSON.stringify(r.path))}, this)'>Open</button></div>`).join("")}</div>` : ""}<h2>Recent projects</h2>
           <div class="recent">${(H.recent||[]).map(r => `<button onclick='openProject(${esc(JSON.stringify(r.path))})'><div class="ic">Pr</div><div><div>${esc(r.name)}</div><small>${esc(r.folder)}</small></div></button>`).join("") || '<div class="sub">Projects you open will show up here.</div>'}</div>
         </div>
@@ -478,8 +481,30 @@ async function homeOpenList(path, b) {
   catch (e) { b.disabled = false; b.textContent = "Open"; }
 }
 let picking = false;                  // one file window at a time (a double-click opened two)
-async function pickProject() { if (picking) return; picking = true; try { const j = await api("pick_project"); if (j.project) { P = j.project; renderHome(); } } finally { picking = false; } }
-async function openProject(path) { toast("Opening and saving a copy…"); const j = await api("open_project", {path}); P = j.project; renderHome(); }
+async function pickProject() { if (picking) return; picking = true; try { const j = await api("pick_project"); if (j.project) { VID = null; P = j.project; renderHome(); } } finally { picking = false; } }
+async function openProject(path) { toast("Opening and saving a copy…"); const j = await api("open_project", {path}); VID = null; P = j.project; renderHome(); }
+// ---------------------------------------------------------------- karaoke on a plain video file
+let VID = null;
+async function pickVideo() {
+  if (picking) return; picking = true;
+  try { const j = await api("pick_video"); if (j.video) { VID = j.video; P = null; renderVideoKaraoke(); } }
+  finally { picking = false; }
+}
+function renderVideoKaraoke() {
+  $("#view").innerHTML = readyCard() + `
+    <div class="card project">
+      <div class="thumb" style="${VID.thumb ? `background-image:url('${VID.thumb}')` : ""}"><span class="len">${esc(VID.duration)}</span></div>
+      <div>
+        <div class="row" style="justify-content:space-between;align-items:flex-start">
+          <div><p class="pname">${esc(VID.name)}</p><div class="sub" style="margin:2px 0 0">A video file, ${esc(VID.size)}</div></div>
+          <button class="btn ghost" onclick="pickVideo()">${ICON.folder} Choose another</button>
+        </div>
+        <div class="saved">${ICON.shield}<div>Your video isn't changed. StoryStudio makes a new one next to it, ending in “(karaoke)”, with the lyrics in the picture.</div></div>
+      </div>
+    </div>
+    <div id="setup"></div>`;
+  setupKaraoke();
+}
 async function switchSeq(uid) { const j = await api("open_project", {path:P.file, seq_uid:uid}); P = j.project; renderHome(); }
 async function pickStory() { if (picking) return; picking = true; try { const j = await api("pick_story"); P = j.project; renderHome(); } finally { picking = false; } }
 async function openPrevious() { const j = await api("open_previous"); R = j.review; filter = ""; renderReview(); }
@@ -549,7 +574,7 @@ function setupKaraoke(keep) {
       <div style="margin-top:10px"><img id="ksample" alt="How the lyrics will look" style="display:block;width:100%;max-width:520px;border-radius:12px;border:1px solid var(--line);min-height:60px;background:var(--bg2)"></div></div>
       <div class="footerbar">
         <div class="row"><button class="btn" onclick="loadLyrics()">${ICON.folder} Load from a file…</button>
-        <span class="sub" style="margin:0">Every word lights up as it's sung. You'll get a copy of your project ending in “(karaoke)”.</span></div>
+        <span class="sub" style="margin:0">Every word lights up as it's sung. ${VID ? "You'll get a new video next to yours, ending in “(karaoke)”." : `You'll get a copy of your project ending in “(karaoke)”. <a href="#" onclick="pickVideo();return false">Use a video file instead</a>`}</span></div>
         <button class="btn primary big" onclick="startKaraoke()">Make karaoke ${arrow()}</button>
       </div>
     </div>`;
@@ -1073,7 +1098,13 @@ async function openFile(path, btn, msg) {
   finally { setTimeout(() => { btn.disabled = false; btn.innerHTML = old; }, 1500); }
 }
 async function runAgain(editLyrics) {
-  const o = DONE; if (!o || !o.source) return;
+  const o = DONE; if (!o || !(o.source || o.video_source)) return;
+  if (o.video_source) {                       // lyrics on a plain video file
+    const v = await api("open_video", {path: o.video_source});
+    VID = v.video; P = null; H.lyrics = o.lyrics || H.lyrics;
+    if (editLyrics || !H.lyrics) { renderVideoKaraoke(); return; }
+    const k = await api("start_karaoke", Object.assign({lyrics: H.lyrics}, kChoices())); watchJob(k.job); return;
+  }
   toast("Taking a fresh copy of your project…");
   const j = await api("open_project", {path: o.source, seq_uid: o.seq_uid});
   P = j.project;
@@ -1095,18 +1126,19 @@ async function renderDone() {
       <div class="card">${o.preview ? `<video src="${o.preview}" controls></video>` : ""}</div>
       <div class="card">
         <div class="ok-ring">${ICON.check}</div>
-        <h1>${karaoke ? "Your karaoke lyrics are ready!" : audioMode ? "Your audio is fixed!" : "Your movie has sound effects!"}</h1>
-        <p class="sub">${o.project ? (karaoke ? "A copy of your Premiere project has the lyrics on their own video track at the top, over the whole song. Move it, fade it, or switch the track off any time." : audioMode ? "A copy of your Premiere project has cleaned, balanced audio." : "A copy of your Premiere project has every sound on its own tracks, in a bin called “StoryStudio sounds”.") + " Your original project wasn't changed." : esc(o.project_error)}</p>
+        <h1>${o.video_out ? "Your video with lyrics is ready!" : karaoke ? "Your karaoke lyrics are ready!" : audioMode ? "Your audio is fixed!" : "Your movie has sound effects!"}</h1>
+        <p class="sub">${o.video_out ? `“${esc(o.video_out.split(/[\\/]/).pop())}” is next to your video, with the lyrics in the picture and the song just as it was. Your original video wasn't changed.` : o.project ? (karaoke ? "A copy of your Premiere project has the lyrics on their own video track at the top, over the whole song. Move it, fade it, or switch the track off any time." : audioMode ? "A copy of your Premiere project has cleaned, balanced audio." : "A copy of your Premiere project has every sound on its own tracks, in a bin called “StoryStudio sounds”.") + " Your original project wasn't changed." : esc(o.project_error)}</p>
         ${o.snapshot_time ? `<div class="sub" style="margin-top:-10px">Made from your project as it was at ${esc(o.snapshot_time)}.</div>` : ""}
         <div class="row" style="flex-wrap:wrap;gap:10px">
           ${o.project ? `<button class="btn primary big" onclick='openFile(${esc(JSON.stringify(o.project))}, this, "Opening in Premiere…")'>Open in Premiere</button>` : ""}
+          ${o.video_out ? `<button class="btn primary big" onclick='openFile(${esc(JSON.stringify(o.video_out))}, this)'>Play it</button>` : ""}
           <button class="btn" onclick='openFile(${esc(JSON.stringify(o.folder))}, this)'>${ICON.folder} Open the folder</button>
           ${o.list ? `<button class="btn" onclick='openFile(${esc(JSON.stringify(o.list))}, this)'>${karaoke ? "Lyrics timing" : audioMode ? "Notes" : "Sound list"}</button>` : ""}
         </div>
-        ${o.source ? `<div class="row" style="flex-wrap:wrap;gap:10px;margin-top:14px">
+        ${o.source || o.video_source ? `<div class="row" style="flex-wrap:wrap;gap:10px;margin-top:14px">
           <button class="btn" onclick="runAgain()">↻ Run it again</button>
           ${karaoke ? `<button class="btn ghost" onclick="runAgain(true)">Change the lyrics…</button>` : ""}
-          <span class="sub" style="margin:0">Uses your project as it is now${karaoke ? ", with the same lyrics" : ""}.</span></div>` : ""}
+          <span class="sub" style="margin:0">${o.video_source ? "Uses the same video and lyrics" : `Uses your project as it is now${karaoke ? ", with the same lyrics" : ""}`}.</span></div>` : ""}
         ${o.levels && o.levels.length ? `<ul class="notes">${o.levels.slice(0,6).map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
         <div class="footerbar">${audioMode || karaoke ? "<span></span>" : `<button class="btn ghost" onclick="api('review').then(j=>{R=j.review;renderReview()})">Back to the sounds</button>`}<button class="btn ghost" onclick="goHome()">Home</button></div>
       </div>

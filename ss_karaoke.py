@@ -114,12 +114,47 @@ def parse_lyrics(text):
     return lines
 
 
+VIDEO_FILES = "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv"
+
+
+def open_video(path):
+    """A plain video file (no Premiere project) to put lyrics on."""
+    import storysound as E
+    from ss_core import probe
+    path = str(Path(path).resolve())
+    try:
+        info = probe(path)
+    except Exception:
+        info = {}
+    if not info.get("has_video") or not info.get("duration"):
+        raise StoryError("StoryStudio couldn't read that video. Try an MP4 file.")
+    if not info.get("has_audio"):
+        raise StoryError("That video has no sound, so there's no singing to line the lyrics "
+                         "up with.")
+    work = E.work_dir(path, "video")
+    thumb = work / "thumb.jpg"
+    try:
+        run([ffmpeg(), "-y", "-v", "error", "-ss", f"{info['duration'] * 0.4:.2f}", "-i", path,
+             "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(thumb)])
+    except Exception:
+        thumb = None
+    return {"video": path, "project": "", "seq_name": Path(path).stem, "mode": "karaoke",
+            "duration": float(info["duration"]), "fps": float(info.get("fps") or 30.0),
+            "width": int(info["width"]), "height": int(info["height"]),
+            "picture": path, "work": str(work), "stage": "opened", "cues": [],
+            "thumb": str(thumb) if thumb and thumb.exists() else ""}
+
+
 def song_audio(st, work):
     """The movie's sound (the song) on the timeline, as one wav."""
+    out = Path(work) / "song.wav"
+    if st.get("video"):                      # a plain video file: its own sound
+        from ss_core import extract_audio
+        extract_audio(st["video"], str(out))
+        return str(out)
     import storysound as E
     seq = E._sequence(st)
     clips = st.get("clips") or M.build_stems(seq, work)
-    out = Path(work) / "song.wav"
     M.mix([dict(c, gain_db=c.get("gain_db", 0.0)) for c in clips], seq["duration"], out)
     return str(out)
 
@@ -128,7 +163,8 @@ def time_lyrics(st, lines, progress=None, cancel=None):
     work = Path(st["work"]) / "karaoke"
     work.mkdir(parents=True, exist_ok=True)
     if progress:
-        progress(0.05, "Getting the song from your timeline…")
+        progress(0.05, "Getting the song from your video…" if st.get("video") else
+                 "Getting the song from your timeline…")
     song = song_audio(st, work)
     try:                                   # no sound means the song file wasn't found
         import numpy as _np
@@ -547,6 +583,94 @@ def _fill_x(line, xs, t):
 # ---------------------------------------------------------------------------
 # all of it
 # ---------------------------------------------------------------------------
+def free_name(path):
+    """path, or "name 2.mp4", "name 3.mp4"... when it is open in another program."""
+    p = Path(path)
+    for k in range(1, 50):
+        q = p if k == 1 else p.with_name(f"{p.stem} {k}{p.suffix}")
+        try:
+            if q.exists():
+                with open(q, "ab"):
+                    pass
+            return q
+        except OSError:
+            continue
+    return p
+
+
+def karaoke_video(st, settings, lines, progress=None, cancel=None):
+    """Lyrics on a plain video file: a new MP4 with the lyrics in the picture, next to it."""
+    say = progress or (lambda f, m: None)
+    src = Path(st["video"])
+    time_lyrics(st, lines, lambda f, m: say(0.02 + 0.45 * f, m), cancel)
+    od = src.parent / "StoryStudio"
+    od.mkdir(parents=True, exist_ok=True)
+    name = safe_name(src.stem)
+    overlay = od / f"{name} - karaoke lyrics.mov"
+    render_overlay(st, overlay, st["fps"], lambda f, m: say(0.47 + 0.3 * f, m), cancel,
+                   settings)
+    if cancel and cancel():
+        raise StoryError("Stopped.")
+    final = free_name(src.with_name(f"{src.stem} (karaoke).mp4"))
+    say(0.78, "Putting the lyrics into your video…")
+    proc = subprocess.Popen(
+        [ffmpeg(), "-y", "-v", "error", "-progress", "pipe:1", "-nostats", "-i", str(src),
+         "-i", str(overlay), "-filter_complex",
+         "[0:v][1:v]overlay=0:0:format=auto:eof_action=pass,format=yuv420p[v]",
+         "-map", "[v]", "-map", "0:a:0", "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+         "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(final)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf8",
+        errors="replace", **NOWIN)
+    for line in proc.stdout:
+        if cancel and cancel():
+            proc.kill()
+            raise StoryError("Stopped.")
+        if line.startswith("out_time_us=") and line.strip()[12:].isdigit():
+            t = int(line.strip()[12:]) / 1e6
+            say(0.78 + 0.2 * min(1.0, t / max(1.0, st["duration"])),
+                f"Putting the lyrics into your video: {fmt_time(t)} of "
+                f"{fmt_time(st['duration'])}")
+    err = proc.stderr.read()
+    proc.wait()
+    if proc.returncode != 0 or not final.exists():
+        log("karaoke video encode failed", err[-1500:])
+        raise StoryError("StoryStudio couldn't make the video with lyrics. Check there's room "
+                         "on the drive and that the video isn't open in another program.")
+    out = {"preview": str(final), "folder": str(src.parent), "overlay": str(overlay),
+           "video_out": str(final)}
+    return _finish(st, od, name, out, say)
+
+
+def _finish(st, od, name, out, say):
+    """The notes and the timing list after the lyrics are made."""
+    import storysound as E
+    k = st["karaoke"]
+    st["levels"] = [f"Timed {k['total']} words to the singing."]
+    if k["weak"]:
+        st["levels"].append(f"{k['weak']} word(s) were hard to hear; check them in the preview.")
+    for n in k.get("repeats") or []:
+        st["levels"].append(f"A section of {n} lines (like the chorus) is sung more times than "
+                            "it's written in the lyrics, so StoryStudio added the repeat.")
+    gone = k.get("left_out") or []
+    if gone:
+        st["levels"].append(
+            f"{len(gone)} line(s) didn't seem to be sung where they're written, so they're left "
+            "out instead of showing at the wrong time: " + "; ".join(f"“{t}”" for t in gone[:4])
+            + ("…" if len(gone) > 4 else "") + ". If they are sung, check the lyrics order.")
+    lst = od / f"{name} - lyrics timing.txt"
+    text = "\n".join(f"{fmt_time(l['start'])}  {l['text']}" for l in k["lines"])
+    if gone:
+        text += ("\n\nLeft out (didn't seem to be sung where they're written):\n" +
+                 "\n".join(f"  {t}" for t in gone))
+    lst.write_text(text, encoding="utf8")
+    out["list"] = str(lst)
+    st["outputs"] = out
+    st["stage"] = "karaoke"
+    E.save(st)
+    say(1.0, "Done!")
+    return out
+
+
 def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     import storysound as E
     say = progress or (lambda f, m: None)
@@ -554,6 +678,8 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     if not lines:
         raise StoryError("Please paste the song's lyrics first.")
     st["mode"] = "karaoke"
+    if st.get("video"):
+        return karaoke_video(st, settings, lines, progress, cancel)
     seq = E._sequence(st)
     st.setdefault("width", seq["width"])
     st.setdefault("height", seq["height"])
@@ -598,28 +724,4 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
         out["project_error"] = ("StoryStudio couldn't add the lyrics to the project copy. The "
                                 "lyrics video is in the StoryStudio folder; drag it onto the "
                                 "top video track at the very start.")
-    k = st["karaoke"]
-    st["levels"] = [f"Timed {k['total']} words to the singing."]
-    if k["weak"]:
-        st["levels"].append(f"{k['weak']} word(s) were hard to hear; check them in the preview.")
-    for n in k.get("repeats") or []:
-        st["levels"].append(f"A section of {n} lines (like the chorus) is sung more times than "
-                            "it's written in the lyrics, so StoryStudio added the repeat.")
-    gone = k.get("left_out") or []
-    if gone:
-        st["levels"].append(
-            f"{len(gone)} line(s) didn't seem to be sung where they're written, so they're left "
-            "out instead of showing at the wrong time: " + "; ".join(f"“{t}”" for t in gone[:4])
-            + ("…" if len(gone) > 4 else "") + ". If they are sung, check the lyrics order.")
-    lst = od / f"{name} - lyrics timing.txt"
-    text = "\n".join(f"{fmt_time(l['start'])}  {l['text']}" for l in k["lines"])
-    if gone:
-        text += ("\n\nLeft out (didn't seem to be sung where they're written):\n" +
-                 "\n".join(f"  {t}" for t in gone))
-    lst.write_text(text, encoding="utf8")
-    out["list"] = str(lst)
-    st["outputs"] = out
-    st["stage"] = "karaoke"
-    E.save(st)
-    say(1.0, "Done!")
-    return out
+    return _finish(st, od, name, out, say)
