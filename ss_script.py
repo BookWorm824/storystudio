@@ -35,6 +35,97 @@ ASPECTS = {"16:9": "16:9 landscape", "9:16": "9:16 vertical portrait", "1:1": "1
 WORDS_PER_SEC = 2.2                        # a warm storytelling pace (about 130 words a minute)
 EXTRA = 0.2                                # extra shots on top of what the timing needs
 CUSTOM_FILE = APP_DATA / "my_styles.json"
+TYPES_FILE = APP_DATA / "my_shottypes.json"
+
+
+# ---------------------------------------------------------------------------
+# shot types: ss_shottypes.json from the app folder, merged over by the user's own file
+# ---------------------------------------------------------------------------
+_TYPES = None
+
+
+def _clean_type(t, where):
+    """One shot type, tidied: a bad camera (not a MiniMax command) is dropped with a warning
+    in the log, never a crash."""
+    t = dict(t)
+    t["code"] = str(t.get("code") or "").strip().upper()
+    t["name"] = str(t.get("name") or t["code"]).strip()
+    t["opening"] = str(t.get("opening") or "").strip()
+    for k in ("purpose", "framing", "guidance"):
+        t[k] = str(t.get(k) or "").strip()
+    cams = [c for c in (t.get("cameras") or []) if isinstance(c, str)]
+    bad = [c for c in cams if c not in CAMERA]
+    if bad:
+        log(f"shot type {t['code']} ({where}): not MiniMax camera commands, left out:", bad)
+    t["cameras"] = [c for c in cams if c in CAMERA] or ["Static shot"]
+    try:
+        lo, hi = (float(x) for x in t.get("hold") or (2, 4))
+        t["hold"] = [min(lo, hi), max(lo, hi)]
+    except (TypeError, ValueError):
+        t["hold"] = [2.0, 4.0]
+    try:
+        lo, hi = (int(x) for x in t.get("characters") or (0, 9))
+        t["characters"] = [min(lo, hi), max(lo, hi)]
+    except (TypeError, ValueError):
+        t["characters"] = [0, 9]
+    try:
+        t["attempts"] = max(0.1, float(t.get("attempts") or 2))
+    except (TypeError, ValueError):
+        t["attempts"] = 2.0
+    t["extra"] = t.get("extra") if t.get("extra") in (True, False) else None
+    return t
+
+
+def shot_type_data():
+    """{"types": [...], "scene_unit": [...], "mix": "..."}: the bundled file merged with the
+    user's my_shottypes.json by code (same code replaces, a new code is added). Read once."""
+    global _TYPES
+    if _TYPES is not None:
+        return _TYPES
+    try:
+        base = json.loads((APP_DIR / "ss_shottypes.json").read_text(encoding="utf8"))
+    except (OSError, ValueError) as ex:
+        log("shot types file missing or broken:", ex)
+        base = {}
+    types = [_clean_type(t, "built in") for t in base.get("types") or []
+             if isinstance(t, dict) and t.get("code")]
+    try:
+        mine = json.loads(TYPES_FILE.read_text(encoding="utf8"))
+        mine = mine.get("types", []) if isinstance(mine, dict) else mine
+        for t in mine or []:
+            if not (isinstance(t, dict) and t.get("code")):
+                continue
+            t = _clean_type(t, "my_shottypes.json")
+            at = next((i for i, x in enumerate(types) if x["code"] == t["code"]), None)
+            if at is None:
+                types.append(t)
+            else:
+                types[at] = t
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as ex:
+        log("my_shottypes.json skipped:", ex)
+    types = [t for t in types if t["code"] and t["opening"]]
+    mix = base.get("mix") or {}
+    _TYPES = {"types": types, "scene_unit": base.get("scene_unit") or [],
+              "mix": mix if isinstance(mix, (dict, str)) else {}}
+    return _TYPES
+
+
+def shot_types():
+    return shot_type_data()["types"]
+
+
+def shot_type(code):
+    """The type with this code, or None (old shot lists have no type)."""
+    if not code:
+        return None
+    return next((t for t in shot_types() if t["code"] == code), None)
+
+
+def type_menu():
+    """The types for the window: what the dropdown and the chips need."""
+    return [{k: t[k] for k in ("code", "name", "purpose", "attempts")} for t in shot_types()]
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +720,12 @@ MOTION_RULES = ("the IMAGE-TO-VIDEO prompt for MiniMax Hailuo, SHORT: 1-2 senten
                 "then the camera move in plain words. One continuous shot, only what is already "
                 "in the picture, believable motion (children move like real children), never "
                 "write 'no ...'.")
+PICTURE_RULES_TYPED = PICTURE_RULES.replace(
+    "Start with the shot size and angle (wide shot, medium shot, close-up, overhead, low "
+    "angle...), then",
+    "Start with the chosen shot type's opening words, word for word (for a CU: \"Close-up "
+    "of\"), then the subject straight away (any angle, like low or from behind, goes after "
+    "the subject), then")
 SHOT = {
     "type": "object",
     "properties": {
@@ -656,6 +753,94 @@ SHOT = {
 }
 SHOTS = {"type": "object", "properties": {"shots": {"type": "array", "items": SHOT}},
          "required": ["shots"], "additionalProperties": False}
+TYPE_FIELD = "shot_type"
+
+
+def with_type(schema, before):
+    """A copy of an object schema with the shot type added (an enum of the codes) just before
+    the field `before`, so the model picks the type before it writes that field."""
+    codes = [t["code"] for t in shot_types()]
+    field = {"type": "string", "enum": codes,
+             "description": "the shot type's code, from the SHOT TYPES menu"}
+    props = {}
+    for k, v in schema["properties"].items():
+        if k == before:
+            props[TYPE_FIELD] = field
+        props[k] = (dict(v, description=PICTURE_RULES_TYPED)
+                    if k == "picture" and v.get("description") == PICTURE_RULES else v)
+    req = []
+    for k in schema["required"]:
+        if k == before:
+            req.append(TYPE_FIELD)
+        req.append(k)
+    return dict(schema, properties=props, required=req)
+
+
+def shots_schema():
+    """The shot list schema; with the shot types when the types file is there."""
+    if not shot_types():
+        return SHOTS
+    return {"type": "object", "properties": {"shots": {"type": "array",
+                                                        "items": with_type(SHOT, "picture")}},
+            "required": ["shots"], "additionalProperties": False}
+
+
+def mix_text(n=None):
+    """The rough mix of types: shares, or for n shots how many of each."""
+    mix = shot_type_data()["mix"]
+    if isinstance(mix, str):
+        return mix
+    parts = []
+    for key, share in mix.items():
+        codes = " or ".join(c for c in key.split("+") if shot_type(c))
+        if not codes:
+            continue
+        try:
+            share = float(share)
+        except (TypeError, ValueError):
+            continue
+        if n:
+            k = share * n
+            parts.append(f"{'about ' + str(round(k)) if k >= 0.75 else 'now and then one'} "
+                         f"{codes}")
+        else:
+            parts.append(f"{codes} {round(share * 100)}%")
+    return ", ".join(parts)
+
+
+def type_rules(n_shots=None):
+    """The SHOT TYPES menu and how to use it, for the request (n_shots: how many shots this
+    request plans, for a concrete mix)."""
+    d = shot_type_data()
+    lines = []
+    for t in d["types"]:
+        lo, hi = t["characters"]
+        who = (f"{lo}" if lo == hi else f"{lo} to {hi}") + " recurring character" + \
+            ("" if hi == 1 else "s")
+        lines.append(f"- {t['code']}, {t['name']}: {t['purpose']}. Framing: {t['framing']}. "
+                     f"On screen: {who}. Cameras that suit it: "
+                     f"{', '.join('[' + c + ']' for c in t['cameras'])}. "
+                     f"Picture prompt starts: \"{t['opening']}\". {t['guidance']}.")
+    unit = " -> ".join(d["scene_unit"]) or "EST -> WS or MS -> CU -> REACT -> INS or EMPTY"
+    return f"""SHOT TYPES: every shot has exactly one, from this menu; put its code in \
+"shot_type" before writing the prompts.
+{chr(10).join(lines)}
+
+HOW TO USE THEM: a scene usually goes {unit} (establishing, then wide or medium, then a \
+close-up, then a reaction, then a detail or an empty frame). Vary the type from shot to shot, \
+and never put two shots of the same type back to back on the same character. Whenever \
+something happens, follow it with a reaction shot (REACT) of whoever saw it. A rough mix for a \
+whole video: {mix_text() or 'mostly close-ups, then medium, wide and reaction shots, a few details'}\
+{f'; for the {n_shots} shots asked for here that means roughly: ' + mix_text(n_shots) if n_shots and isinstance(d['mix'], dict) else ''}. \
+Treat those numbers as targets: close-ups (CU or XCU) are the most common type, \
+medium shots (MS) are only connectors between them, and an establishing shot (EST) is only for \
+the first shot of a scene or a new place. Every clip is trimmed to its best few seconds in the \
+edit, so choose the type for the story moment, never for the clip length: a close-up or a \
+reaction works as a main shot too. \
+"characters" lists exactly who is visible, so it must fit the type (a two-shot has two, an \
+empty frame or point of view has none). The picture prompt starts with the type's opening \
+words, word for word, and "camera" (and "camera2") must be one of the cameras that suit the \
+type."""
 
 
 def shot_counts(plan, clip):
@@ -677,9 +862,26 @@ def shot_counts(plan, clip):
     return need, add
 
 
+OLD_VARIETY = """Plan exactly the number of main and extra shots asked for in each scene. Keep \
+it varied: mix wide shots, medium action shots, close-ups, details and unusual angles (overhead, \
+low, through a doorway or leaves), with never more than two close-ups or head shots in a row. \
+Choose the camera move that suits each moment: calmer moves ([Static shot], [Push in], [Pan \
+left/right]) in verses and quiet parts, livelier ones ([Tracking shot], [Truck left/right], \
+[Pedestal up], [Pull out]) in choruses and big moments. Keep both prompts short."""
+
+
 def make_shots(spec, plan, progress=None, cancel=None, per_request=24):
     import ss_claude as C
     clip = int(spec["clip"])
+    schema = shots_schema()
+    typed_rules = ""
+    if schema is not SHOTS:
+        typed_rules = ("{TYPES}" + "\n\nPlan exactly the number of main and extra shots "
+                       "asked for in each scene, with unusual angles too (overhead, low, "
+                       "through a doorway or leaves) where they fit the type. Choose the camera "
+                       "move that suits each moment from the type's cameras: calmer in verses "
+                       "and quiet parts, livelier in choruses and big moments. Keep both "
+                       "prompts short.")
     need, add = shot_counts(plan, clip)
     cast = "\n".join(f"- {c['name']}: short look to use in prompts: \"{c['short']}\" "
                      f"(full look, for reference: {c['look']}; {c.get('voice', '')})"
@@ -742,15 +944,12 @@ different medium or style into the prompts (no "3D" unless the style is 3D).
 
 {scenes}{before}
 
-Plan exactly the number of main and extra shots asked for in each scene. Keep it varied: mix \
-wide shots, medium action shots, close-ups, details and unusual angles (overhead, low, through \
-a doorway or leaves), with never more than two close-ups or head shots in a row. Choose the \
-camera move that suits each moment: calmer moves ([Static shot], [Push in], [Pan left/right]) in \
-verses and quiet parts, livelier ones ([Tracking shot], [Truck left/right], [Pedestal up], \
-[Pull out]) in choruses and big moments. Keep both prompts short."""
-        res = C.ask(prompt, SHOTS, system=SYSTEM, timeout=1200)
+{typed_rules.replace('{TYPES}', type_rules(sum(need[i] + add[i] for i in grp))) if typed_rules else OLD_VARIETY}"""
+        res = C.ask(prompt, schema, system=SYSTEM, timeout=1200)
         for s in res.get("shots", []):
             s["scene"] = min(max(1, int(s.get("scene") or grp[0] + 1)), len(plan["scenes"]))
+            if TYPE_FIELD in s and not shot_type(s[TYPE_FIELD]):
+                s.pop(TYPE_FIELD)                   # an unknown code: treat it as untyped
             shots.append(s)
     return shots
 
@@ -758,18 +957,171 @@ verses and quiet parts, livelier ones ([Tracking shot], [Truck left/right], [Ped
 # ---------------------------------------------------------------------------
 # putting the prompts together
 # ---------------------------------------------------------------------------
+# a shot size the model wrote at the front of a picture in its own words ("A close up shot
+# of", "Wide view:"), replaced by the type's opening words
+LEAD_SIZE = re.compile(
+    r"^\s*(?:an?\s+)?(?:(?:extreme|very|tight|medium|wide|full[- ]body|full[- ]figure|"
+    r"establishing|close|low[- ]angle|high[- ]angle|overhead|eye[- ]level|over[- ]the[- ]"
+    r"shoulder|two|point[- ]of[- ]view|pov|reaction|tracking|detail|insert|aerial|empty|quiet|"
+    r"side|cinematic)[\s,-]+)*(?:shot|close[- ]?up|view|frame|two[- ]shot)\b"
+    r"(?:\s+(?:shot|view)\b)?"
+    # an angle right after the size ("Close-up, eye level, of"): the type's words replace it
+    r"(?:[\s,]+(?:at\s+|from\s+)?(?:an?\s+)?(?:eye[- ]level|low[- ]angle|high[- ]angle|low|high|"
+    r"overhead|above|below|side[- ]on|from the side)\b)*"
+    r"(?:[\s,]*(?:of|on|looking at|past|showing|through)\b)?\s*[,:\-\u2013\u2014]?\s*", re.I)
+
+
+def opening_first(picture, t):
+    """The picture text, starting with the type's opening words exactly as written in the
+    types file: a paraphrase of them, or another type's opening, is replaced."""
+    text = (picture or "").strip()
+    op = t["opening"]
+    stem = re.sub(r"\s+(?:of|looking at|past)$", "", op)
+    m = re.match(re.escape(stem) + r"\s*,?\s+((?:from|at|seen from|in)\b[^,.]{0,40}?)\s*,?\s+"
+                 r"(?:of|looking at|past)\s+", text, re.I)
+    if m and not text.lower().startswith(op.lower() + " "):
+        angle, rest = m.group(1).strip(), text[m.end():]
+        k = rest.find(". ")                     # the angle goes after the first sentence's subject
+        rest = rest[:k] + f", {angle}" + rest[k:] if k > 0 else rest.rstrip(".") + f", {angle}."
+        text = op + " " + rest
+    for o in sorted((x["opening"] for x in shot_types()), key=len, reverse=True):
+        if o and text.lower().startswith(o.lower()):
+            text = text[len(o):].lstrip(" ,:")
+            break
+    else:
+        m = LEAD_SIZE.match(text)
+        if m and m.end() < len(text):
+            text = text[m.end():]
+    first = text.split(" ", 1)[0]
+    if first in ("A", "An", "The") or (len(text) > 1 and text[0].isupper() and text[1].islower()):
+        text = text[0].lower() + text[1:]       # "Close-up of a girl", not "of A girl"
+    return f"{op} {text}".strip()
+
+
 def picture_prompt(shot, plan, style, aspect):
     """The picture description, then the art style: short (the usual) or the full style text.
-    Shot lists made before 1.2 have no "length" and keep the full style."""
+    Shot lists made before 1.2 have no "length" and keep the full style. A shot with a type
+    starts with the type's opening words (shot lists made before types are left as they were)."""
+    t = shot_type(shot.get(TYPE_FIELD))
+    pic = opening_first(shot["picture"], t) if t else shot["picture"]
     if style.get("length", "full") == "full":
-        return f"{shot['picture'].strip()}\n\nArt style: {style_block(style, aspect)}"
-    return f"{shot['picture'].strip().rstrip('.')}. {style_tag(style, aspect)}"
+        return f"{pic.strip()}\n\nArt style: {style_block(style, aspect)}"
+    return f"{pic.strip().rstrip('.')}. {style_tag(style, aspect)}"
+
+
+def fit_camera(shot):
+    """A typed shot's camera must suit its type: one that doesn't is swapped for the type's
+    first camera (the second, optional move is dropped instead). The model's own choice is
+    kept in camera_asked, so a later type change can use it again if it fits."""
+    t = shot_type(shot.get(TYPE_FIELD))
+    if not t:
+        return
+    ok = t["cameras"]
+    want = shot.setdefault("camera_asked", shot.get("camera", ""))
+    want2 = shot.setdefault("camera2_asked", shot.get("camera2", ""))
+    shot["camera"] = want if want in ok else ok[0]
+    shot["camera2"] = want2 if (not want2 or want2 in ok) else ""
+    if want not in ok or (want2 and want2 not in ok):
+        log(f"shot {shot.get('n', '?')} ({t['code']}): camera {want!r}/{want2!r} -> "
+            f"{shot['camera']!r}/{shot['camera2']!r}")
 
 
 def minimax_prompt(shot):
+    fit_camera(shot)
     cams = [shot["camera"]] + ([shot["camera2"]] if shot.get("camera2") and
                                shot["camera2"] != shot["camera"] else [])
     return f"{shot['motion'].strip()} [{','.join(cams)}]"[:2000]
+
+
+def _secs(x):
+    return f"{x:g}"
+
+
+def check_shots(r):
+    """Hints on every shot that has a type (never errors, never blocking): characters that
+    don't fit the type, an extra flag the type disagrees with, the same type and characters
+    twice in a row, a camera that had to be changed, a slot much longer than the type holds.
+    Also each shot's suggested trim: the middle of its type's hold, at most the clip.
+    Shots without a type (shot lists made before types) get neither."""
+    has_cast = bool(r.get("characters"))
+    clip = float(r.get("clip") or 8)
+    prev = None
+    for s in r["shots"]:
+        t = shot_type(s.get(TYPE_FIELD))
+        if not t:
+            s.pop("warnings", None)
+            s.pop("trim", None)
+            prev = None
+            continue
+        w, name = [], t["name"]
+        chars = [c for c in s.get("characters") or [] if c]
+        lo, hi = t["characters"]
+        if has_cast and not lo <= len(chars) <= hi:
+            want = f"{lo}" if lo == hi else f"{lo} to {hi}"
+            w.append(f"{name}: usually {want} character{'' if hi == 1 else 's'} on screen, "
+                     f"but this shot lists {len(chars)}"
+                     f"{' (' + ', '.join(chars) + ')' if chars else ''}, so the picture may "
+                     "fight its framing.")
+        if t["extra"] is not None and bool(s.get("extra")) != t["extra"]:
+            w.append(f"{name}: usually a main shot, but this one is marked as an extra."
+                     if s.get("extra") else
+                     f"{name}: usually an extra shot, but this one is a main shot.")
+        key = (t["code"], sorted(c.lower() for c in chars))
+        if prev == key:
+            w.append("Same shot type and characters as the shot before: it may look like a "
+                     "jump cut.")
+        asked, asked2 = s.get("camera_asked"), s.get("camera2_asked")
+        if asked and asked != s.get("camera"):
+            w.append(f"The camera move was changed from [{asked}] to [{s.get('camera')}] to "
+                     f"suit this shot type ({name}); check the video prompt's words still "
+                     "match.")
+        if asked2 and asked2 not in t["cameras"]:
+            w.append(f"The second camera move [{asked2}] was left out: it doesn't suit this "
+                     f"shot type ({name}).")
+        slot = float(s.get("end", 0)) - float(s.get("start", 0))
+        if slot > 2 * t["hold"][1]:
+            w.append(f"{name}: plays best for about {_secs(t['hold'][0])} to "
+                     f"{_secs(t['hold'][1])} seconds, and this slot is {_secs(slot)} seconds, "
+                     "so trim it in the edit.")
+        s["warnings"] = w
+        s["trim"] = round(min(clip, sum(t["hold"]) / 2), 1)
+        prev = key
+    return r
+
+
+def type_counts(r):
+    """[(code, name, how many)] most to least, and the rough number of generations."""
+    n, gens = {}, 0.0
+    for s in r.get("shots") or []:
+        t = shot_type(s.get(TYPE_FIELD))
+        if t:
+            n[t["code"]] = n.get(t["code"], 0) + 1
+            gens += t["attempts"]
+    order = sorted(n, key=lambda c: -n[c])
+    return [(c, shot_type(c)["name"], n[c]) for c in order], gens
+
+
+def shot_hints(r):
+    """What the window needs after one shot changed: every typed shot's hints and trim
+    (a change can add or clear a "same as the shot before" hint on its neighbour)."""
+    return {str(s["n"]): {"warnings": s.get("warnings", []), "trim": s.get("trim")}
+            for s in r["shots"] if s.get(TYPE_FIELD)}
+
+
+def set_type(r, n, code):
+    """The user picked another type for shot n: both prompts are put together again (the
+    new opening words, a camera that suits it), with no AI call. Saves the shot list."""
+    t = shot_type(code)
+    if not t:
+        raise StoryError("That shot type isn't in the list.")
+    shot = next(s for s in r["shots"] if s["n"] == int(n))
+    shot[TYPE_FIELD] = t["code"]
+    style = r["style"] if r["style"].get("style") else find_style(r["style"]["id"])
+    shot["picture_prompt"] = picture_prompt(shot, r, style, r["aspect"])
+    shot["minimax_prompt"] = minimax_prompt(shot)
+    check_shots(r)
+    r["files"] = save(r)
+    return {"shot": shot, "hints": shot_hints(r)}
 
 
 def sheet_prompt(char, style, aspect):
@@ -857,6 +1209,7 @@ def build(spec, progress=None, cancel=None):
                                                  "style_id", "aspect", "direction", "cast",
                                                  "wording", "onscreen", "style_len",
                                                  "my_direction", "agreed")}}
+    check_shots(result)
     add_extras(result, style, say)
     say(0.97, "Saving the shot list…")
     result["files"] = save(result)
@@ -913,6 +1266,11 @@ def as_text(r):
           f"Shape: {r['aspect']}   Art style: {r['style']['name']}",
           f"Shots: {r['main_shots']} main + {r['extra_shots']} extra "
           f"(the main shots cover {mmss(r['covers'])})", ""]
+    counts, gens = type_counts(r)
+    if counts:
+        L += ["Shot types: " + ", ".join(f"{name} {k}" for _, name, k in counts),
+              f"About {math.ceil(gens)} video generations to get every shot right (a rough "
+              "guide from each type).", ""]
     if r.get("visual_rules"):
         L += ["Keeping it one world: " + r["visual_rules"], ""]
     if r.get("title_image"):
@@ -949,6 +1307,12 @@ def as_text(r):
             L.append(f"  Words: {s['words']}")
         if s.get("purpose"):
             L.append(f"  What this shot is for: {s['purpose']}")
+        t = shot_type(s.get(TYPE_FIELD))
+        if t:
+            L.append(f"  Shot type: {t['name']} ({t['code']})"
+                     + (f"   Keep about {_secs(s['trim'])} s of the clip" if s.get("trim") else ""))
+            for h in s.get("warnings") or []:
+                L.append(f"  Note: {h}")
         L += ["", "  Text-to-image prompt (ChatGPT / Nano Banana):",
               "  " + s["picture_prompt"].replace("\n", "\n  "), "",
               f"  Image-to-video prompt (MiniMax, {r['clip']}-second clip):",
@@ -1088,7 +1452,23 @@ def restyle_shots(r, c, old_look, style, progress=None, per_request=12):
         if progress:
             progress(0.2 + 0.75 * k / max(1, len(mine)),
                      f"Updating {c['name']} in shots {part[0]['n']} to {part[-1]['n']}…")
-        listing = "\n\n".join(f"SHOT {s['n']}: {s['picture']}" for s in part)
+        typed = all(shot_type(s.get(TYPE_FIELD)) for s in part)
+        if typed:
+            listing = "\n\n".join(
+                f"SHOT {s['n']} (shot type {s[TYPE_FIELD]}, starts \"{shot_type(s[TYPE_FIELD])['opening']}\"): "
+                f"{s['picture']}" for s in part)
+            schema = {"type": "object", "properties": {"shots": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "n": {"type": "integer"},
+                    TYPE_FIELD: {"type": "string", "enum": [t["code"] for t in shot_types()]},
+                    "picture": {"type": "string"}},
+                "required": ["n", TYPE_FIELD, "picture"], "additionalProperties": False}}},
+                "required": ["shots"], "additionalProperties": False}
+            keep = (" Keep each shot's type and its opening words exactly; return the type in "
+                    "\"shot_type\".")
+        else:
+            listing = "\n\n".join(f"SHOT {s['n']}: {s['picture']}" for s in part)
+            schema, keep = FIXED, ""
         res = C.ask(f"""The character {c['name']} has a NEW look. In each text-to-image prompt \
 below, change only how {c['name']} is described so it matches the new look exactly (hair, eyes, \
 age, outfit and colours). Keep everything else word for word: the framing, the action, the \
@@ -1100,8 +1480,8 @@ NEW LOOK: {new_look}
 
 {listing}
 
-Return every shot with its number and the updated prompt in "picture".""", FIXED, system=SYSTEM,
-                    timeout=600)
+Return every shot with its number and the updated prompt in "picture".{keep}""", schema,
+                    system=SYSTEM, timeout=600)
         new = {int(x["n"]): x["picture"].strip() for x in res.get("shots", [])}
         for s in part:
             if new.get(s["n"]):
@@ -1193,28 +1573,43 @@ CAST (describe a visible character by their short look, word for word):
 {cast or '(no recurring characters)'}
 Shots next to it (don't repeat them):
 {near or '(none)'}"""
+    t = shot_type(shot.get(TYPE_FIELD))
     if which == "picture":                       # a whole new shot: the picture and its motion
-        res = C.ask(f"""{head}
+        if t:                                    # keep the shot type (unless the user asks)
+            schema = with_type(REDO_SHOT, "picture")
+            pic_rules = PICTURE_RULES_TYPED
+            type_note = (f"\n\n{type_rules()}\n\nThis shot is a {t['name']} ({t['code']}). "
+                         "Keep that shot type, unless what the user wants needs a different "
+                         "one; put the code in \"shot_type\".")
+        else:
+            schema, pic_rules, type_note = REDO_SHOT, PICTURE_RULES, ""
+        res = C.ask(f"""{head}{type_note}
 
 The user doesn't like this shot and wants a new one:
 Picture: {shot['picture']}
 Motion: {shot['motion']}
 {f"What the user wants: {note}" if note else "Write a new, better shot for the same words: a different idea, framing or subject is welcome."}
 
-Write the new shot: "picture" is {PICTURE_RULES} "motion" is {MOTION_RULES} Set "camera" (and \
+Write the new shot: "picture" is {pic_rules} "motion" is {MOTION_RULES} Set "camera" (and \
 "camera2", or "") to the MiniMax camera command matching the motion; "title" is a short shot \
 name, 2-6 words; "characters" lists the names of recurring characters visible (or none).""",
-                    REDO_SHOT, system=SYSTEM, timeout=300)
+                    schema, system=SYSTEM, timeout=300)
+        if t:
+            shot[TYPE_FIELD] = res.get(TYPE_FIELD) if shot_type(res.get(TYPE_FIELD)) \
+                else t["code"]
         shot["picture"] = res["picture"].strip()
         shot["motion"] = res["motion"].strip()
         shot["title"] = res.get("title", "").strip() or shot.get("title", "")
         shot["characters"] = [x for x in res.get("characters", [])
                               if any(x.lower() == c["name"].lower() for c in r["characters"])]
         shot["camera"], shot["camera2"] = res["camera"], res.get("camera2", "")
+        shot.pop("camera_asked", None)          # the new choice is the one to check
+        shot.pop("camera2_asked", None)
         shot["picture_prompt"] = picture_prompt(shot, r, style, r["aspect"])
         shot["minimax_prompt"] = minimax_prompt(shot)
+        check_shots(r)
         r["files"] = save(r)
-        return {"shot": shot}
+        return {"shot": shot, "hints": shot_hints(r)}
     res = C.ask(f"""{head}
 The text-to-image prompt (the motion must fit this picture): {shot['picture']}
 
@@ -1223,12 +1618,17 @@ CURRENT IMAGE-TO-VIDEO PROMPT (the user wants a new version): {shot['motion']}
 
 Write the new prompt in "text", following this rule: {MOTION_RULES}
 Set camera (and camera2, or "") to the MiniMax camera command that matches the camera move in \
-your new text.""" + NO_SHORT, REDO, system=SYSTEM, timeout=300)
+your new text.""" + (f" This is a {t['name']} shot: use only cameras that suit it: "
+                     + ", ".join(t["cameras"]) + "." if t else "") + NO_SHORT,
+                REDO, system=SYSTEM, timeout=300)
     shot["motion"] = res["text"].strip()
     shot["camera"], shot["camera2"] = res["camera"], res.get("camera2", "")
+    shot.pop("camera_asked", None)
+    shot.pop("camera2_asked", None)
     shot["minimax_prompt"] = minimax_prompt(shot)
+    check_shots(r)
     r["files"] = save(r)
-    return {"shot": shot}
+    return {"shot": shot, "hints": shot_hints(r)}
 
 
 def load(path):
@@ -1237,6 +1637,7 @@ def load(path):
     r = json.loads(p.read_text(encoding="utf8"))
     txt = p.with_name(re.sub(r"\.json$", ".txt", p.name))
     r["files"] = {"json": str(p), "text": str(txt), "folder": str(p.parent)}
+    check_shots(r)                    # only shots with a type; older lists are left as they are
     return r
 
 

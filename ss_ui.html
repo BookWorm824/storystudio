@@ -666,6 +666,7 @@ let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", onscreen:"
 const ONSCREEN = [["auto","Go by my direction"],["main","Main characters"],["none","No main character (B-roll)"],["nopeople","No people"]];
 const ONSCREEN_HINT = {auto:"StoryStudio follows what your direction says.", main:"The video follows the characters you set up below.", none:"Different people of all ages in different shots, mixed with nature. No one person throughout.", nopeople:"Only nature, animals and places."};
 let SBR = null;                       // the finished shot list
+let SBT = [];                         // the shot types: code, name, purpose, attempts
 let PICS = null;                      // sample pictures for the default styles
 async function openBuilder() {
   const fresh = await api("sb_styles");          // re-read every time, so new lists show up
@@ -891,7 +892,7 @@ async function sbOpen(path) {
   try { j = await api("sb_open", {path}); }
   catch (e) { reportError("sb_open: " + e.message); throw e; }
   if (!j.result) { toast("That shot list couldn't be opened.", true); reportError("sb_open: empty result"); return; }
-  SBR = j.result;
+  SBR = j.result; SBT = j.shot_types || SBT;
   try { renderScript(); }
   catch (e) { toast("That shot list opened, but something went wrong showing it. Details were saved to the log file.", true); reportError("renderScript: " + (e.stack || e.message)); throw e; }
   $("main").scrollTop = 0;
@@ -906,9 +907,33 @@ function promptBox(label, sub, text, redo) {
     <button class="btn small" onclick="pbCopy(${i})">Copy</button>${redo ? `<button class="btn small ghost" onclick="pbRedo(${i})">${redo.which === "picture" ? "Different shot" : "New version"}</button>` : ""}</div>
     <div class="ptext">${esc(text)}</div><div class="pmsg"></div></div>`;
 }
+function sbTypeCounts(r) {          // how many of each type, most to least, and the tries
+  const n = {}; let gens = 0;
+  for (const s of r.shots) {
+    const t = s.shot_type && SBT.find(x => x.code === s.shot_type); if (!t) continue;
+    n[t.code] = (n[t.code] || 0) + 1; gens += t.attempts || 0;
+  }
+  const line = Object.keys(n).sort((a, b) => n[b] - n[a]).map(c => `${SBT.find(x => x.code === c).name} ${n[c]}`).join(" · ");
+  return {line, gens};
+}
+async function sbSetType(n, code, sel) {        // a new type: both prompts again, no AI call
+  sel.disabled = true;
+  let j;
+  try { j = await api("sb_shot_type", {n, code}); }
+  catch (e) { sel.disabled = false; return; }
+  Object.assign(SBR.shots.find(s => s.n === n), j.shot);
+  for (const s of SBR.shots) { const h = (j.hints || {})[String(s.n)]; if (h) { s.warnings = h.warnings; s.trim = h.trim; } }
+  const y = $("main").scrollTop;
+  FRESH = `picture-${n}`;
+  renderScript(); $("main").scrollTop = y;
+  const nb = document.querySelector(`.pbox[data-key="picture-${n}"]`);
+  if (nb) nb.querySelector(".pmsg").innerHTML = `<span class="ok">✓ Both prompts now fit the new shot type (no AI needed; the shot list file is updated too)</span>`;
+  setTimeout(() => { FRESH = ""; document.querySelectorAll(".pbox.fresh").forEach(b => b.classList.remove("fresh")); }, 6000);
+}
 function renderScript() {
   const r = SBR; if (!r) return openBuilder();
   PB = [];
+  const types = sbTypeCounts(r);
   const story = r.kind === "story";
   let top = "";
   if (r.title_image) top += `<div class="card"><h2>Title image</h2><div class="sub">The story's name on a transparent background. Make it in ChatGPT and ask for a transparent PNG (Nano Banana can't make true transparency).</div>${promptBox("Title image prompt", "", r.title_image.prompt, {which:"title", n:0})}</div>`;
@@ -923,18 +948,21 @@ function renderScript() {
       scene = s.scene; const sc = r.scenes[scene - 1] || {};
       head = `<div class="scenehead"><h2 style="margin:0">Scene ${scene}: ${esc(sc.title || "")}</h2><div class="sub" style="margin:4px 0 0">${esc(sc.section || "")} · ${mmss(sc.start || 0)}–${mmss(sc.end || 0)} · ${sc.clips || 0} clips${sc.concept ? " · " + esc(sc.concept) : ""}</div></div>`;
     }
+    const ty = s.shot_type ? SBT.find(t => t.code === s.shot_type) : null;
     return head + `<div class="card shot ${s.extra ? "extra" : ""}">
-      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${s.n}${s.title ? ": " + esc(s.title) : ""}</b><span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
+      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${s.n}${s.title ? ": " + esc(s.title) : ""}</b>${ty ? `<select class="pill" title="${esc(ty.purpose)}" aria-label="Shot type" onchange="sbSetType(${s.n}, this.value, this)">${SBT.map(t => `<option value="${esc(t.code)}" ${t.code === ty.code ? "selected" : ""}>${esc(t.code)} · ${esc(t.name)}</option>`).join("")}</select>` : ""}<span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
       <span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span></div>
       ${s.words ? `<div class="words">💬 ${esc(s.words)}</div>` : ""}
       ${s.purpose ? `<div class="purpose"><b>What this shot is for:</b> ${esc(s.purpose)}</div>` : ""}
+      ${ty && (s.warnings || []).length ? `<div class="sub" style="margin:2px 0 0">${s.warnings.map(esc).join(" ")}</div>` : ""}
       ${promptBox("Text-to-image prompt", "ChatGPT / Nano Banana", s.picture_prompt, {which:"picture", n:s.n})}
-      ${promptBox("Image-to-video prompt", `MiniMax · ${r.clip}-second clip`, s.minimax_prompt, {which:"motion", n:s.n})}</div>`;
+      ${promptBox("Image-to-video prompt", `MiniMax · ${r.clip}-second clip${ty && s.trim ? ` · keep about ${s.trim} s` : ""}`, s.minimax_prompt, {which:"motion", n:s.n})}</div>`;
   }).join("");
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>${esc(r.title)}</h1><div class="sub" style="margin:0">${esc(r.summary)}</div></div>
       <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.text))}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.folder))}})'>${ICON.folder} Folder</button>` : ""}</div></div>
-    <div class="chips"><span class="chip">${story ? "Story" : "Music video"}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span></div>
+    <div class="chips"><span class="chip">${story ? "Story" : "Music video"}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span>${types.gens ? `<span class="chip" title="A rough guide: some shot types take several tries to come out right">About ${Math.ceil(types.gens)} generations</span>` : ""}</div>
+    ${types.line ? `<div class="sub" style="margin:8px 0 0">Shot types: ${esc(types.line)}</div>` : ""}
     ${r.approach ? `<div class="banner"><b>The plan:</b> ${esc(r.approach)}</div>` : ""}
     ${r.visual_rules ? `<div class="banner">${esc(r.visual_rules)}</div>` : ""}
     ${top ? `<div class="toplist">${top}</div>` : ""}
@@ -966,6 +994,7 @@ async function doRedo(i) {
   }
   if (j.job) return watchJob(j.job);           // a new character look also updates the shots
   if (j.shot) Object.assign(SBR.shots.find(s => s.n === j.shot.n), j.shot);
+  if (j.hints) for (const s of SBR.shots) { const h = j.hints[String(s.n)]; if (h) { s.warnings = h.warnings; s.trim = h.trim; } }
   if (j.character) Object.assign(SBR.characters[redo.n], j.character);
   if (j.suno) SBR.suno = j.suno;
   if (j.thumbnail) SBR.thumbnail = j.thumbnail;
@@ -1009,7 +1038,7 @@ function watchJob(first) {
       if (j.then === "review") { R = (await api("review")).review; filter = ""; renderReview(); }
       else if (j.then === "done") renderDone();
       else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
-      else if (j.then === "script") { SBR = (await api("sb_result")).result; renderScript(); $("main").scrollTop = 0; }
+      else if (j.then === "script") { const k = await api("sb_result"); SBR = k.result; SBT = k.shot_types || SBT; renderScript(); $("main").scrollTop = 0; }
       else if (j.then === "feedback") { F = (await api("feedback")).feedback; fbFilter = ""; renderFeedback(); }
     }
   }, 700);

@@ -563,7 +563,14 @@ def api(name, a):
             S.sb = SB.build(spec, progress, cancel)
         return {"job": run_job("Planning your shots", work, "script", [est])}
     if name == "sb_result":
-        return {"result": S.sb}
+        import ss_script as SB
+        return {"result": S.sb, "shot_types": SB.type_menu()}
+    if name == "sb_shot_type":
+        import ss_script as SB
+        if not S.sb:
+            raise StoryError("The shot list isn't open any more. Open it again from the "
+                             "script builder, then try once more.")
+        return SB.set_type(S.sb, a.get("n", 0), a.get("code", ""))
     if name == "sb_redo":
         import ss_script as SB
         if not S.sb:
@@ -593,7 +600,7 @@ def api(name, a):
             log_error("sb_open")
             raise StoryError("That shot list couldn't be opened. It may have been moved or "
                              "renamed.")
-        return {"result": S.sb}
+        return {"result": S.sb, "shot_types": SB.type_menu()}
     if name == "update_check":
         import ss_update
         info = ss_update.check(timeout=8)

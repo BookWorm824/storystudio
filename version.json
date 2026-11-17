@@ -1,5 +1,5 @@
 {
-  "version": "1.11.0",
+  "version": "1.12.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -20,11 +20,12 @@
     "ss_feedback.py",
     "ss_gpt.py",
     "ss_script.py",
+    "ss_shottypes.json",
     "ss_styles.json",
     "ss_style_pics.json",
     "ss_fal.py",
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "New: karaoke lyrics on a finished video file (MP4), no Premiere project needed. You get a new video ending in (karaoke) next to yours."
+  "notes": "Script builder: every shot now has a shot type (close-up, reaction, two-shot and 10 more). Change it from the shot card without any AI cost, see hints when a shot fights its type, and see the mix of types and a rough generation count at the top."
 }
