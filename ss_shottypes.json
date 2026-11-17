@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "StoryStudio shot types, from the Shot type library. To add your own or change one, put my_shottypes.json in StoryStudio's own folder (next to settings.json): a list of types, or {\"types\": [...]}; a type with the same code replaces the built-in one, a new code is added. cameras must be MiniMax camera commands. characters is [fewest, most] recurring characters on screen. extra: true = usually an extra shot, false = usually a main shot, null = either.",
+  "about": "StoryStudio shot types, from the Shot type library. To add your own or change one, put my_shottypes.json in StoryStudio's own folder (next to settings.json): a list of types, or {\"types\": [...]}; a type with the same code replaces the built-in one, a new code is added. That file can also hold its own \"mix\" (and \"scene_unit\"), which is used instead of the one here. cameras must be MiniMax camera commands. characters is [fewest, most] recurring characters on screen. extra: true = usually an extra shot, false = usually a main shot, null = either.",
   "scene_unit": ["EST", "WS or MS", "CU", "REACT", "INS or EMPTY"],
   "mix": {"CU+XCU": 0.30, "MS": 0.20, "WS+EST": 0.15, "2S": 0.10, "REACT": 0.10, "INS+POV": 0.08, "FGW+EMPTY+TRACK": 0.07},
   "types": [

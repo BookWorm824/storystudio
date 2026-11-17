@@ -89,9 +89,15 @@ def shot_type_data():
         base = {}
     types = [_clean_type(t, "built in") for t in base.get("types") or []
              if isinstance(t, dict) and t.get("code")]
+    mix, unit = base.get("mix") or {}, base.get("scene_unit") or []
     try:
         mine = json.loads(TYPES_FILE.read_text(encoding="utf8"))
-        mine = mine.get("types", []) if isinstance(mine, dict) else mine
+        if isinstance(mine, dict):                 # the user's own mix and scene shape win
+            if isinstance(mine.get("mix"), (dict, str)) and mine["mix"]:
+                mix = mine["mix"]
+            if isinstance(mine.get("scene_unit"), list) and mine["scene_unit"]:
+                unit = mine["scene_unit"]
+            mine = mine.get("types", [])
         for t in mine or []:
             if not (isinstance(t, dict) and t.get("code")):
                 continue
@@ -106,8 +112,7 @@ def shot_type_data():
     except (OSError, ValueError) as ex:
         log("my_shottypes.json skipped:", ex)
     types = [t for t in types if t["code"] and t["opening"]]
-    mix = base.get("mix") or {}
-    _TYPES = {"types": types, "scene_unit": base.get("scene_unit") or [],
+    _TYPES = {"types": types, "scene_unit": unit,
               "mix": mix if isinstance(mix, (dict, str)) else {}}
     return _TYPES
 
