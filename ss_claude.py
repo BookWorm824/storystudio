@@ -6,6 +6,7 @@ no API key. Pictures go in as one stream-json message, so no tools are needed.
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,13 +20,8 @@ DEFAULT_MODEL = "opus"
 # Anything not listed can still be typed in ("Another model").
 CLAUDE_MODELS = [
     ("", "Opus, always the newest", "StoryStudio's usual choice: strong and quick."),
-    ("fable", "Fable, always the newest", "The most capable. Slower, and uses more of "
-                                          "your plan."),
     ("sonnet", "Sonnet, always the newest", "Faster and lighter on your plan."),
     ("haiku", "Haiku, always the newest", "Fastest and lightest. Fine for simple jobs."),
-    ("claude-fable-5-2", "Fable 5.2", ""),
-    ("claude-fable-5-1", "Fable 5.1", ""),
-    ("claude-fable-5", "Fable 5", ""),
     ("claude-opus-5-5", "Opus 5.5", ""),
     ("claude-opus-5", "Opus 5", ""),
     ("claude-opus-4-8", "Opus 4.8", ""),
@@ -36,7 +32,41 @@ CLAUDE_MODELS = [
     ("claude-sonnet-4-6", "Sonnet 4.6", ""),
     ("claude-haiku-5-5", "Haiku 5.5", ""),
     ("claude-haiku-4-5", "Haiku 4.5", ""),
+    ("fable", "Fable, always the newest", "Only if you choose it: slower, and uses much more "
+                                          "of your plan."),
+    ("claude-fable-5-2", "Fable 5.2", ""),
+    ("claude-fable-5-1", "Fable 5.1", ""),
+    ("claude-fable-5", "Fable 5", ""),
 ]
+LAST_FILE = APP_DATA / "claude" / "last_model.txt"
+
+
+def last_model():
+    """The model that really answered StoryStudio's last question to Claude ("" if none yet)."""
+    try:
+        return LAST_FILE.read_text(encoding="utf8").strip()
+    except OSError:
+        return ""
+
+
+def _answered_by(result):
+    """Note which model Claude really used. The Claude program can answer with a different
+    one than asked (when a plan is busy, say): that is logged, and Fable answering when it
+    wasn't chosen is logged as a warning."""
+    used = [m for m in (result.get("modelUsage") or {}) if "haiku" not in m.lower()] or \
+        list(result.get("modelUsage") or {})
+    if not used:
+        return
+    name = ", ".join(used)
+    if name != last_model():
+        log("claude answered with", name, "(asked for", model() + ")")
+        try:
+            LAST_FILE.parent.mkdir(parents=True, exist_ok=True)
+            LAST_FILE.write_text(name, encoding="utf8")
+        except OSError:
+            pass
+    if any("fable" in m.lower() for m in used) and "fable" not in model().lower():
+        log("WARNING: Claude answered with Fable although", model(), "was asked for")
 
 
 def chosen_model():
@@ -46,8 +76,19 @@ def chosen_model():
 
 
 def model():
-    """The model name handed to the Claude program."""
+    """The model name handed to the Claude program: what's picked in Settings, or Opus.
+    Fable is only ever used when it is picked there by name."""
     return os.environ.get("STORYSOUND_CLAUDE_MODEL") or chosen_model() or DEFAULT_MODEL
+
+
+def nice_model(mid):
+    """'claude-opus-5-5' -> 'Opus 5.5' (for showing which model answered)."""
+    known = next((n for i, n, _ in CLAUDE_MODELS if i == mid), "")
+    if known:
+        return known
+    m = re.match(r"claude-([a-z]+)-(\d+)(?:-(\d+))?", mid or "")
+    return f"{m.group(1).title()} {m.group(2)}{'.' + m.group(3) if m.group(3) and len(m.group(3)) < 3 else ''}" \
+        if m else (mid or "")
 
 
 def model_label(m=None):
@@ -161,6 +202,7 @@ def ask_claude(prompt, schema, system=None, images=None, timeout=1200):
             continue
         if ev.get("type") == "result":
             result = ev
+    _answered_by(result)
     if result.get("is_error") or "structured_output" not in result:
         _fail(str(result.get("result") or r.stderr or r.stdout))
     return result["structured_output"]

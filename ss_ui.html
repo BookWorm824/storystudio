@@ -740,6 +740,7 @@ function renderBuilder(top) {
   }
   $("#view").innerHTML = `
     <div class="rhead" id="sbpage"><div><h1>Script builder</h1><div class="sub" style="margin:0">Turns lyrics or a story into a shot list with a picture prompt and a MiniMax prompt for every shot.</div></div>
+    ${H.ai && H.ai.name ? `<div class="row" style="gap:8px"><span class="chip">${esc(H.ai.name)}${H.ai.model_name ? " · " + esc(H.ai.model_name) : ""}</span><button class="btn small ghost" onclick="openSettings()">Change</button></div>` : ""}
 </div>
     ${SBD.recent.length ? `<div class="card" style="margin-bottom:14px"><h2 style="margin:0 0 10px">Your shot lists</h2>${pastLists()}</div>` : ""}
     <div class="sbsteps">${steps.join("")}</div>
@@ -1226,7 +1227,7 @@ function drawAi(ai) {
     <div class="field">ChatGPT ${gpt}</div>
     ${ai.chatgpt === "ready" ? modelPick("chatgpt", ai.chatgpt_models, ai.chatgpt_model, "Your ChatGPT default") : ""}
     <div class="field">Use <div class="seg">${choice("auto","Automatic")}${choice("claude","Claude")}${choice("chatgpt","ChatGPT")}</div></div>
-    <div class="sub" style="margin:10px 0 0">${ai.name ? `Right now StoryStudio is using <b>${ai.name}</b>${ai.model_name ? ` (${esc(ai.model_name)})` : ""}.` : "Neither is set up yet: set up ChatGPT above, or install Claude."}</div>`;
+    <div class="sub" style="margin:10px 0 0">${ai.name ? `Right now StoryStudio is using <b>${ai.name}</b>${ai.model_name ? ` (${esc(ai.model_name)})` : ""}.` : "Neither is set up yet: set up ChatGPT above, or install Claude."}${ai.claude && ai.claude_last ? ` Claude's last answer came from <b>${esc(ai.claude_last)}</b>.` : ""}</div>`;
 }
 async function aiChoose(v) { const j = await api("ai_choose", {choice:v}); drawAi(Object.assign({}, H.ai, j.ai)); }
 async function aiSignIn() { await api("ai_sign_in_chatgpt"); toast("A sign-in window opened. Sign in there, then come back here.", false); setTimeout(async () => drawAi((await api("ai_status")).ai), 20000); }

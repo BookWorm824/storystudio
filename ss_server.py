@@ -133,7 +133,9 @@ def ai_view():
             "choice": S.settings.get("ai", "auto"),
             "claude_model": C.chosen_model(), "chatgpt_model": G.chosen_model(),
             "claude_models": [{"id": i, "name": n, "note": t} for i, n, t in C.CLAUDE_MODELS],
-            "model_name": {"claude": C.model_label, "chatgpt": G.model_label}[p]() if p else ""}
+            "model_name": {"claude": C.model_label, "chatgpt": G.model_label}[p]() if p else "",
+            "claude_last": ", ".join(C.nice_model(m.strip())
+                                     for m in C.last_model().split(",") if m.strip())}
 
 
 FB_LABEL = {"fix": "Please fix", "suggest": "Idea", "beat": "Beat", "good": "Nicely done"}

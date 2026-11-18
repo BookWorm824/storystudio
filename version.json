@@ -1,5 +1,5 @@
 {
-  "version": "1.12.1",
+  "version": "1.12.2",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -27,5 +27,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Script builder: your own my_shottypes.json can now set the mix of shot types too."
+  "notes": "Claude: StoryStudio uses Opus unless you pick another model in Settings, shows which model really answered, and the script builder shows the model with a Change button. Fable is only used if you choose it."
 }
