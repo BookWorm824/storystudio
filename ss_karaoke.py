@@ -40,8 +40,69 @@ def number_words(n):
     return "".join(ONES[int(d)] for d in str(n))
 
 
+# a section name on a line of its own, without brackets: "Verse 1", "Final Chorus", "Bridge:"
+PLAIN_LABEL = re.compile(
+    r"^\s*(?:(?:final|last|first|second|third|fourth|1st|2nd|3rd|4th|repeat|short|end)\s+)?"
+    r"(?:verse|chorus|pre[- ]?chorus|post[- ]?chorus|bridge|intro|outro|hook|refrain|"
+    r"interlude|instrumental|solo|break|breakdown|tag|ending|coda|vamp|spoken(?:\s+part)?)"
+    r"(?:\s+(?:\d+|[ivx]+|one|two|three|four))?(?:\s*[\[(]?\s*x\s*\d\s*[\])]?)?\s*:?\s*$", re.I)
+# a note in round brackets, not sung: "(pronounced took)", "(spoken)", "(kids shout)"
+NOTE_WORDS = re.compile(
+    r"(?<![a-z])(pronounced|pronunciation|say it|says|rhymes with|sounds like|spoken|speak|"
+    r"speaking|whisper\w*|shout\w*|yell\w*|softly|slowly|slower|faster|louder|quietly|gently|"
+    r"repeat\w*|harmon\w*|backing|backup|background|ad[- ]?lib\w*|instrumental|music|"
+    r"pause|beat|clap\w*|stomp\w*|snap\w*|kids|children|everyone|together|girls?|boys?|"
+    r"choir|crowd|sound effects?|sfx|optional|note|fade\w*|laugh\w*|giggle\w*|sung by|"
+    r"singer|lead|chorus|verse|bridge)(?![a-z])", re.I)
+PRONOUNCED = re.compile(r"^\s*(?:pronounced|say(?:\s+it)?(?:\s+like)?|rhymes with|sounds like)"
+                        r"\s*:?\s*[\"'\u2018\u2019\u201c\u201d]?\s*([A-Za-z' -]{1,30}?)\s*"
+                        r"[\"'\u2018\u2019\u201c\u201d]?\s*$", re.I)
+SAYS = "\x01"                    # "toque\x01TOOK": shown as written, lined up as it's sung
+
+
+def _no_symbols(s):
+    """Emoji, music notes and decorations (🎶 ♪ * ~ •) are not shown on the karaoke screen."""
+    import unicodedata
+    out = []
+    for ch in s:
+        cat = unicodedata.category(ch)
+        if cat in ("So", "Sk", "Cs", "Co", "Mn") and ch not in "'`":
+            continue
+        if ch in "*~•|_#^=<>\ufe0f\u200d":
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def clean_line(raw):
+    """One line of pasted lyrics, ready for the screen: notes in brackets taken out (a
+    "(pronounced took)" note is used to line the word up with how it's sung), [anything in
+    square brackets] and {curly} taken out, emoji and music notes taken out, and the spacing
+    and dashes tidied ("breath\u2014whoa!" -> "breath \u2014 whoa!", "trash ," -> "trash,")."""
+    s = _no_symbols(raw)
+    s = re.sub(r"\[[^\[\]]*\]|\{[^{}]*\}", " ", s)
+
+    def paren(m):
+        inner = m.group(1).strip()
+        p = PRONOUNCED.match(inner)
+        if p:
+            letters = re.sub(r"[^A-Za-z']", "", p.group(1)).upper().strip("'")
+            return SAYS + letters if letters else " "
+        if PAREN_LABEL.match("(" + inner + ")") or REPEAT.fullmatch("(" + inner + ")") or \
+                (NOTE_WORDS.search(inner) and len(inner.split()) <= 8):
+            return " "
+        return m.group(0)                           # "(ooh)": sung, so it stays
+    s = re.sub(r"\s*\(([^()]*)\)", paren, s)
+    s = re.sub(r"(?<=[A-Za-z!?,.])\s*[\u2014\u2013]\s*(?=[A-Za-z])", " \u2014 ", s)
+    s = re.sub(r"\s+([,.!?;:])", r"\1", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    s = re.sub(r"^[\s,;:\-\u2014\u2013]+", "", s)
+    return s
+
+
 def is_label(s):
-    return bool(SECTION.match(s) or PAREN_LABEL.match(s))
+    t = _no_symbols(s).strip()
+    return bool(SECTION.match(t) or PAREN_LABEL.match(t) or PLAIN_LABEL.match(t))
 
 
 def _section_key(label):
@@ -60,6 +121,7 @@ def _expand_sections(text):
         if not s:
             continue
         if is_label(s):
+            s = _no_symbols(s).strip().rstrip(":")
             m = REPEAT.search(s.rstrip("]) "))
             cur = {"key": _section_key(s), "times": int(m.group(1)) if m else 1, "lines": []}
             sections.append(cur)
@@ -98,9 +160,20 @@ def parse_lyrics(text):
         if m:
             times = max(1, min(4, int(m.group(1))))
             s = s[:m.start()].strip()
+        s = clean_line(s)
+        m = REPEAT.search(s)                            # "(x2)" after a note: "toque! (x2)"
+        if m:
+            times = max(times, min(4, int(m.group(1))))
+            s = s[:m.start()].strip()
+        if not re.search(r"[A-Za-z0-9]", s):
+            continue                                    # only emoji or a note: nothing to sing
         words = []
         for w in s.split():
-            norm = re.sub(r"[^A-Za-z']", "", w).upper().strip("'")
+            says = ""
+            if SAYS in w:                               # "toque!\x01TOOK"
+                w, says = w.split(SAYS, 1)
+            norm = re.sub(r"[^A-Za-z']", "", says or w).upper().strip("'")
+            norm = re.sub(r"(.)\1{2,}", r"\1\1", norm)   # "Whoooooa" is lined up as "WHOOA"
             digits = re.sub(r"\D", "", w)
             if not norm and digits:                        # "5 little ducks", "1, 2, 3"
                 norm = number_words(int(digits[:6]))
@@ -108,9 +181,10 @@ def parse_lyrics(text):
                 words.append({"text": w, "norm": norm})
             elif words:                                    # "-", "&" ... stays with a word
                 words[-1]["text"] += " " + w
+        text_shown = " ".join(x["text"] for x in words)
         for _ in range(times):
             if words:
-                lines.append({"text": s, "words": [dict(x) for x in words]})
+                lines.append({"text": text_shown, "words": [dict(x) for x in words]})
     return lines
 
 
@@ -239,6 +313,7 @@ def time_lyrics(st, lines, progress=None, cancel=None):
                          score=t["score"])
         timed.append(line)
     left_out = [lines[i]["text"] for i in result.get("dropped_lines") or []]
+    extra = result.get("unsung") or []          # singing with no lyrics on it (an extra verse?)
     repeats = [a["lines"] for a in result.get("added") or []]
     lines = timed
     if not lines:
@@ -250,7 +325,9 @@ def time_lyrics(st, lines, progress=None, cancel=None):
     weak = sum(1 for l in lines for w in l["words"] if w.get("score", 1) < 0.15)
     total = sum(len(l["words"]) for l in lines)
     st["karaoke"] = {"lines": lines, "weak": weak, "total": total, "left_out": left_out,
-                     "repeats": repeats}
+                     "repeats": repeats, "extra": extra}
+    if extra:
+        log("karaoke: singing with no lyrics:", extra)
     if left_out:
         log("karaoke: left out (not sung where written):", left_out)
     if repeats:
@@ -651,6 +728,15 @@ def _finish(st, od, name, out, say):
     for n in k.get("repeats") or []:
         st["levels"].append(f"A section of {n} lines (like the chorus) is sung more times than "
                             "it's written in the lyrics, so StoryStudio added the repeat.")
+    for x in (k.get("extra") or [])[:3]:
+        when = f"{fmt_time(x['start'])}–{fmt_time(x['end'])}"
+        st["levels"].append(
+            f"At {when} the song sings “{x['heard']}” again, but the lyrics only have it once, "
+            "so nothing shows there. Add those lines again where they're sung and make it again."
+            if x.get("kind") == "again" else
+            f"There's singing at {when} that isn't in the lyrics you pasted (it sounded like "
+            f"“{x['heard']}”). If the song has more words, add them where they're sung and "
+            "make it again.")
     gone = k.get("left_out") or []
     if gone:
         st["levels"].append(
@@ -662,6 +748,12 @@ def _finish(st, od, name, out, say):
     if gone:
         text += ("\n\nLeft out (didn't seem to be sung where they're written):\n" +
                  "\n".join(f"  {t}" for t in gone))
+    if k.get("extra"):
+        text += ("\n\nSinging with no lyrics on screen (what the speech AI heard, so the "
+                 "words may be a little off):\n" + "\n".join(
+                     f"  {fmt_time(x['start'])}-{fmt_time(x['end'])}  {x['heard']}"
+                     + ("   (sung again, written only once)" if x.get("kind") == "again" else
+                        "   (not in the lyrics)") for x in k["extra"]))
     lst.write_text(text, encoding="utf8")
     out["list"] = str(lst)
     st["outputs"] = out

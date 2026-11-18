@@ -136,11 +136,12 @@ def main():
                 ws)
 
     # what the speech model hears in the voice: used to find singing that has no lyrics
-    heard = []
+    heard, heard_words = [], []
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import ss_media as M
-        heard = sorted(((w["s"] + w["e"]) / 2) for w in M.transcribe_raw(vocals16))
+        heard_words = sorted(M.transcribe_raw(vocals16), key=lambda w: w["s"])
+        heard = [(w["s"] + w["e"]) / 2 for w in heard_words]
     except Exception as ex:
         say(event="note", text=f"listening check skipped: {type(ex).__name__}: {ex}"[:300])
 
@@ -254,17 +255,150 @@ def main():
         seq = seq[:wp] + seq[wp + 1:]
         got = align(seq)
 
+    # singing that doesn't match the lyrics shown there, and isn't anywhere in the lyrics
+    # (a verse that wasn't pasted): the lyrics around it get stretched over it, so the words
+    # light up at the wrong time. Found by comparing what the speech model heard with the
+    # lyric shown at that moment; then that stretch is kept free of lyrics and they're lined
+    # up again, kept only if it agrees better with what was heard everywhere else.
+    import difflib
+    import re as _re
+
+    def letters(s):
+        return _re.sub(r"[^A-Z]", "", s.upper())
+
+    lyric_letters = [letters(w) for w in spec["words"]]
+
+    def alike(a, b):
+        return bool(a and b) and (a == b or difflib.SequenceMatcher(None, a, b).ratio() >= 0.6)
+
+    def heard_vs_shown(got, seq):
+        """For each heard word: True = a lyric word like it is shown there, False = not,
+        None = too short to judge."""
+        shown = sorted((w["start"] * frame_sec, w["end"] * frame_sec,
+                        lyric_letters[starts[seq[p]] + k]) for (p, k), w in got.items())
+        out = []
+        for hw, t in zip(heard_words, heard):
+            h = letters(hw["t"])
+            if len(h) < 3:
+                out.append(None)
+                continue
+            near = [l for a, b, l in shown if a - 0.4 <= t <= b + 0.4]
+            out.append(any(alike(h, l) for l in near))
+        return out
+
+    def in_lyrics(words):
+        """How well these heard words match some stretch of the lyrics (0-1)."""
+        H = [letters(w["t"]) for w in words if len(letters(w["t"])) >= 2]
+        if not H:
+            return 1.0
+        best = 0.0
+        L = [x for x in lyric_letters if x]
+        for i in range(0, max(1, len(L) - len(H) + 1)):
+            r = difflib.SequenceMatcher(None, H, L[i:i + len(H) + 3], autojunk=False).ratio()
+            best = max(best, r)
+        return best
+
+    def unknown_spans(got, seq):
+        """Runs of heard words that mostly don't match the lyrics shown with them, and don't
+        match any part of the lyrics either: [(start, end, words)]."""
+        flags = heard_vs_shown(got, seq)
+        runs, cur = [], []
+        for w, f in zip(heard_words, flags):
+            if cur and w["s"] - cur[-1][0]["e"] > 2.5:
+                runs.append(cur)
+                cur = []
+            if f is False or (cur and f is None):
+                cur.append((w, f))
+            elif f is True and cur:
+                bad = sum(1 for _, x in cur if x is False)
+                good = sum(1 for _, x in cur if x is True) + 1
+                if good / (bad + good) > 0.35:
+                    runs.append(cur)
+                    cur = []
+                else:
+                    cur.append((w, f))
+        if cur:
+            runs.append(cur)
+        out = []
+        for r in runs:
+            while r and r[-1][1] is not False:
+                r = r[:-1]
+            ws = [w for w, _ in r]
+            if sum(1 for _, x in r if x is False) >= 4 and ws and ws[-1]["e"] - ws[0]["s"] >= 2.0 \
+                    and in_lyrics(ws) < 0.5:
+                out.append((ws[0]["s"], ws[-1]["e"], ws))
+        return out
+
+    unknown = []
+    if heard_words:
+        found = unknown_spans(got, seq)
+        if found:
+            masked = em.clone()
+            for a, b, _ in found:
+                f0, f1 = max(0, int((a - 0.3) / frame_sec)), int((b + 0.3) / frame_sec) + 1
+                masked[f0:f1] = -1e4
+                masked[f0:f1, blank] = 0.0
+            inside = lambda t: any(a - 0.3 <= t <= b + 0.3 for a, b, _ in found)
+
+            def wrong(g):
+                return sum(1 for f, t in zip(heard_vs_shown(g, seq), heard)
+                           if f is False and not inside(t))
+            before = wrong(got)
+            keep_em, em = em, masked
+            g2 = align(seq)
+            after = wrong(g2) if g2 else before + 1
+            say(event="note", text=f"singing not in the lyrics at "
+                                   f"{[(round(a, 1), round(b, 1)) for a, b, _ in found]}: "
+                                   f"mismatched words elsewhere {before} -> {after}")
+            if g2 and after <= before - 3:
+                got = g2
+                unknown = found
+            em = keep_em
+
+    def unsung(got):
+        """Stretches of singing with no lyric word on them (an extra verse that wasn't pasted,
+        a spoken bit): what was heard there, so the user can add it."""
+        spans = sorted((w["start"] * frame_sec,
+                        min(w["end"], w["start"] + int(1.2 / frame_sec)) * frame_sec)
+                       for w in got.values())
+        free = [w for w, t in zip(heard_words, heard)
+                if not any(a - 0.45 <= t <= b + 0.45 for a, b in spans)]
+        groups = []
+        for w in free:
+            if groups and w["s"] - groups[-1][-1]["e"] < 2.5:
+                groups[-1].append(w)
+            else:
+                groups.append([w])
+        spans_out = [{"start": round(a, 2), "end": round(b, 2), "kind": "new",
+                      "heard": " ".join(x["t"] for x in ws)[:200]} for a, b, ws in unknown]
+        for g in groups:
+            if len(g) >= 4 and g[-1]["e"] - g[0]["s"] >= 2.0 and not any(
+                    x["start"] - 1 <= g[0]["s"] <= x["end"] + 1 for x in spans_out):
+                # words that ARE in the lyrics, sung again here: written once, sung twice
+                spans_out.append({"start": round(g[0]["s"], 2), "end": round(g[-1]["e"], 2),
+                                  "kind": "again" if in_lyrics(g) >= 0.5 else "new",
+                                  "heard": " ".join(
+                                      x["t"] for x in heard_words
+                                      if g[0]["s"] - 0.05 <= x["s"] <= g[-1]["e"])[:200]})
+        return sorted(spans_out, key=lambda x: x["start"])
+
     out_lines = []
     for p, li in enumerate(seq):
         ws = []
         for k in range(sizes[li]):
             w = got.get((p, k))
-            ws.append(None if w is None else {
-                "start": round(w["start"] * frame_sec, 3), "end": round(w["end"] * frame_sec, 3),
-                "score": round(sum(w["score"]) / len(w["score"]), 3)})
+            if w is None:
+                ws.append(None)
+                continue
+            a, b = w["start"] * frame_sec, w["end"] * frame_sec
+            for u0, u1, _ in unknown:            # a word split around singing that isn't in the
+                if a < u0 and b > u1:            # lyrics belongs after it, where it's sung
+                    a = min(b - 0.12, u1 + 0.3)
+            ws.append({"start": round(a, 3), "end": round(b, 3),
+                       "score": round(sum(w["score"]) / len(w["score"]), 3)})
         out_lines.append({"line": li, "words": ws})
     Path(spec["out"]).write_text(json.dumps({
-        "lines": out_lines, "dropped_lines": dropped,
+        "lines": out_lines, "dropped_lines": dropped, "unsung": unsung(got) if heard else [],
         "added": [{"lines": n} for _, n in added], "heard_words": len(heard)}), encoding="utf8")
     say(event="done")
 
