@@ -1,5 +1,5 @@
 {
-  "version": "1.13.0",
+  "version": "1.13.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -27,5 +27,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Karaoke: notes in the lyrics (like \"(pronounced took)\"), section names without brackets (Verse 1, Chorus) and emoji are left off the screen, and StoryStudio now tells you when the song sings words that aren't in your lyrics, and lines the rest up around them."
+  "notes": "Karaoke: choose the colour of the words and the colour they light up in."
 }

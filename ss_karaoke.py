@@ -376,8 +376,31 @@ STYLES = {
 STYLE = STYLES["kids"]
 
 
+def _hex(v):
+    """'#ffc440' -> (255, 196, 64), or None."""
+    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", str(v or "").strip())
+    return tuple(int(m.group(1)[i:i + 2], 16) for i in (0, 2, 4)) if m else None
+
+
 def style_of(settings):
     s = STYLES.get((settings or {}).get("karaoke_style"), STYLES["kids"])
+    words, high = _hex((settings or {}).get("karaoke_color")), \
+        _hex((settings or {}).get("karaoke_highlight"))
+    if words or high:                      # the user's own colours over the look's
+        s = dict(s)
+        if words:
+            s["base"] = words + (s["base"][3],)          # the look's softness before it's sung
+            if s.get("glow"):
+                s["fill"] = words + (255,)               # elegant: sung words full and bright
+            r, g, b = words
+            if 0.2126 * r + 0.7152 * g + 0.0722 * b < 90:  # dark words: a light edge to read them
+                s["outline"] = (255, 255, 255, 220 if not s.get("glow") else 150)
+                s["shadow"] = (255, 255, 255, 120)
+        if high:
+            if s.get("glow"):
+                s["glow"] = high + (s["glow"][3],)       # elegant: the glow around sung words
+            else:
+                s["fill"] = high + (255,)                # kids: the colour words fill with
     try:
         rows = 1 if int((settings or {}).get("karaoke_rows", 2)) == 1 else 2
     except (TypeError, ValueError):

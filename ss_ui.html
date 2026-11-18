@@ -421,7 +421,8 @@ function renderPlan() {
     if (id === "karaoke") body = `<textarea id="plan_lyrics" rows="8" class="sbin" placeholder="Paste the lyrics here…" oninput="H.lyrics=this.value">${esc(keep)}</textarea>
       <div class="row" style="margin-top:8px"><button class="btn" onclick="planLoadLyrics()">${ICON.folder} Load from a file…</button></div>
       <div style="margin-top:10px"><div class="opt"><div><label class="t">Lines on screen</label><div class="hint">One line keeps more of the picture clear.</div></div>${kSeg("karaoke_rows",[[2,"Two lines"],[1,"One line"]],2)}</div>
-      <div class="opt"><div><label class="t">Look</label><div class="hint">For kids: big, bold, gold words. Elegant: finer letters that glow softly as they're sung.</div></div>${kSeg("karaoke_style",[["kids","For kids"],["elegant","Elegant"]],"kids")}</div>
+      <div class="opt"><div><label class="t">Look</label><div class="hint">For kids: big, bold words that fill with colour. Elegant: finer letters that glow softly as they're sung.</div></div>${kSeg("karaoke_style",[["kids","For kids"],["elegant","Elegant"]],"kids")}</div>
+      <div class="opt"><div><label class="t">Colours</label><div class="hint">The words, and the colour they light up in as they're sung.</div></div><div class="swrow"><label class="sub" style="margin:0;display:flex;align-items:center;gap:6px">Words <input type="color" style="width:44px;height:30px;padding:0;margin:0" value="${kColour("karaoke_color")}" onchange="kOpt('karaoke_color', this.value)"></label><label class="sub" style="margin:0;display:flex;align-items:center;gap:6px">Highlight <input type="color" style="width:44px;height:30px;padding:0;margin:0" value="${kColour("karaoke_highlight")}" onchange="kOpt('karaoke_highlight', this.value)"></label>${opts.karaoke_color || opts.karaoke_highlight ? `<button class="btn small ghost" onclick="opts.karaoke_color='';kOpt('karaoke_highlight','')">Use the look's colours</button>` : ""}</div></div>
       <div style="margin-top:10px"><img id="ksample" alt="How the lyrics will look" style="display:block;width:100%;max-width:520px;border-radius:12px;border:1px solid var(--line);min-height:60px;background:var(--bg2)"></div></div>`;
     if (id === "feedback") body = `<div class="opt"><div><label class="t">This is a</label></div>${fbSeg("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"]])}</div>`;
     return `<div class="planstep"><div class="sbn">${i + 1}</div><div style="flex:1;min-width:0"><b>${STEPS[id]}</b>${body ? `<div style="margin-top:8px">${body}</div>` : ""}</div></div>`;
@@ -557,7 +558,10 @@ function kSeg(key, items, dflt) {
   const cur = opts[key] == null ? dflt : opts[key];
   return `<div class="seg">${items.map(([v,t]) => `<button class="${cur==v?"on":""}" onclick="kOpt('${key}',${esc(JSON.stringify(v))})">${t}</button>`).join("")}</div>`;
 }
-function kChoices() { return {karaoke_rows: opts.karaoke_rows || 2, karaoke_style: opts.karaoke_style || "kids"}; }
+function kChoices() { return {karaoke_rows: opts.karaoke_rows || 2, karaoke_style: opts.karaoke_style || "kids", karaoke_color: opts.karaoke_color || "", karaoke_highlight: opts.karaoke_highlight || ""}; }
+// the colour boxes show the look's own colours until the user picks their own
+const K_LOOK = {kids: {karaoke_color: "#ffffff", karaoke_highlight: "#ffc440"}, elegant: {karaoke_color: "#fff8e8", karaoke_highlight: "#ffc45a"}};
+function kColour(k) { return opts[k] || K_LOOK[opts.karaoke_style === "elegant" ? "elegant" : "kids"][k]; }
 function kOpt(k, v) { opts[k] = v; if ($("#lyrics")) { H.lyrics = $("#lyrics").value; setupKaraoke(true); } else renderPlan(); }
 async function kSample() {
   if (!$("#ksample")) return;
@@ -570,7 +574,8 @@ function setupKaraoke(keep) {
       <p class="sub" style="margin-bottom:8px">Paste the song's lyrics in the order they're sung. Labels like [Chorus] are fine: a label with nothing under it repeats that section, and [Chorus x2] repeats it twice. Add (x2) at the end of a line that's sung twice. Lines that aren't sung where they're written are left out, and StoryStudio tells you which.</p>
       <textarea id="lyrics" rows="12" style="width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:14px;resize:vertical" placeholder="Paste the lyrics here…">${esc(H.lyrics || "")}</textarea>
       <div style="margin-top:12px"><div class="opt"><div><label class="t">Lines on screen</label><div class="hint">One line keeps more of the picture clear.</div></div>${kSeg("karaoke_rows",[[2,"Two lines"],[1,"One line"]],2)}</div>
-      <div class="opt"><div><label class="t">Look</label><div class="hint">For kids: big, bold, gold words. Elegant: finer letters that glow softly as they're sung.</div></div>${kSeg("karaoke_style",[["kids","For kids"],["elegant","Elegant"]],"kids")}</div>
+      <div class="opt"><div><label class="t">Look</label><div class="hint">For kids: big, bold words that fill with colour. Elegant: finer letters that glow softly as they're sung.</div></div>${kSeg("karaoke_style",[["kids","For kids"],["elegant","Elegant"]],"kids")}</div>
+      <div class="opt"><div><label class="t">Colours</label><div class="hint">The words, and the colour they light up in as they're sung.</div></div><div class="swrow"><label class="sub" style="margin:0;display:flex;align-items:center;gap:6px">Words <input type="color" style="width:44px;height:30px;padding:0;margin:0" value="${kColour("karaoke_color")}" onchange="kOpt('karaoke_color', this.value)"></label><label class="sub" style="margin:0;display:flex;align-items:center;gap:6px">Highlight <input type="color" style="width:44px;height:30px;padding:0;margin:0" value="${kColour("karaoke_highlight")}" onchange="kOpt('karaoke_highlight', this.value)"></label>${opts.karaoke_color || opts.karaoke_highlight ? `<button class="btn small ghost" onclick="opts.karaoke_color='';kOpt('karaoke_highlight','')">Use the look's colours</button>` : ""}</div></div>
       <div style="margin-top:10px"><img id="ksample" alt="How the lyrics will look" style="display:block;width:100%;max-width:520px;border-radius:12px;border:1px solid var(--line);min-height:60px;background:var(--bg2)"></div></div>
       <div class="footerbar">
         <div class="row"><button class="btn" onclick="loadLyrics()">${ICON.folder} Load from a file…</button>

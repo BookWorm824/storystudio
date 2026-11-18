@@ -341,7 +341,8 @@ def api(name, a):
     if name == "hello":
         return {"settings": {k: S.settings.get(k) for k in (
                     "busy", "add_music", "use_local", "use_freesound", "best_of",
-                    "sound_source", "fal_limit", "karaoke_rows", "karaoke_style")},
+                    "sound_source", "fal_limit", "karaoke_rows", "karaoke_style", "karaoke_color",
+                    "karaoke_highlight")},
                 "has_fs_key": bool(S.settings.get("freesound_key")),
                 "has_hf_key": bool(S.settings.get("hf_key")),
                 "has_fal_key": bool(S.settings.get("fal_key")),
@@ -484,7 +485,8 @@ def api(name, a):
         import base64
         import ss_karaoke as K
         st = S.st or {}
-        s = dict(S.settings, **{k: a[k] for k in ("karaoke_rows", "karaoke_style") if k in a})
+        s = dict(S.settings, **{k: a[k] for k in ("karaoke_rows", "karaoke_style",
+                                                  "karaoke_color", "karaoke_highlight") if k in a})
         out = core.APP_DATA / "karaoke_sample.jpg"
         K.sample(st, s, out)
         return {"image": "data:image/jpeg;base64," + base64.b64encode(out.read_bytes()).decode()}
@@ -495,7 +497,8 @@ def api(name, a):
         if not K.parse_lyrics(text):
             raise StoryError("Please paste the song's lyrics first.")
         st["lyrics_text"] = text
-        for k in ("karaoke_rows", "karaoke_style"):         # remembered for next time
+        for k in ("karaoke_rows", "karaoke_style", "karaoke_color",
+                  "karaoke_highlight"):                       # remembered for next time
             if a.get(k) is not None:
                 S.settings[k] = s[k] = a[k]
         core.save_settings(S.settings)

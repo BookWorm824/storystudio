@@ -67,6 +67,8 @@ DEFAULTS = {
     "fal_limit": 0,            # most dollars to spend on Fal per run (0 = no limit)
     "karaoke_rows": 2,         # lyrics on 2 lines (classic) or 1 (keeps the picture clear)
     "karaoke_style": "kids",   # kids (big, bold, gold) / elegant (fine, soft, glowing)
+    "karaoke_color": "",       # the words' colour, "#rrggbb" ("" = the look's own)
+    "karaoke_highlight": "",   # the colour of words being sung ("" = the look's own)
     "style": "auto",           # auto / cartoon / realistic
     "loudness_target": -14.0,  # YouTube
     "last_folder": "",
