@@ -627,6 +627,20 @@ def api(name, a):
             K.check(r, folder, progress, cancel, again=bool(a.get("again")))
         return {"job": run_job("Looking at your pictures and clips", work, "script",
                                [20 + n * 1.2 + (n // 15 + 1) * 45])}
+    if name == "sb_roughcut":
+        import ss_roughcut as RC
+        if not S.sb:
+            raise StoryError("The shot list isn't open any more. Open it again, then try once "
+                             "more.")
+        res = RC.build(S.sb, a.get("folder") or S.sb.get("clip_folder") or "")
+        return {"rough": res, "result": S.sb}
+    if name == "reveal":
+        p = a.get("path")
+        if not p or not os.path.exists(p):
+            raise StoryError("That file isn't there any more. It may have been moved, renamed "
+                             "or still be syncing.")
+        subprocess.Popen(["explorer", "/select,", os.path.normpath(p)])
+        return {"ok": True}
     if name == "sb_shot_type":
         import ss_script as SB
         if not S.sb:

@@ -1,5 +1,5 @@
 {
-  "version": "1.17.0",
+  "version": "1.18.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -21,6 +21,7 @@
     "ss_gpt.py",
     "ss_script.py",
     "ss_clips.py",
+    "ss_roughcut.py",
     "ss_craft.py",
     "ss_shottypes.json",
     "ss_styles.json",
@@ -29,5 +30,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "A big one for cartoons and AI clips. StoryStudio now checks your pictures and clips (keep, use these seconds, or make again with new wording), checks that shots match each other, writes cartoons the way the classic shorts were made, and has a step-by-step guide on the start page."
+  "notes": "StoryStudio can now build your rough cut. In a shot list, under Your pictures and clips, press Build the rough cut: it makes a Premiere timeline with every shot in order, each clip cut to its good seconds and set to its speed. Shots that are not ready use their picture as a stand-in."
 }

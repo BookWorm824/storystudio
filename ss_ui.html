@@ -349,7 +349,7 @@ async function openGuide() {
     ["Check the pictures before you pay for video", `In the shot list press <b>Choose the folder and check them</b>. StoryStudio tells you which pictures are good and gives you new wording for the ones that aren't. Fixing a picture is cheap; a clip made from a bad picture is wasted.`],
     ["Make the clips", `In MiniMax, upload the shot's picture and paste its <b>Image-to-video prompt</b> (keep the camera words in [brackets]). Save each as <b>shot 1.mp4</b>; a second try is <b>shot 1b.mp4</b>. Two or three tries for a shot is normal.`],
     ["Check the clips", `Press <b>Check the new ones</b>. For each clip StoryStudio says: keep it, use only these seconds, or make it again with this new wording. It also checks that the shots match each other, and tells you when one faces the wrong way.`],
-    ["Put it together in Premiere", `Put the good clips on the timeline in shot order, using the seconds StoryStudio gave you. Cut straight from shot to shot; save fades for when time passes. Don't worry about exact timing yet.`],
+    ["Put it together in Premiere", `In the shot list press <b>Build the rough cut</b>. StoryStudio makes a timeline with every shot in order, each clip already cut to its good seconds and set to its speed. In Premiere click File, then Import, and choose the rough cut file. Shots cut straight from one to the next; save fades for when time passes. Don't worry about exact timing yet.`],
     ["Fix the timing", `Open the project in StoryStudio, click <b>Timing and pacing</b> and choose Silent cartoon. Then press <b>Make these changes for me</b>: StoryStudio trims, speeds up and tightens the shots in a copy ending in “(retimed)”.` + go("Open my Premiere project", "pickProject()")],
     ["Add the sound effects", `Open the (retimed) copy in StoryStudio, click <b>Add sound effects</b> and choose <b>Cartoon: a sound for everything</b>. Sound goes in after the timing is right, so it stays in step.`],
     ["Music, title and thumbnail", `The shot list has three music prompts for Suno (a strolling tune, a sneaky tune and a chase tune), a title picture prompt and a YouTube thumbnail prompt.`],
@@ -999,18 +999,50 @@ function clipsCard(r) {
   const total = r.shots.length, done = n.done || 0;
   if (!r.clip_folder) return `<div class="card" style="margin-top:26px"><h2>Your pictures and clips</h2>
     <div class="sub" style="margin:0 0 12px">Once you've made some pictures or clips, StoryStudio can look at them and tell you which are good, which seconds of each clip to use, and exactly what to paste to redo the ones that went wrong. Name each file with its shot number, like <b>shot 5.png</b> and <b>shot 5.mp4</b> (<b>shot 5b.mp4</b> for another try). A picture named after a character${r.characters.length ? ` (<b>${esc(r.characters[0].name)}.png</b>)` : ""} is used to check that character looks the same everywhere.</div>
-    <button class="btn primary" onclick="clipsPick()">${ICON.folder} Choose the folder and check them</button></div>`;
+    <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn primary" onclick="clipsPick()">${ICON.folder} Choose the folder and check them</button><button class="btn ghost" onclick="roughPick(this)">Just put my clips on a Premiere timeline</button></div><div class="pmsg" id="rcmsg"></div></div>`;
   const chip = (k, t, cls) => n[k] ? `<span class="chip ${cls || ""}">${n[k]} ${n[k] === 1 ? t[0] : t[1]}</span>` : "";
-  const next = n["redo picture"] ? "Next: make the pictures again that are marked below, then their clips." : n["redo clip"] ? "Next: make the marked clips again with the new wording below." : n.picture ? "Next: make the clips for the pictures that are ready." : n.todo ? "Next: make the pictures for the shots that haven't been started." : "Every shot has a good clip. Time to put them together in Premiere, then use Timing and pacing.";
+  const next = n.unchecked ? "Next: press “Check the new ones” so StoryStudio can look at the clips it hasn't seen." : n["redo picture"] ? "Next: make the pictures again that are marked below, then their clips." : n["redo clip"] ? "Next: make the marked clips again with the new wording below." : n.picture ? "Next: make the clips for the pictures that are ready." : n.todo ? "Next: make the pictures for the shots that haven't been started." : "Every shot has a good clip. Build the rough cut below, then use Timing and pacing.";
   return `<div class="card" style="margin-top:26px"><h2>Your pictures and clips</h2>
     <div class="sub" style="margin:0 0 10px"><b>${done} of ${total}</b> shots ${done === 1 ? "has" : "have"} a clip that's ready for the edit. ${next}</div>
-    <div class="chips" style="margin:0 0 12px">${chip("done", ["ready", "ready"], "good")}${chip("redo clip", ["clip to make again", "clips to make again"], "warn")}${chip("redo picture", ["picture to make again", "pictures to make again"], "warn")}${chip("picture", ["picture waiting for a clip", "pictures waiting for a clip"])}${chip("todo", ["not started", "not started"])}</div>
+    <div class="chips" style="margin:0 0 12px">${chip("done", ["ready", "ready"], "good")}${chip("redo clip", ["clip to make again", "clips to make again"], "warn")}${chip("redo picture", ["picture to make again", "pictures to make again"], "warn")}${chip("unchecked", ["clip not checked yet", "clips not checked yet"])}${chip("picture", ["picture waiting for a clip", "pictures waiting for a clip"])}${chip("todo", ["not started", "not started"])}</div>
     ${(r.clip_notes || []).map(x => `<div class="sub" style="margin:0 0 8px">${esc(x)}</div>`).join("")}
     ${(r.continuity || []).length ? `<div style="margin:0 0 12px"><b>Shots that don't match each other</b><ul class="notes">${r.continuity.map(x => `<li><b>Shot ${x.shot}</b> against shot ${x.against}: ${esc(x.problem)} <span style="color:var(--soft)">${esc(x.fix)}</span></li>`).join("")}</ul></div>` : ""}
     ${(r.clip_unknown || []).length ? `<div class="sub" style="margin:0 0 8px">${r.clip_unknown.length} file${r.clip_unknown.length === 1 ? "" : "s"} had no shot number in the name, so StoryStudio left ${r.clip_unknown.length === 1 ? "it" : "them"} out (${r.clip_unknown.slice(0, 3).map(esc).join(", ")}${r.clip_unknown.length > 3 ? "…" : ""}).</div>` : ""}
     <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn primary" onclick="clipsCheck()">Check the new ones</button><button class="btn" onclick="clipsPick()">${ICON.folder} Choose another folder</button><button class="btn ghost" onclick="clipsCheck(true)">Check everything again</button>
-    <span class="sub" style="margin:0">${esc(r.clip_folder)}${r.clip_checked ? " · checked " + esc(r.clip_checked) : ""}</span></div></div>`;
+    <span class="sub" style="margin:0">${esc(r.clip_folder)}${r.clip_checked ? " · checked " + esc(r.clip_checked) : ""}</span></div>
+    ${roughBlock(r)}</div>`;
 }
+// ---- the rough cut: the checked clips on a Premiere timeline, in order
+function listShots(a) { return a.length === 1 ? `Shot ${a[0]}` : `Shots ${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`; }
+function roughText(j) {
+  const m = Math.floor(j.seconds / 60), s = Math.round(j.seconds - m * 60);
+  const long = m ? `${m} min ${s} s` : `${s} seconds`;
+  let t = `<span class="ok">✓ Your rough cut is made:</span> ${j.shots} shot${j.shots === 1 ? "" : "s"} in order, about ${long} long.`;
+  const did = [];
+  if (j.trimmed) did.push(`${j.trimmed} clip${j.trimmed === 1 ? " is" : "s are"} cut to ${j.trimmed === 1 ? "its" : "their"} good seconds`);
+  if (j.sped) did.push(`${j.sped} play${j.sped === 1 ? "s" : ""} at a new speed`);
+  if (did.length) t += ` ${did.join(" and ")[0].toUpperCase()}${did.join(" and ").slice(1)}.`;
+  if (j.stand_ins.length) t += ` ${listShots(j.stand_ins)} ${j.stand_ins.length === 1 ? "isn't" : "aren't"} ready yet, so ${j.stand_ins.length === 1 ? "its picture holds its" : "their pictures hold their"} place (orange on the timeline, with a marker).`;
+  if (j.unchecked.length) t += ` ${listShots(j.unchecked)} ${j.unchecked.length === 1 ? "hasn't" : "haven't"} been checked, so ${j.unchecked.length === 1 ? "it went" : "they went"} in whole (purple).`;
+  if (j.missing.length) t += ` ${listShots(j.missing)} ${j.missing.length === 1 ? "has" : "have"} nothing made yet; a marker shows where ${j.missing.length === 1 ? "it goes" : "they go"}.`;
+  return t;
+}
+function roughBlock(r) {
+  const j = r.rough_cut;
+  return `<div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)"><b style="font-size:16px">Rough cut for Premiere</b>
+    <div class="sub" style="margin:6px 0 12px">StoryStudio can put your shots on a Premiere timeline for you: every shot in order, each clip cut to its good seconds and set to its speed. A shot that isn't ready yet uses its picture as a stand-in, so you can watch the whole story. Your pictures and clips aren't changed.</div>
+    <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn primary" onclick="roughCut(this)">${j ? "Build it again" : "Build the rough cut"}</button>${j ? `<button class="btn" onclick='revealFile(${esc(JSON.stringify(j.file))}, this)'>${ICON.folder} Show me the file</button>` : ""}</div>
+    <div class="pmsg" id="rcmsg"></div>
+    ${j ? `<div class="sub" style="margin:12px 0 0">${roughText(j)}</div>
+    <div class="sub" style="margin:10px 0 0"><b>To open it in Premiere:</b><br>1. Open Premiere, and make a new project (or open this video's project).<br>2. Click <b>File</b>, then <b>Import</b>, and choose <b>${esc(j.file_name)}</b>. It's in the folder with your pictures and clips.<br>3. Double-click the timeline called <b>${esc(j.name)}</b>.<br>Then save the project. When you're ready, open that project in StoryStudio and use <b>Timing and pacing</b>.</div>` : ""}</div>`;
+}
+async function roughCut(btn, folder) {
+  const old = btn ? btn.innerHTML : ""; if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
+  try { const k = await api("sb_roughcut", folder ? {folder} : {}); SBR = k.result; const y = $("main").scrollTop; renderScript(); $("main").scrollTop = y; }
+  catch (e) { if (btn) { btn.disabled = false; btn.innerHTML = old; } const m = $("#rcmsg"); if (m) m.innerHTML = `<span class="err">${esc(e.message || "That didn't work.")}</span>`; }
+}
+async function roughPick(btn) { if (picking) return; picking = true; let j; try { j = await api("sb_clips_pick"); } finally { picking = false; } if (j.folder) roughCut(btn, j.folder); }
+async function revealFile(path, btn) { try { await api("reveal", {path}); } catch (e) { const m = $("#rcmsg"); if (m) m.innerHTML = `<span class="err">${esc(e.message || "")}</span>`; } }
 async function clipsPick() { if (picking) return; picking = true; let j; try { j = await api("sb_clips_pick"); } finally { picking = false; } if (j.folder) { const k = await api("sb_clips_check", {folder: j.folder}); watchJob(k.job); } }
 async function clipsCheck(again) { const k = await api("sb_clips_check", {again: !!again}); watchJob(k.job); }
 function sbTypeCounts(r) {          // how many of each type, most to least, and the tries
