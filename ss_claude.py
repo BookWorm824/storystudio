@@ -327,6 +327,15 @@ BUSY = {
             "action that really makes a sound, all the way through (soft under the "
             "narration). Rich means more of the sounds that belong, never noise for its own "
             "sake.",
+    "cartoon": "CARTOON, WALL TO WALL: this is a wordless slapstick cartoon with no narration, "
+               "so the sound effects tell the story. Give a sound to EVERY visible action, "
+               "however small: each footstep pattern (tiptoe, scamper, skid), every bonk, "
+               "bounce, zip, whoosh, splat, pop, stretch, blink and double take, plus things "
+               "falling, landing and wobbling. Prefer classic cartoon sounds (slide whistle, "
+               "boing, bonk, zip, pizzicato tiptoes, a falling whistle, spinning-top dizzy "
+               "sound) over realistic ones where they fit the gag, and add wordless voice "
+               "sounds for the characters (gasp, giggle, yelp, sniff, panting, a sigh). Mark "
+               "them synced and time each to the exact moment. Keep ambience light.",
 }
 
 

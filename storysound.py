@@ -52,7 +52,8 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
     n_look = len([s for s in st.get("shots") or [] if s.get("name") != "black"]) or \
         max(4, round(d / 5))
     plan += 30 + n_look * 0.6 + math.ceil(math.ceil(n_look / 6) / 3) * 40   # close look
-    per_min = {"light": 7, "normal": 13, "lots": 24}.get(settings.get("busy", "normal"), 13)
+    per_min = {"light": 7, "normal": 13, "lots": 24, "cartoon": 34}.get(
+        settings.get("busy", "normal"), 13)
     n = n_cues if n_cues is not None else max(4, round(d / 60 * per_min))
     beds = max(1, round(n * 0.3))
     takes = max(1, int(settings.get("best_of", 3)))
@@ -241,6 +242,7 @@ def analyze(st, settings, progress=None, cancel=None):
     if cancel and cancel():
         raise StoryError("Stopped.")
 
+    st["cartoon"] = settings.get("busy") == "cartoon"   # wordless cartoon: effects up front
     balance_audio(st, seq, progress, cancel)
     clips = st["clips"]
 
@@ -288,7 +290,7 @@ def analyze(st, settings, progress=None, cancel=None):
         log_error("close look")
     if cancel and cancel():
         raise StoryError("Stopped.")
-    st["movie_type"] = plan.get("movie_type", "")
+    st["movie_type"] = "cartoon" if st.get("cartoon") else plan.get("movie_type", "")
     st["look"] = plan.get("look", "")
     st["cues"] = tidy_cues(plan["cues"], dur, st["cuts"])
     st["stage"] = "planned"
@@ -358,6 +360,7 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
         log_error("lip-sync voice cleanup")
     mapping, report, set_levels, per_clip = ss_mix.process(
         clips, st["speech"] if dia else [], work, out_dir(st) / "audio", song_video,
+        music_target=ss_mix.CARTOON_MUSIC if st.get("cartoon") and not dia else None,
         originals=originals, progress=lambda f, m: _say(progress, at(0.8 + 0.2 * f), m))
     reset = {}                               # track item id -> clip volume (dB) in the copy
     for c in clips:                          # the preview now plays the processed copies

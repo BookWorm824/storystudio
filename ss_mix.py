@@ -24,6 +24,7 @@ MUSIC_ALONE = -24.0           # music when nobody is talking
 MUSIC_UNDER = -31.0           # music under narration (about 13 dB below the voice)
 HOLD_GAP = 2.5                # music/backgrounds stay down through pauses shorter than this
 SONG_TARGET = -16.0           # music videos: the song is the main sound
+CARTOON_MUSIC = -22.0         # wordless cartoons: the score sits under the sound effects
 SFX_TARGET = -30.0            # sound effects already on the timeline (well under the voice)
 BG_TARGET = -39.0             # long background sounds (birds, rain, room tone)
 SFX_PEAK = -26.0              # loudest moment of an effect / a background, at most
@@ -339,7 +340,8 @@ def clean_video_voices(clips, work, out_dir, originals=None, progress=None):
     return out_map
 
 
-def process(clips, speech, work, out_dir, song_video=False, progress=None, originals=None):
+def process(clips, speech, work, out_dir, song_video=False, progress=None, originals=None,
+            music_target=None):
     """clips: from ss_media.build_stems (each has file, start, end, gain_db, tag, src_in,
     speed, id, track_db). In StoryStudio's project copy every clip handled here loses its
     Premiere effects and clip gain (StoryStudio's cleanup replaces them), so levels are set
@@ -438,7 +440,9 @@ def process(clips, speech, work, out_dir, song_video=False, progress=None, origi
                     if L < -60:
                         base = 0.0
                     elif song_video or not speech:
-                        base = max(-24.0, min(18.0, SONG_TARGET - L - c.get("track_db", 0.0)))
+                        base = max(-24.0, min(18.0, (SONG_TARGET if music_target is None
+                                                      else music_target)
+                                               - L - c.get("track_db", 0.0)))
                     else:
                         base = max(-30.0, min(18.0, MUSIC_ALONE - L - c.get("track_db", 0.0)))
                     t = np.arange(s0, s1 + 0.1, 0.1)
@@ -532,7 +536,9 @@ def process(clips, speech, work, out_dir, song_video=False, progress=None, origi
                               f"by {abs(v - np.median(vals)):.0f} dB; fixed.")
     if music_moves:
         if song_video or not speech:
-            report.append("The song was set to a steady, comfortable level.")
+            report.append("The music was set to a steady level under the sound effects."
+                          if music_target is not None else
+                          "The song was set to a steady, comfortable level.")
         else:
             report.append("Music now sits under the narration: it dips while someone talks and "
                           "comes back up in the gaps.")

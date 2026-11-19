@@ -336,27 +336,27 @@ function readyCard() {
     <button class="btn primary" onclick="setupTools()">Download now</button></div></div>`;
 }
 async function setupTools() { const j = await api("setup_tools"); watchJob(j.job); }
+function kindLabel(k) { return k === "story" ? "Story" : k === "cartoon" ? "Silent cartoon" : "Music video"; }
 function renderHome() {
   if (!P) {
+    const lists = H.shotlists || [], recent = H.recent || [];
     $("#view").innerHTML = readyCard() + `
-      <h1>Welcome back</h1><p class="sub">Open a Premiere project to get started (StoryStudio works on its own copy, so you can keep editing), or put karaoke lyrics on a finished video.</p>
-      <div class="hero">
-        <div style="display:flex;flex-direction:column;gap:12px">
-        <button class="drop" onclick="pickProject()">
-          ${ICON.folder.replace('<svg','<svg style="width:54px;height:54px;color:var(--accent)"')}
-          <h2 style="margin:6px 0 4px">Open a Premiere project</h2>
-          <div class="sub" style="margin:0">Choose a .prproj file</div>
-        </button>
-        <button class="btn" style="justify-content:center;padding:14px" onclick="pickVideo()">${ICON.mic || ""} Karaoke lyrics on a video file (MP4)</button>
-        </div>
-        <div class="card"><button class="btn primary" style="width:100%;justify-content:center;margin-bottom:16px" onclick="openBuilder()">${ICON.film} Plan a new video: script builder</button>${(H.shotlists||[]).length ? `<h2>Your shot lists</h2><div class="pastlist" style="margin-bottom:18px">${H.shotlists.map(r => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots</small></div><button class="btn small" onclick='homeOpenList(${esc(JSON.stringify(r.path))}, this)'>Open</button></div>`).join("")}</div>` : ""}<h2>Recent projects</h2>
-          <div class="recent">${(H.recent||[]).map(r => `<button onclick='openProject(${esc(JSON.stringify(r.path))})'><div class="ic">Pr</div><div><div>${esc(r.name)}</div><small>${esc(r.folder)}</small></div></button>`).join("") || '<div class="sub">Projects you open will show up here.</div>'}</div>
-        </div>
-      </div>`;
+      <h1>What would you like to do?</h1><p class="sub">Pick one to get started.</p>
+      <div class="tasks" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:18px">
+        ${task("film","#2b2414","#ffd27a","Plan a new video","Start from song lyrics, a story, or a silent cartoon idea. You get a shot list with a picture prompt and a video prompt for every shot.","openBuilder()")}
+        ${task("folder","#3a2a14","var(--accent)","Work on a video I'm editing","Open your Premiere project to add sound effects, fix the audio, add karaoke lyrics or get edit feedback. StoryStudio works on its own copy.","pickProject()")}
+        ${task("mic","#2a2142","#c9a7ff","Put karaoke lyrics on a finished video","Choose a video file (MP4) and paste the lyrics. No Premiere project needed.","pickVideo()")}
+      </div>
+      ${lists.length || recent.length ? `<h2 style="margin:34px 0 12px">Pick up where you left off</h2>
+      <div class="hero" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+        ${recent.length ? `<div class="card"><h2>Premiere projects</h2><div class="recent">${recent.map(r => `<button onclick='openProject(${esc(JSON.stringify(r.path))})'><div class="ic">Pr</div><div><div>${esc(r.name)}</div><small>${esc(r.folder)}</small></div></button>`).join("")}</div></div>` : ""}
+        ${lists.length ? `<div class="card"><h2>Shot lists</h2><div class="pastlist">${lists.map(r => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${kindLabel(r.kind)} · ${r.shots} shots</small></div><button class="btn small" onclick='homeOpenList(${esc(JSON.stringify(r.path))}, this)'>Open</button></div>`).join("")}</div></div>` : ""}
+      </div>` : ""}`;
     return;
   }
   const seqs = P.sequences.length > 1 ? `<div class="field">Sequence <select onchange="switchSeq(this.value)">${P.sequences.map(s => `<option value="${esc(s.uid)}" ${s.uid===P.seq_uid?"selected":""}>${esc(s.name)} (${s.duration})</option>`).join("")}</select></div>` : "";
   $("#view").innerHTML = readyCard() + `
+    <div class="row" style="margin-bottom:12px"><button class="btn small ghost" onclick="goHome()">‹ Start page</button></div>
     <div class="card project">
       <div class="thumb" style="${P.thumb ? `background-image:url('${P.thumb}')` : ""}"><span class="len">${P.duration}</span></div>
       <div>
@@ -375,18 +375,16 @@ function renderHome() {
         <div class="field">Story <b title="${esc(P.story)}">${P.story ? esc(P.story.split(/[\\/]/).pop()) : "No script found (StoryStudio will listen to the narration)"}</b><button class="btn ghost" onclick="pickStory()">Choose…</button></div>
       </div>
     </div>
-    <div class="row" style="justify-content:space-between;margin-top:30px;flex-wrap:wrap;gap:10px"><h2 style="margin:0">What would you like to do?</h2>
+    <div class="row" style="justify-content:space-between;margin-top:30px;flex-wrap:wrap;gap:10px"><h2 style="margin:0">What would you like to do with this video?</h2>
       <div class="swrow"><button class="switch ${MULTI?"on":""}" onclick="toggleMulti()" aria-label="Do several at once"></button><span class="sub" style="margin:0">Do several at once</span></div></div>
     ${MULTI ? `<div class="sub" style="margin:8px 0 0">Tick what you'd like. StoryStudio does them in this order, each on the copy the step before made: sound effects, then the audio, then karaoke, then feedback.</div>` : ""}
     <div class="tasks">
       ${pickTask("sounds","sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","setupSounds()")}
       ${pickTask("fix","wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
       ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
-      ${MULTI ? "" : task("film","#2b2414","#ffd27a","Script builder","Lyrics or a story into shots, with picture and MiniMax prompts for each.","openBuilder()")}
       ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback()")}
-      ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Smooth edits","Lines cuts up with the beat and smooths rough spots.","", true)}
-      ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","Open last time's sounds","Pick up where you left off with this project.","openPrevious()") : ""}
-      ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","Open last time's feedback","See the notes from the last time it watched this project.","openPreviousFeedback()") : ""}
+      ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","See last time's sounds","The sounds StoryStudio made for this project before.","openPrevious()") : ""}
+      ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","See last time's feedback","The notes from the last time it watched this project.","openPreviousFeedback()") : ""}
     </div>
     <div id="setup"></div>`;
   if (MULTI && PICK.length) renderPlan();
@@ -413,7 +411,7 @@ function renderPlan() {
   const fbSeg = (key, items) => `<div class="seg">${items.map(([v,t]) => `<button class="${fbOpts[key]===v?"on":""}" onclick="fbOpts.${key}=${esc(JSON.stringify(v))};renderPlan()">${t}</button>`).join("")}</div>`;
   const parts = PICK.map((id, i) => {
     let body = "";
-    if (id === "sounds") body = `<div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"]])}</div>
+    if (id === "sounds") body = `<div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"],["cartoon","Cartoon: a sound for everything"]])}</div>
       <div class="opt"><div><label class="t">Quality</label></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>
       <div class="opt"><div><label class="t">Background music</label></div><div class="swrow">${sw("add_music")}<span class="sub" style="margin:0">${opts.add_music?"On":"Off"}</span></div></div>
       <div class="sub" style="margin:6px 0 0">You'll check the sounds before they go in; after you press “Put them in my movie”, StoryStudio carries on by itself.</div>`;
@@ -520,7 +518,7 @@ async function setupSounds(keepScroll) {
   $("#setup").innerHTML = `
     <div class="card panel">
       <h2>Add sound effects</h2>
-      <div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"]])}</div>
+      <div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"],["cartoon","Cartoon: a sound for everything"]])}</div>
       ${H.has_fal_key ? `<div class="opt"><div><label class="t">Who makes the sounds</label><div class="hint">${opts.sound_source === "pc" ? "The sound AI on this PC. Free, but the sounds are rougher." : "Fal watches each whole shot and makes its sounds while watching, so every sound lands in step with the picture. Uses the credit on your Fal account."}</div></div>${seg("sound_source",[["auto","Fal"],["pc","This PC (free)"]])}</div>` : `<div class="opt"><div><label class="t">Better sounds with Fal</label><div class="hint">Add your Fal key and the sounds are made by Fal instead of this PC: clearer, and in step with the picture.</div></div><div class="swrow"><span class="chip">No key yet</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
       ${H.has_fal_key && opts.sound_source !== "pc" ? `<div class="opt"><div><label class="t">Spending limit</label><div class="hint">The most this story may cost on Fal. The most important shots (doors, footsteps, things picked up or dropped) get their sounds first; the rest keep their backgrounds. Leave empty for no limit.</div></div><div class="swrow"><span class="sub" style="margin:0">$</span><input type="number" min="0" step="0.5" style="width:90px;margin:0" placeholder="No limit" value="${opts.fal_limit ? opts.fal_limit : ""}" onchange="setOpt('fal_limit', Math.max(0, parseFloat(this.value) || 0))"></div></div>` : ""}
       ${H.has_fal_key && opts.sound_source !== "pc" ? `<div class="opt"><div><label class="t">Versions</label><div class="hint">Best makes 2 versions of each shot's sound and keeps the one that fits. Quick makes 1 and costs half.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>` : `<div class="opt"><div><label class="t">Quality</label><div class="hint">Best makes 3 versions of each sound and keeps the one that fits.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>`}
@@ -667,7 +665,7 @@ async function openFbProject() { if (F.dirty) { const j = await api("fb_save"); 
 
 // ---------------------------------------------------------------- script builder
 let SBD = null;                       // styles, aspects, recent shot lists
-let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", onscreen:"auto", cast:"", style_id:"", aspect:"16:9", styleTab:"", styleFind:"", ideas:[], wording:"improved", style_len:"short", talk:null, talkView:false};
+let SBS = {kind:"", text:"", title:"", song:"", clip:8, direction:"", onscreen:"auto", cast:"", style_id:"", aspect:"16:9", cartoonLen:"1:30", cclip:5, started:false, styleTab:"", styleFind:"", ideas:[], wording:"improved", style_len:"short", talk:null, talkView:false};
 const ONSCREEN = [["auto","Go by my direction"],["main","Main characters"],["none","No main character (B-roll)"],["nopeople","No people"]];
 const ONSCREEN_HINT = {auto:"StoryStudio follows what your direction says.", main:"The video follows the characters you set up below.", none:"Different people of all ages in different shots, mixed with nature. No one person throughout.", nopeople:"Only nature, animals and places."};
 let SBR = null;                       // the finished shot list
@@ -687,7 +685,7 @@ function sbStep(n, title, body, hint) {
 }
 function renderBuilder(top) {
   if (SBS.talkView && SBS.kind) return renderTalk(top);
-  const music = SBS.kind === "music", story = SBS.kind === "story";
+  const music = SBS.kind === "music", story = SBS.kind === "story", cartoon = SBS.kind === "cartoon";
   const groups = [...new Set(SBD.styles.map(s => s.group))];
   if (!SBS.styleTab) SBS.styleTab = groups.find(g => g !== "My styles") || groups[0];
   const find = SBS.styleFind.toLowerCase();
@@ -696,12 +694,15 @@ function renderBuilder(top) {
   let n = 1, steps = [];
   steps.push(sbStep(n++, "What are we making?", `<div class="row" style="gap:12px;flex-wrap:wrap">
       <button class="kindbtn ${music?"on":""}" onclick="sbSet('kind','music',true)">${ICON.mic}<b>Music video</b><span>From song lyrics</span></button>
-      <button class="kindbtn ${story?"on":""}" onclick="sbSet('kind','story',true)">${ICON.film}<b>Story</b><span>From a story script</span></button></div>`));
+      <button class="kindbtn ${story?"on":""}" onclick="sbSet('kind','story',true)">${ICON.film}<b>Story</b><span>From a story script</span></button>
+      <button class="kindbtn ${cartoon?"on":""}" onclick="sbSet('kind','cartoon',true)">${ICON.sound}<b>Silent cartoon</b><span>No words: silly gags and lots of sound effects</span></button></div>`));
   if (SBS.kind) {
-    steps.push(sbStep(n++, music ? "The lyrics" : "The story script", `
+    steps.push(sbStep(n++, music ? "The lyrics" : cartoon ? "Your cartoon" : "The story script", `
+      ${cartoon ? `<div class="seg" style="margin-bottom:10px"><button class="${!SBS.started?"on":""}" onclick="sbSetKeep('started',false)">Start from scratch</button><button class="${SBS.started?"on":""}" onclick="sbSetKeep('started',true)">I've already started one</button></div>` : ""}
       <input type="text" class="sbin" placeholder="Title (optional)" value="${esc(SBS.title)}" oninput="SBS.title=this.value" style="margin-bottom:10px">
-      <textarea id="sbtext" class="sbin" rows="10" placeholder="${music ? "Paste the song lyrics here…" : "Paste the story script here…"}" oninput="SBS.text=this.value">${esc(SBS.text)}</textarea>
-      <div class="row" style="margin-top:10px"><button class="btn" onclick="sbLoadText()">${ICON.folder} Load from a file…</button><span class="sub" style="margin:0">Word, PDF or text file</span></div>`));
+      <textarea id="sbtext" class="sbin" rows="${cartoon && !SBS.started ? 5 : 10}" placeholder="${music ? "Paste the song lyrics here…" : cartoon ? (SBS.started ? "Tell me what you have so far, in order: the character, the idea, the gags or shots you've already made, and where you're stuck or what's still missing…" : "What's the cartoon about? One sentence is enough. For example: A puppy tries to nap in the garden, but a bee keeps landing on his nose…") : "Paste the story script here…"}" oninput="SBS.text=this.value">${esc(SBS.text)}</textarea>
+      <div class="row" style="margin-top:10px"><button class="btn" onclick="sbLoadText()">${ICON.folder} Load from a file…</button><span class="sub" style="margin:0">Word, PDF or text file</span></div>`,
+      cartoon ? (SBS.started ? "StoryStudio keeps everything you've made, fills the gaps, adds the reactions and finishes it." : "No script needed: StoryStudio writes the gags, the reactions and the sound effects for every shot.") : ""));
     if (music) {
       steps.push(sbStep(n++, "Song length and clips", `
         <div class="row" style="flex-wrap:wrap;gap:12px">
@@ -717,6 +718,15 @@ function renderBuilder(top) {
         ${SBS.ideas.length ? `<div class="ideas">${SBS.ideas.map((d, i) => `<button class="idea" onclick="sbUseIdea(${i})"><b>${esc(d.name)}</b><span>${esc(d.direction)}</span></button>`).join("")}</div>` : ""}`));
       steps.push(sbStep(n++, "Who's in it?", `<div class="seg" style="flex-wrap:wrap">${ONSCREEN.map(([v, t]) => `<button class="${SBS.onscreen === v ? "on" : ""}" onclick="sbSetKeep('onscreen','${v}')">${t}</button>`).join("")}</div>
         <div class="sub" style="margin:8px 0 0">${ONSCREEN_HINT[SBS.onscreen] || ""}</div>`));
+    } else if (cartoon) {
+      steps.push(sbStep(n++, "Length and clips", `
+        <div class="row" style="flex-wrap:wrap;gap:12px">
+          <input type="text" class="sbin" style="width:120px" placeholder="1:30" value="${esc(SBS.cartoonLen)}" oninput="SBS.cartoonLen=this.value">
+          <span style="flex:1"></span>
+          <span class="sub" style="margin:0">Clip length</span>
+          <div class="seg">${[5,8].map(c => `<button class="${SBS.cclip==c?"on":""}" onclick="sbSet('cclip',${c},true)">${c} seconds</button>`).join("")}</div>
+        </div>`, "Minutes:seconds for the whole cartoon. Short clips suit quick gags. StoryStudio adds extra shots (reactions and details) so you always have something to cut to."));
+      steps.push(sbStep(n++, "Anything to keep in mind?", `<textarea class="sbin" rows="3" placeholder="Optional. For example: he never catches the bee, end with them both asleep, nothing too rough…" oninput="SBS.direction=this.value">${esc(SBS.direction)}</textarea>`));
     } else {
       steps.push(sbStep(n++, "Length and clips", `<div class="sub" style="margin:0">Stories use <b>8-second clips</b>. ${aiName()} reads the script, works out how long it takes to tell, and plans enough shots, plus extra shots to give you room. The story itself is the direction.</div>`));
       steps.push(sbStep(n++, "Anything to keep in mind?", `<textarea class="sbin" rows="3" placeholder="Optional. For example: make the opening obvious she's dreaming, more scenes of the dad, no classroom…" oninput="SBS.direction=this.value">${esc(SBS.direction)}</textarea>`));
@@ -744,7 +754,7 @@ function renderBuilder(top) {
     steps.push(sbStep(n++, "Picture shape", `<div class="seg">${SBD.aspects.map(a => `<button class="${SBS.aspect===a?"on":""}" onclick="sbSet('aspect','${a}',true)">${a}</button>`).join("")}</div>`, "16:9 is the usual YouTube shape."));
   }
   $("#view").innerHTML = `
-    <div class="rhead" id="sbpage"><div><h1>Script builder</h1><div class="sub" style="margin:0">Turns lyrics or a story into a shot list with a picture prompt and a MiniMax prompt for every shot.</div></div>
+    <div class="rhead" id="sbpage"><div><h1>Script builder</h1><div class="sub" style="margin:0">Turns lyrics, a story or a cartoon idea into a shot list with a picture prompt and a MiniMax prompt for every shot.</div></div>
     ${H.ai && H.ai.name ? `<div class="row" style="gap:8px"><span class="chip">${esc(H.ai.name)}${H.ai.model_name ? " · " + esc(H.ai.model_name) : ""}</span><button class="btn small ghost" onclick="openSettings()">Change</button></div>` : ""}
 </div>
     ${SBD.recent.length ? `<div class="card" style="margin-bottom:14px"><h2 style="margin:0 0 10px">Your shot lists</h2>${pastLists()}</div>` : ""}
@@ -787,7 +797,7 @@ async function sbBrainstorm() {
 }
 function sbUseIdea(i) { SBS.direction = SBS.ideas[i].direction; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; toast("Added to the direction. Change it however you like."); }
 async function sbCast() {
-  if (!SBS.text.trim()) return toast("Paste the " + (SBS.kind === "story" ? "story" : "lyrics") + " first.", true);
+  if (!SBS.text.trim()) return toast(sbNeedText(), true);
   const b = $("#castbtn"); b.disabled = true; b.textContent = "Describing the characters…";
   try {
     const st = SBD.styles.find(s => s.id === SBS.style_id);
@@ -802,10 +812,12 @@ async function sbSaveStyle() {
   const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; toast("Saved to My styles");
 }
 async function sbDelStyle(id) { const j = await api("sb_delete_style", {id}); SBD.styles = j.styles; if (SBS.style_id === id) SBS.style_id = ""; const y = $("main").scrollTop; renderBuilder(); $("main").scrollTop = y; }
+function sbNeedText() { return SBS.kind === "cartoon" ? (SBS.started ? "Tell me what you have so far first." : "Describe your cartoon idea first.") : "Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first."; }
 function songSeconds(t) { t = String(t || "").trim(); if (!t) return 0; const p = t.split(":").map(Number); return p.length > 1 ? p[0] * 60 + (p[1] || 0) : p[0]; }
 async function sbStart() {
-  if (!SBS.text.trim()) return toast("Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first.", true);
+  if (!SBS.text.trim()) return toast(sbNeedText(), true);
   if (SBS.kind === "music" && !(songSeconds(SBS.song) >= 5)) return toast("Enter how long the song is, for example 3:15.", true);
+  if (SBS.kind === "cartoon" && !(songSeconds(SBS.cartoonLen) >= 15)) return toast("Enter how long the cartoon should be, for example 1:30.", true);
   if (!SBS.style_id) return toast("Choose an art style.", true);
   const spec = Object.assign(sbSpec(), {style_id:SBS.style_id, aspect:SBS.aspect, wording:SBS.wording, style_len:SBS.style_len,
                                         agreed: sbTalkFits() ? SBS.talk.plan : ""});
@@ -815,7 +827,9 @@ async function sbStart() {
 function sbSpec() {                    // what the AI needs to know, for talking it over and building
   const music = SBS.kind === "music", nobody = music && (SBS.onscreen === "none" || SBS.onscreen === "nopeople");
   const st = SBD.styles.find(s => s.id === SBS.style_id);
-  return {kind:SBS.kind, text:SBS.text, title:SBS.title, song_seconds:songSeconds(SBS.song), clip:SBS.clip, direction:SBS.direction,
+  const cartoon = SBS.kind === "cartoon";
+  return {kind:SBS.kind, text:SBS.text, title:SBS.title, song_seconds:songSeconds(SBS.song), clip: cartoon ? SBS.cclip : SBS.clip, direction:SBS.direction,
+          cartoon_seconds: songSeconds(SBS.cartoonLen), started: cartoon && !!SBS.started,
           onscreen: music ? SBS.onscreen : "main", cast: nobody ? "" : SBS.cast, style_name: st ? st.name : ""};
 }
 
@@ -828,7 +842,7 @@ function sbTalkFits() {               // is the plan we talked over for the text
   return was.filter(w => now.has(w)).length / was.length >= 0.7;   // small edits keep the plan; a new song doesn't
 }
 function sbTalkOpen() {
-  if (!SBS.text.trim()) return toast("Paste or load the " + (SBS.kind === "story" ? "story script" : "lyrics") + " first.", true);
+  if (!SBS.text.trim()) return toast(sbNeedText(), true);
   if (SBS.talk && SBS.talk.plan && !sbTalkFits()) SBS.talk = null;      // different lyrics: a new talk
   SBS.talkView = true;
   if (!SBS.talk) { SBS.talk = {heard:"", plan:"", questions:[], answers:[], note:"", rounds:[], edited:false, busy:false}; sbTalkAsk(); }
@@ -864,7 +878,7 @@ function sbTalkBuild() {
 }
 function renderTalk(top) {
   const T = SBS.talk, ai = aiName(), first = !T.plan;
-  const busy = `<div class="card"><div class="talkbusy"><span class="spin"></span>${first ? `${ai} is reading the ${SBS.kind === "story" ? "story" : "lyrics"} and thinking of questions\u2026` : `${ai} is updating the plan\u2026`} This can take up to a minute.</div></div>`;
+  const busy = `<div class="card"><div class="talkbusy"><span class="spin"></span>${first ? `${ai} is ${SBS.kind === "cartoon" ? "thinking about your cartoon" : "reading the " + (SBS.kind === "story" ? "story" : "lyrics") + " and thinking of questions"}\u2026` : `${ai} is updating the plan\u2026`} This can take up to a minute.</div></div>`;
   const qs = T.questions.map((q, i) => `<div class="talkq"><h3>${esc(q.q)}</h3>
       ${q.options.length ? `<div class="chips">${q.options.map((o, k) => `<span class="chip ${T.answers[i] === o ? "on" : ""}" onclick="sbTalkPick(${i},${k})">${esc(o)}</span>`).join("")}</div>` : ""}
       <input type="text" class="sbin" placeholder="Or type your own answer (leave empty to let ${ai} decide)" value="${esc(T.answers[i] || "")}" oninput="SBS.talk.answers[${i}]=this.value"></div>`).join("");
@@ -886,7 +900,7 @@ function renderTalk(top) {
   if (top) $("main").scrollTop = 0;
 }
 function pastLists() {
-  return `<div class="pastlist">${SBD.recent.map((r, i) => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${r.kind === "story" ? "Story" : "Music video"} · ${r.shots} shots · ${esc(r.made || "")}</small></div><button class="btn small" id="past${i}" onclick="sbOpenRecent(${i})">Open</button></div>`).join("")}</div>`;
+  return `<div class="pastlist">${SBD.recent.map((r, i) => `<div class="pastrow"><div><b>${esc(r.title)}</b><small>${kindLabel(r.kind)} · ${r.shots} shots · ${esc(r.made || "")}</small></div><button class="btn small" id="past${i}" onclick="sbOpenRecent(${i})">Open</button></div>`).join("")}</div>`;
 }
 async function sbOpenRecent(i) {
   const b = $("#past" + i); if (b) { b.disabled = true; b.textContent = "Opening…"; }
@@ -958,7 +972,7 @@ function renderScript() {
     return head + `<div class="card shot ${s.extra ? "extra" : ""}">
       <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${s.n}${s.title ? ": " + esc(s.title) : ""}</b>${ty ? `<select class="pill" title="${esc(ty.purpose)}" aria-label="Shot type" onchange="sbSetType(${s.n}, this.value, this)">${SBT.map(t => `<option value="${esc(t.code)}" ${t.code === ty.code ? "selected" : ""}>${esc(t.code)} · ${esc(t.name)}</option>`).join("")}</select>` : ""}<span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
       <span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span></div>
-      ${s.words ? `<div class="words">💬 ${esc(s.words)}</div>` : ""}
+      ${s.words ? `<div class="words">${r.kind === "cartoon" ? "🔊" : "💬"} ${esc(s.words)}</div>` : ""}
       ${s.purpose ? `<div class="purpose"><b>What this shot is for:</b> ${esc(s.purpose)}</div>` : ""}
       ${ty && (s.warnings || []).length ? `<div class="sub" style="margin:2px 0 0">${s.warnings.map(esc).join(" ")}</div>` : ""}
       ${promptBox("Text-to-image prompt", "ChatGPT / Nano Banana", s.picture_prompt, {which:"picture", n:s.n})}
@@ -967,7 +981,7 @@ function renderScript() {
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>${esc(r.title)}</h1><div class="sub" style="margin:0">${esc(r.summary)}</div></div>
       <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.text))}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.folder))}})'>${ICON.folder} Folder</button>` : ""}</div></div>
-    <div class="chips"><span class="chip">${story ? "Story" : "Music video"}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span>${types.gens ? `<span class="chip" title="A rough guide: some shot types take several tries to come out right">About ${Math.ceil(types.gens)} generations</span>` : ""}</div>
+    <div class="chips"><span class="chip">${kindLabel(r.kind)}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span>${types.gens ? `<span class="chip" title="A rough guide: some shot types take several tries to come out right">About ${Math.ceil(types.gens)} generations</span>` : ""}</div>
     ${types.line ? `<div class="sub" style="margin:8px 0 0">Shot types: ${esc(types.line)}</div>` : ""}
     ${r.approach ? `<div class="banner"><b>The plan:</b> ${esc(r.approach)}</div>` : ""}
     ${r.visual_rules ? `<div class="banner">${esc(r.visual_rules)}</div>` : ""}

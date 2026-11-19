@@ -1,5 +1,5 @@
 {
-  "version": "1.13.1",
+  "version": "1.14.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -27,5 +27,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Karaoke: choose the colour of the words and the colour they light up in."
+  "notes": "New start page with three clear choices. New in the script builder: Silent cartoon (no words, silly gags, a sound list for every shot), from scratch or from one you've already started. The sound machine has a Cartoon level: a sound for everything."
 }

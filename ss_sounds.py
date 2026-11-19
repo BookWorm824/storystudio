@@ -483,6 +483,8 @@ def target_lufs(level, movie_type="", kind=""):
     t = DIALOGUE_REF + LEVEL_OFFSET.get(level, -6.0)
     if movie_type == "music video":
         t -= 4.0
+    elif movie_type == "cartoon":               # no narration: the effects are the star
+        t += 5.0
     return t
 
 

@@ -379,6 +379,63 @@ ON_NOPEOPLE = ("WHO IS ON SCREEN: NO PEOPLE. Only nature, animals, places and ob
                "EMPTY unless the direction asks for a recurring animal character.")
 
 
+# ---------------------------------------------------------------------------
+# silent cartoons: wordless slapstick shorts, all picture, sound effects and music
+# ---------------------------------------------------------------------------
+KIND_NAME = {"story": "story", "music": "music video", "cartoon": "silent cartoon"}
+
+
+def kind_name(k):
+    return KIND_NAME.get(k, "music video")
+
+
+def text_label(spec):
+    """What the user's text is called in a request."""
+    if spec.get("kind") == "cartoon":
+        return "CARTOON SO FAR" if spec.get("started") else "CARTOON IDEA"
+    return "STORY" if spec.get("kind") == "story" else "LYRICS"
+
+
+CARTOON_RULES = (
+    "THIS IS A SILENT CARTOON: a wordless slapstick short in the spirit of the classic "
+    "theatrical cartoon shorts of the 1930s to 1950s. No narration, no dialogue, no words or "
+    "signs anywhere: everything is told by what we see, and by sound effects and music.\n"
+    "- One simple situation: a likeable character wants something small (a nap, a snack, to "
+    "catch a butterfly) and things keep going wrong in sillier and sillier ways. Build in "
+    "threes (a try, a bigger try, the biggest try backfires), add a topper gag, and end "
+    "warmly: the character is fine, a little wiser or happily giving up.\n"
+    "- Every gag is a chain of single-action shots: the setup, the wind-up (the character "
+    "gets ready and the audience sees it coming), the gag itself, and the reaction (a big "
+    "take, a slow blink at the camera, dizzy eyes). Never skip the reaction.\n"
+    "- Feelings are big and clear: wide eyes, drooping ears, a proud strut, a sneaky tiptoe. "
+    "The character thinks before acting, so the viewer can read every thought.\n"
+    "- Gentle slapstick only: bonks, splashes, tangles, tumbles and surprises that the "
+    "character bounces right back from. Nobody is hurt, nothing is mean or frightening, no "
+    "weapons, no fire or explosions near anyone.\n"
+    "- Easy to animate: one clear action per shot, at most two characters in a shot, simple "
+    "props. Avoid hands or paws picking up and handling small things; cut to a detail shot "
+    "of the thing already moving or already in place instead.\n"
+    "- The image-to-video prompt may use cartoon motion instead of realistic motion: squash "
+    "and stretch, a wind-up before a dash, a double take, legs spinning before running.\n"
+    "- SOUND: in \"words\", list the sound effects heard in that shot, in order, the way a "
+    "cartoon sound editor spots them: classic cartoon sounds (boing, slide whistle, bonk, "
+    "zip, splat, pop, tiptoe plinks, a falling whistle) and real ones (splash, creak, bark, "
+    "birds), plus wordless voice sounds (gasp, giggle, yelp, sniff, sigh). Never speech."
+)
+CARTOON_WORDS = ("the SOUND EFFECTS heard during this shot, in order, a few words each, for "
+                 "example \"tiptoe plinks, slide whistle up, BONK, birds tweeting\"; never "
+                 "speech or narration")
+
+
+def cartoon_schema(schema):
+    """The shot list schema for a silent cartoon: "words" holds the shot's sound effects."""
+    item = schema["properties"]["shots"]["items"]
+    props = dict(item["properties"])
+    props["words"] = dict(props["words"], description=CARTOON_WORDS)
+    return dict(schema, properties={"shots": dict(schema["properties"]["shots"],
+                                                  items=dict(item, properties=props))})
+
+
 def on_screen(spec):
     """The who-is-on-screen rule for this video."""
     on = spec.get("onscreen") or "auto"
@@ -407,6 +464,26 @@ unhurried storytelling pace is about {WORDS_PER_SEC * 60:.0f} words a minute, pl
 between scenes and moments where the picture needs to breathe (an opening, big moments, the \
 ending). Give that total in "seconds".
 {f"THE USER'S NOTES FOR THE PICTURES (follow them exactly): {direction}" if direction else ""}"""
+    elif spec["kind"] == "cartoon":
+        secs, clip = float(spec["cartoon_seconds"]), int(spec.get("clip") or 5)
+        if spec.get("started"):
+            start = ("THE USER HAS ALREADY STARTED THIS CARTOON. The text at the end is what "
+                     "they have so far: the idea, the character, gags or shots already made, "
+                     "and where they are stuck. Keep everything they have made or decided, in "
+                     "their order: never replace their gags with your own. Work out where the "
+                     "cartoon stands, then fill the gaps, add the wind-ups and reactions that "
+                     "are missing, and carry it on to a strong last gag and a warm ending.")
+        else:
+            start = ("The text at the end is the user's idea, however short. Invent the whole "
+                     "cartoon from it.")
+        task = (f"Write a SILENT CARTOON about {secs:.0f} seconds long (about "
+                f"{round(secs / clip)} clips of {clip} seconds); use {secs:.0f} as "
+                f"\"seconds\".\n{CARTOON_RULES}\n"
+                f"THE USER'S NOTES (follow them exactly): {direction or '(none)'}\n{start}\n"
+                "Split it into scenes: the opening, each stage of the trouble (each bigger "
+                "than the last), the big finish, the ending. In each scene's \"text\" write "
+                "what happens as gag beats in order, one short line per beat (what we SEE "
+                "happen), about one beat for each clip the scene lasts.")
     else:
         task = f"""These are SONG LYRICS for a music video. The song is \
 {float(spec['song_seconds']):.0f} seconds long; use that as "seconds".
@@ -433,6 +510,9 @@ instrumental breaks and outro where nothing is sung (give those scenes text "(in
     cast_rule += ("\n- Each character is ONE individual. Groups and crowds (classmates, the "
                   "meadow animals, a choir) are not characters: describe them inside the shots. "
                   "A look never mentions another character, not even for size.")
+    cartoon_intro = (" For a silent cartoon it is one or two clips: the place, then the character "
+                     "happy and unaware of the trouble to come."
+                     if spec["kind"] == "cartoon" else "")
     prompt = f"""{task}
 
 Then:
@@ -440,7 +520,7 @@ Then:
 - ALWAYS begin with an INTRO scene (section "Intro") of opening pictures before any words: \
 establish the world and the place, and introduce the main character(s) if there are any. For a \
 song it covers the instrumental intro (about 8-15 seconds if you can't tell). For a story it is \
-about 16 seconds of opening pictures before the narration starts; include it in the total.
+about 16 seconds of opening pictures before the narration starts; include it in the total.{cartoon_intro}
 - Write "approach": the direction turned into plain rules for every shot.
 - Split it into scenes in order, each with its setting described the same way every time it \
 returns, the exact text it covers, and how many seconds it lasts. The scene seconds must add up \
@@ -453,10 +533,11 @@ character looks.
 
 Title given by the user (keep it if present): {spec.get('title') or '(none)'}
 
-THE {"STORY" if spec["kind"] == "story" else "LYRICS"}:
+THE {text_label(spec)}:
 {text[:60000]}"""
     if progress:
-        progress(0.05, f"{C.ai_name()} is reading the {'story' if spec['kind'] == 'story' else 'lyrics'}…")
+        progress(0.05, f"{C.ai_name()} is writing the cartoon's gags…" if spec["kind"] == "cartoon"
+                 else f"{C.ai_name()} is reading the {'story' if spec['kind'] == 'story' else 'lyrics'}…")
     res = C.ask(prompt, PLAN, system=SYSTEM, timeout=900)
     if not res.get("scenes"):
         raise StoryError("The AI couldn't split that into scenes. Check the text and try again.")
@@ -474,6 +555,8 @@ THE {"STORY" if spec["kind"] == "story" else "LYRICS"}:
         c["short"] = (c.get("short") or "").strip() or short_look(c["look"])
     if spec["kind"] == "music":
         res["seconds"] = float(spec["song_seconds"])
+    elif spec["kind"] == "cartoon":
+        res["seconds"] = float(spec["cartoon_seconds"])
     else:
         res["seconds"] = max(10.0, float(res.get("seconds") or words / WORDS_PER_SEC))
     first = res["scenes"][0]
@@ -528,8 +611,10 @@ def suggest_cast(spec):
     import ss_claude as C
     text = (spec.get("text") or "").strip()
     if not text:
-        raise StoryError("Paste or load the " + ("story script" if spec.get("kind") == "story"
-                                                  else "song lyrics") + " first.")
+        raise StoryError("Describe your cartoon idea first." if spec.get("kind") == "cartoon"
+                         else "Paste or load the " + (
+                             "story script" if spec.get("kind") == "story" else "song lyrics")
+                         + " first.")
     given = parse_cast(spec.get("cast") or "")
     if spec.get("onscreen") in ("none", "nopeople") and not given:
         return []                                # no recurring characters wanted
@@ -541,7 +626,10 @@ def suggest_cast(spec):
     style = f"Art style: {spec['style_name']}." if spec.get("style_name") else ""
     direction = (f"The user's direction (follow it): {spec['direction']}"
                  if spec.get("direction") else "")
-    what = "story" if spec.get("kind") == "story" else "music video"
+    what = kind_name(spec.get("kind"))
+    if spec.get("kind") == "cartoon":
+        what += (" (wordless slapstick: give each character a simple, appealing cartoon design "
+                 "with a clear shape and big readable eyes and expressions)")
     res = C.ask(f"""Describe every recurring character who will appear on screen in this {what} \
 (if the direction means there is no main character, return an empty list), so an \
 image AI draws each one exactly the same in every picture. For each: name, and one fixed look in \
@@ -556,7 +644,7 @@ mentions or compares to another character, not even for size (say "about one met
 {direction}
 {kept}
 
-{"STORY" if spec.get("kind") == "story" else "LYRICS"}:
+{text_label(spec)}:
 {text[:40000]}""", CAST, system=SYSTEM, timeout=600)
     return res.get("characters", [])
 
@@ -630,9 +718,11 @@ def talk(spec, rounds=None):
     would change the video most. `rounds` is what was asked and answered so far."""
     import ss_claude as C
     text = (spec.get("text") or "").strip()
-    music = spec.get("kind") != "story"
+    cartoon = spec.get("kind") == "cartoon"
+    music = spec.get("kind") not in ("story", "cartoon")
     if not text:
-        raise StoryError("Paste or load the " + ("song lyrics" if music else "story script") +
+        raise StoryError("Describe your cartoon idea first." if cartoon else
+                         "Paste or load the " + ("song lyrics" if music else "story script") +
                          " first.")
     rounds = rounds or []
     direction = (spec.get("direction") or "").strip()
@@ -645,6 +735,15 @@ def talk(spec, rounds=None):
             facts.append(f"The song is {secs:.0f} seconds long, about {round(secs / clip)} "
                          f"clips of {clip} seconds.")
         facts.append(on_screen(spec))
+    elif cartoon:
+        secs, clip = float(spec.get("cartoon_seconds") or 90), int(spec.get("clip") or 5)
+        facts.append(f"It will be about {secs:.0f} seconds long, about {round(secs / clip)} "
+                     f"clips of {clip} seconds. " + CARTOON_RULES + "\nFor a silent cartoon, "
+                     "good questions are about the character and what they want, the place, "
+                     "the kinds of gags (and anything too rough), a running gag, and how it "
+                     "ends. " + ("The user has already started it: ask about what is missing "
+                                 "or where they are stuck, and keep what they have."
+                                 if spec.get("started") else ""))
     else:
         facts.append("It is a story read aloud as narration over the pictures, in 8-second "
                      "clips. The story itself sets what happens; talk about how to show it.")
@@ -672,9 +771,9 @@ def talk(spec, rounds=None):
     else:
         turn = ("This is the start. Write a first plan from what you have, then ask the 3-5 "
                 "questions whose answers would change the video most.")
-    words = "lyrics" if music else "story"
+    words = "cartoon idea" if cartoon else "lyrics" if music else "story"
     prompt = f"""You are talking with the studio owner about the direction of this \
-{"music video" if music else "story video"} BEFORE you write the shot list, the way a director \
+{"silent cartoon" if cartoon else "music video" if music else "story video"} BEFORE you write the shot list, the way a director \
 talks a video over with the client first. Be warm and brief.
 
 {turn}
@@ -894,7 +993,22 @@ def make_shots(spec, plan, progress=None, cancel=None, per_request=24):
     direction = (spec.get("direction") or "").strip()
     rules = (f"THE USER'S DIRECTION (follow it exactly): {direction}\n" if direction else "") + \
         f"THE APPROACH FOR EVERY SHOT: {plan.get('approach', '')}\n" + \
-        (on_screen(spec) if spec["kind"] == "music" else "")
+        (on_screen(spec) if spec["kind"] == "music" else "") + \
+        (CARTOON_RULES if spec["kind"] == "cartoon" else "")
+    if spec["kind"] == "cartoon":
+        schema = cartoon_schema(schema)
+        coverage = (f"Each main shot is one {clip}-second clip. Main shots go in order and "
+                    "together play out every beat of each scene's text, one beat per shot: the "
+                    "setup, the wind-up, the gag, the reaction. Put each scene's extra shots "
+                    "right after the main shot they would cut away from; extras are reaction "
+                    "faces, details and cutaways, never a copy of another shot.")
+    else:
+        coverage = (f"Each main shot is one {clip}-second clip. Main shots go in order and "
+                    "together cover all of each scene's text, split evenly so each shot's words "
+                    f"fit about {clip} seconds, and each one shows what its words are about. "
+                    "Put each scene's extra shots right after the main shot they would cut "
+                    "away from; extras are different angles, details or moments, never a copy "
+                    "of another shot.")
     # groups of scenes, about per_request shots each
     groups, cur, n = [], [], 0
     for i, s in enumerate(plan["scenes"]):
@@ -929,15 +1043,12 @@ def make_shots(spec, plan, progress=None, cancel=None, per_request=24):
                       "; ".join(s.get("title", "") for s in shots[:-3]) +
                       "\nThe last shots just before these (continue smoothly):\n" +
                       "\n".join(f"- {s['picture']}" for s in last))
-        prompt = f"""{"Story" if spec["kind"] == "story" else "Music video"}: \
+        prompt = f"""{kind_name(spec["kind"]).capitalize()}: \
 "{plan['title']}". {plan['summary']}
 
 {rules}
 
-Each main shot is one {clip}-second clip. Main shots go in order and together cover all of each \
-scene's text, split evenly so each shot's words fit about {clip} seconds, and each one shows what \
-its words are about. Put each scene's extra shots right after the main shot they would cut away \
-from; extras are different angles, details or moments, never a copy of another shot.
+{coverage}
 
 CAST (in the text-to-image prompt, describe a visible character by their short look, word for \
 word):
@@ -1147,13 +1258,23 @@ def sheet_prompt(char, style, aspect):
 def build(spec, progress=None, cancel=None):
     say = progress or (lambda f, m: None)
     spec = dict(spec)
-    if spec.get("kind") not in ("story", "music"):
-        raise StoryError("Choose Music video or Story first.")
+    if spec.get("kind") not in ("story", "music", "cartoon"):
+        raise StoryError("Choose Music video, Story or Silent cartoon first.")
     if not (spec.get("text") or "").strip():
-        raise StoryError("Paste or load the " + ("story script." if spec["kind"] == "story"
-                                                  else "song lyrics."))
+        raise StoryError("Describe your cartoon idea first." if spec["kind"] == "cartoon" else
+                         "Paste or load the " + ("story script." if spec["kind"] == "story"
+                                                 else "song lyrics."))
     if spec["kind"] == "story":
         spec["clip"] = 8
+    elif spec["kind"] == "cartoon":
+        spec["clip"] = int(spec.get("clip") or 5)
+        try:
+            spec["cartoon_seconds"] = min(900.0, float(spec.get("cartoon_seconds") or 0))
+        except (TypeError, ValueError):
+            spec["cartoon_seconds"] = 0.0
+        if spec["cartoon_seconds"] < 15:
+            raise StoryError("Enter how long the cartoon should be (for example 1:30).")
+        spec["started"] = bool(spec.get("started"))
     else:
         spec["clip"] = int(spec.get("clip") or 8)
         if not spec.get("song_seconds") or float(spec["song_seconds"]) < 5:
@@ -1213,7 +1334,8 @@ def build(spec, progress=None, cancel=None):
               "spec": {k: spec.get(k) for k in ("kind", "title", "song_seconds", "clip",
                                                  "style_id", "aspect", "direction", "cast",
                                                  "wording", "onscreen", "style_len",
-                                                 "my_direction", "agreed")}}
+                                                 "my_direction", "agreed", "cartoon_seconds",
+                                                 "started")}}
     check_shots(result)
     add_extras(result, style, say)
     say(0.97, "Saving the shot list…")
@@ -1254,7 +1376,7 @@ def mmss(sec):
 
 
 def as_text(r):
-    kind = "Story" if r["kind"] == "story" else "Music video"
+    kind = {"story": "Story", "cartoon": "Silent cartoon"}.get(r["kind"], "Music video")
     L = [f"{r['title']}  ({kind})", "=" * 60, r["summary"], ""]
     sp = r["spec"]
     if sp.get("agreed"):
@@ -1309,7 +1431,7 @@ def as_text(r):
         L.append(f"{tag} {s['n']}: {s.get('title', '')}   {mmss(s['start'])}-{mmss(s['end'])}"
                  + (f"   ({', '.join(s['characters'])})" if s.get("characters") else ""))
         if s.get("words"):
-            L.append(f"  Words: {s['words']}")
+            L.append(f"  {'Sounds' if r['kind'] == 'cartoon' else 'Words'}: {s['words']}")
         if s.get("purpose"):
             L.append(f"  What this shot is for: {s['purpose']}")
         t = shot_type(s.get(TYPE_FIELD))
@@ -1365,6 +1487,14 @@ EXTRAS = {
 }
 
 
+CARTOON_MUSIC = (" This is a SILENT CARTOON, so the music carries the whole short instead of "
+                 "sitting under narration: write the three Suno prompts as lively instrumental "
+                 "cartoon scores in the spirit of classic theatrical cartoon music (playful "
+                 "orchestra, pizzicato strings, bassoon, clarinet, xylophone, muted trumpet) "
+                 "that follow the action: for example a bouncy main theme, a sneaky tiptoe "
+                 "theme, and a fast chase or finale theme.")
+
+
 def extras(r, progress=None):
     """Suno prompts (stories), a thumbnail prompt, and a title image prompt (stories)."""
     import ss_claude as C
@@ -1373,7 +1503,7 @@ def extras(r, progress=None):
     cast = "\n".join(f"- {c['name']}: {c['look']}" for c in r["characters"])
     scenes = "\n".join(f"- {s['title']}: {s.get('concept', '')} (mood: {s.get('mood', '')})"
                        for s in r["scenes"])
-    res = C.ask(f"""For the {'story' if r['kind'] == 'story' else 'music video'} \
+    res = C.ask(f"""For the {kind_name(r['kind'])} \
 "{r['title']}": {r['summary']}
 {f"The approach: {r['approach']}" if r.get('approach') else ""}
 Scenes:
@@ -1386,7 +1516,7 @@ different medium or style)
 Write: three Suno prompts for gentle instrumental background theme music that follows the feel \
 of the story (each a different take: for example a warm main theme, a lighter playful version, \
 a tender emotional version); the YouTube thumbnail picture; and how the title lettering should \
-look.""", EXTRAS, system=SYSTEM, timeout=600)
+look.{CARTOON_MUSIC if r['kind'] == 'cartoon' else ''}""", EXTRAS, system=SYSTEM, timeout=600)
     return res
 
 
@@ -1414,7 +1544,7 @@ def add_extras(r, style, progress=None):
     r["thumbnail"] = {"desc": x["thumbnail"], "lettering": x.get("lettering", ""),
                       "prompt": thumbnail_prompt(x["thumbnail"], r["title"], style,
                                                  lettering=x.get("lettering", ""))}
-    if r["kind"] == "story":
+    if r["kind"] in ("story", "cartoon"):
         r["suno"] = x["suno"][:3]
         r["title_image"] = {"look": x["title_look"],
                             "prompt": title_prompt(x["title_look"], r["title"], style)}
@@ -1501,18 +1631,20 @@ def redo(r, n, which, note="", progress=None):
     or a new look for a character (which="character", n = index). Saves the shot list."""
     import ss_claude as C
     style = r["style"] if r["style"].get("style") else find_style(r["style"]["id"])
-    about = (f"the {'story' if r['kind'] == 'story' else 'music video'} \"{r['title']}\": "
+    about = (f"the {kind_name(r['kind'])} \"{r['title']}\": "
              f"{r['summary']}")
     spec = r.get("spec") or {}
     rules = ((f"THE USER'S DIRECTION (follow it exactly): {spec['direction']}\n"
               if spec.get("direction") else "") +
              (f"THE APPROACH FOR EVERY SHOT: {r['approach']}\n" if r.get("approach") else "") +
-             (on_screen(spec) + "\n" if r["kind"] == "music" and spec.get("onscreen") else ""))
+             (on_screen(spec) + "\n" if r["kind"] == "music" and spec.get("onscreen") else "") +
+             (CARTOON_RULES + "\n" if r["kind"] == "cartoon" else ""))
     change = f"What the user wants changed: {note}" if note else "Make a fresh, better version."
     if which in ("suno", "thumbnail", "title"):
         if which == "suno":
             cur = r["suno"][int(n)]
-            ask = (f"Write a new Suno style prompt for gentle instrumental background theme "
+            ask = (f"Write a new Suno style prompt for "
+                   f"{'lively instrumental cartoon score' if r['kind'] == 'cartoon' else 'gentle instrumental background theme'} "
                    f"music for {about} Current one ({cur['name']}): {cur['prompt']}\n{change}\n"
                    "Under 200 characters: genre, instruments, tempo in bpm, feel, ending with "
                    "'instrumental, no vocals'.")
@@ -1567,12 +1699,12 @@ a glance: age or species, hair, skin, main outfit colours) in "short"; set camer
     idx = r["shots"].index(shot)
     near = "\n".join(f"- shot {s['n']}: {s['picture'][:200]}" for s in
                      r["shots"][max(0, idx - 2):idx + 3] if s is not shot)
-    head = f"""{'Story' if r['kind'] == 'story' else 'Music video'} "{r['title']}": {r['summary']}
+    head = f"""{kind_name(r['kind']).capitalize()} "{r['title']}": {r['summary']}
 {rules}
 Scene {shot['scene']}: {sc['title']} ({sc.get('section', '')}). {sc.get('concept', '')}
 Setting: {sc['place']}
 Shot {shot['n']}: {shot.get('title', '')}. {shot.get('purpose', '')}
-Words heard: {shot.get('words', '')}
+{'Sound effects heard' if r['kind'] == 'cartoon' else 'Words heard'}: {shot.get('words', '')}
 Clip length: {r['clip']} seconds.
 CAST (describe a visible character by their short look, word for word):
 {cast or '(no recurring characters)'}

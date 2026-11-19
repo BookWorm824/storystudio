@@ -559,6 +559,8 @@ def api(name, a):
         if spec.get("kind") == "story":
             secs = len((spec.get("text") or "").split()) / SB.WORDS_PER_SEC
             clip = 8
+        elif spec.get("kind") == "cartoon":
+            secs, clip = float(spec.get("cartoon_seconds") or 90), int(spec.get("clip") or 5)
         else:
             secs, clip = float(spec.get("song_seconds") or 0), int(spec.get("clip") or 8)
         shots = secs / clip * (1 + SB.EXTRA)
