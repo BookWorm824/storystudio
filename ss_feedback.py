@@ -19,6 +19,7 @@ import numpy as np
 
 from ss_core import StoryError, fmt_time, log, log_error, read_story, safe_name
 import ss_media as M
+import ss_craft as craft
 import ss_premiere as P
 
 COLOUR = {"fix": "red", "suggest": "yellow", "beat": "blue", "good": "green"}
@@ -509,17 +510,7 @@ TIMING_KIND = {
     "music": "This is a MUSIC VIDEO. Cuts on the beat are checked separately; here judge "
              "whether each shot's movement fits the energy of that part of the song, and trim "
              "dead time at the start and end of clips.",
-    "cartoon": "This is a SILENT SLAPSTICK CARTOON (no narration). Comic timing is everything:\n"
-               "- The wind-up (the character gets ready and we see it coming) needs time, "
-               "about half a second to a second and a half. Don't trim it away.\n"
-               "- The gag itself is fast. If the bonk, splash or tumble floats, speed it up "
-               "(130 to 200 percent) and cut just after the impact.\n"
-               "- Then HOLD the reaction: the big take, the slow blink, the dizzy eyes need 1 "
-               "to 2 seconds of near stillness to be funny. A reaction cut short kills the "
-               "joke; say 'hold longer'.\n"
-               "- Gags in threes get a little quicker each time, and a beat of calm before the "
-               "last, biggest gag makes it land.\n"
-               "- Opening and ending shots can be slower; the middle should move.",
+    "cartoon": craft.TIMING,
 }
 
 

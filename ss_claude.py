@@ -9,9 +9,11 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from ss_core import APP_DATA, NOWIN, StoryError, fmt_time, log, log_error
+import ss_craft as craft
 
 DEFAULT_MODEL = "opus"
 # Every Claude model the user can pick in Settings: (id, name, note). "" is StoryStudio's
@@ -144,11 +146,16 @@ def provider():
         return "chatgpt"
     if want == "claude" and has_claude:
         return "claude"
-    if has_claude:
+    if has_claude and not (has_gpt and time.time() < _CLAUDE_DOWN[0]):
         return "claude"
     if has_gpt:
         return "chatgpt"
     return None
+
+
+# Claude can't answer just now (signed out, or the plan's limit is reached): with Automatic
+# chosen and ChatGPT set up, ChatGPT answers instead until this time
+_CLAUDE_DOWN = [0.0]
 
 
 def ai_name():
@@ -165,7 +172,22 @@ def ask(prompt, schema, system=None, images=None, timeout=1200):
     if p == "chatgpt":
         import ss_gpt as G
         return G.ask(prompt, schema, system=system, images=images, timeout=timeout)
-    return ask_claude(prompt, schema, system, images, timeout)
+    try:
+        return ask_claude(prompt, schema, system, images, timeout)
+    except StoryError as ex:
+        import ss_gpt as G
+        from ss_core import load_settings
+        msg = str(ex)
+        if load_settings().get("ai", "auto") == "auto" and G.find() and                 ("signed in" in msg or "usage limit" in msg):
+            try:
+                ready = G.status() == "ready"
+            except Exception:
+                ready = False
+            if ready:
+                log("Claude can't answer (" + msg[:60] + "); using ChatGPT for now")
+                _CLAUDE_DOWN[0] = time.time() + 30 * 60
+                return G.ask(prompt, schema, system=system, images=images, timeout=timeout)
+        raise
 
 
 def ask_claude(prompt, schema, system=None, images=None, timeout=1200):
@@ -327,15 +349,7 @@ BUSY = {
             "action that really makes a sound, all the way through (soft under the "
             "narration). Rich means more of the sounds that belong, never noise for its own "
             "sake.",
-    "cartoon": "CARTOON, WALL TO WALL: this is a wordless slapstick cartoon with no narration, "
-               "so the sound effects tell the story. Give a sound to EVERY visible action, "
-               "however small: each footstep pattern (tiptoe, scamper, skid), every bonk, "
-               "bounce, zip, whoosh, splat, pop, stretch, blink and double take, plus things "
-               "falling, landing and wobbling. Prefer classic cartoon sounds (slide whistle, "
-               "boing, bonk, zip, pizzicato tiptoes, a falling whistle, spinning-top dizzy "
-               "sound) over realistic ones where they fit the gag, and add wordless voice "
-               "sounds for the characters (gasp, giggle, yelp, sniff, panting, a sigh). Mark "
-               "them synced and time each to the exact moment. Keep ambience light.",
+    "cartoon": craft.SOUND_PLAN,
 }
 
 

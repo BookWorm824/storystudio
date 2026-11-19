@@ -1,5 +1,5 @@
 {
-  "version": "1.16.0",
+  "version": "1.17.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -20,6 +20,8 @@
     "ss_feedback.py",
     "ss_gpt.py",
     "ss_script.py",
+    "ss_clips.py",
+    "ss_craft.py",
     "ss_shottypes.json",
     "ss_styles.json",
     "ss_style_pics.json",
@@ -27,5 +29,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Silent cartoons: after a Timing and pacing check, press \"Make these changes for me\" and StoryStudio trims, speeds up and tightens the shots in a new copy ending in (retimed). Your project isn't changed."
+  "notes": "A big one for cartoons and AI clips. StoryStudio now checks your pictures and clips (keep, use these seconds, or make again with new wording), checks that shots match each other, writes cartoons the way the classic shorts were made, and has a step-by-step guide on the start page."
 }

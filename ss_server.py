@@ -52,7 +52,7 @@ SLOW_ASKS = {"sb_redo", "sb_brainstorm", "sb_cast", "sb_talk"}
 PICK_LOCK = threading.Lock()            # one Windows file window at a time
 # never wait behind other actions: quick status calls, and file pickers (a Windows file window
 # left open must not freeze the rest of StoryStudio)
-NO_LOCK = {"job", "ping", "stop", "client_error", "update_check", "problem_report",
+NO_LOCK = {"job", "ping", "stop", "sb_clips_pick", "guide", "client_error", "update_check", "problem_report",
            "sb_pick_text", "sb_pick_song",
            "pick_lyrics", "sb_open", "sb_result", "sb_styles", "sb_style_pics"}
 
@@ -318,6 +318,28 @@ def native_pick(title, types, initial=None):
     return f
 
 
+def native_folder(title, initial=None):
+    """A normal Windows "choose a folder" window."""
+    import tkinter as tk
+    from tkinter import filedialog
+    if not PICK_LOCK.acquire(blocking=False):
+        raise StoryError("A file window is already open. Choose there (it may be behind this "
+                         "window), or close it, then try again.")
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        root.lift()
+        root.focus_force()
+        try:
+            return filedialog.askdirectory(title=title, mustexist=True,
+                                           initialdir=initial or core.documents_dir())
+        finally:
+            root.destroy()
+    finally:
+        PICK_LOCK.release()
+
+
 def make_thumb(st):
     """A frame from the middle of the movie, for the project card."""
     try:
@@ -509,6 +531,9 @@ def api(name, a):
         return {"job": run_job("Making karaoke lyrics",
                                lambda p, c, ph: K.karaoke(st, s, text, p, c), "done", [est])}
     # --- script builder (no Premiere project needed) ---------------------------------
+    if name == "guide":
+        import ss_craft
+        return {"lessons": [{"title": t, "text": x} for t, x in ss_craft.LESSONS]}
     if name == "sb_styles":
         import ss_script as SB
         return {"styles": SB.styles()["styles"], "aspects": list(SB.ASPECTS),
@@ -575,6 +600,33 @@ def api(name, a):
     if name == "sb_result":
         import ss_script as SB
         return {"result": S.sb, "shot_types": SB.type_menu()}
+    if name == "sb_clips_pick":
+        if not S.sb:
+            raise StoryError("The shot list isn't open any more. Open it again, then try once "
+                             "more.")
+        f = native_folder("Choose the folder with your pictures and clips",
+                          S.sb.get("clip_folder") or S.settings.get("last_clip_folder"))
+        if f:
+            S.settings["last_clip_folder"] = str(Path(f).parent)
+            core.save_settings(S.settings)
+        return {"folder": f or ""}
+    if name == "sb_clips_check":
+        import ss_clips as K
+        if not S.sb:
+            raise StoryError("The shot list isn't open any more. Open it again, then try once "
+                             "more.")
+        r, folder = S.sb, a.get("folder") or S.sb.get("clip_folder") or ""
+        found, _, _ = K.find_files(r, folder)
+        n = sum(len(v) for v in found.values())
+        if not n:
+            raise StoryError("StoryStudio didn't find any pictures or clips with a shot number "
+                             "in their name in that folder. Name them like “shot 5.png” and "
+                             "“shot 5.mp4”.")
+
+        def work(progress, cancel, phase):
+            K.check(r, folder, progress, cancel, again=bool(a.get("again")))
+        return {"job": run_job("Looking at your pictures and clips", work, "script",
+                               [20 + n * 1.2 + (n // 15 + 1) * 45])}
     if name == "sb_shot_type":
         import ss_script as SB
         if not S.sb:

@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 from ss_core import APP_DIR, APP_DATA, StoryError, documents_dir, fmt_time, log, safe_name
+import ss_craft as craft
 
 CAMERA = ["Static shot", "Push in", "Pull out", "Pan left", "Pan right", "Truck left",
           "Truck right", "Tilt up", "Tilt down", "Pedestal up", "Pedestal down", "Zoom in",
@@ -396,32 +397,7 @@ def text_label(spec):
     return "STORY" if spec.get("kind") == "story" else "LYRICS"
 
 
-CARTOON_RULES = (
-    "THIS IS A SILENT CARTOON: a wordless slapstick short in the spirit of the classic "
-    "theatrical cartoon shorts of the 1930s to 1950s. No narration, no dialogue, no words or "
-    "signs anywhere: everything is told by what we see, and by sound effects and music.\n"
-    "- One simple situation: a likeable character wants something small (a nap, a snack, to "
-    "catch a butterfly) and things keep going wrong in sillier and sillier ways. Build in "
-    "threes (a try, a bigger try, the biggest try backfires), add a topper gag, and end "
-    "warmly: the character is fine, a little wiser or happily giving up.\n"
-    "- Every gag is a chain of single-action shots: the setup, the wind-up (the character "
-    "gets ready and the audience sees it coming), the gag itself, and the reaction (a big "
-    "take, a slow blink at the camera, dizzy eyes). Never skip the reaction.\n"
-    "- Feelings are big and clear: wide eyes, drooping ears, a proud strut, a sneaky tiptoe. "
-    "The character thinks before acting, so the viewer can read every thought.\n"
-    "- Gentle slapstick only: bonks, splashes, tangles, tumbles and surprises that the "
-    "character bounces right back from. Nobody is hurt, nothing is mean or frightening, no "
-    "weapons, no fire or explosions near anyone.\n"
-    "- Easy to animate: one clear action per shot, at most two characters in a shot, simple "
-    "props. Avoid hands or paws picking up and handling small things; cut to a detail shot "
-    "of the thing already moving or already in place instead.\n"
-    "- The image-to-video prompt may use cartoon motion instead of realistic motion: squash "
-    "and stretch, a wind-up before a dash, a double take, legs spinning before running.\n"
-    "- SOUND: in \"words\", list the sound effects heard in that shot, in order, the way a "
-    "cartoon sound editor spots them: classic cartoon sounds (boing, slide whistle, bonk, "
-    "zip, splat, pop, tiptoe plinks, a falling whistle) and real ones (splash, creak, bark, "
-    "birds), plus wordless voice sounds (gasp, giggle, yelp, sniff, sigh). Never speech."
-)
+CARTOON_RULES = craft.INTRO + craft.STORY + craft.ACTING + craft.STAGING + craft.SOUNDS
 CARTOON_WORDS = ("the SOUND EFFECTS heard during this shot, in order, a few words each, for "
                  "example \"tiptoe plinks, slide whistle up, BONK, birds tweeting\"; never "
                  "speech or narration")
@@ -483,7 +459,9 @@ ending). Give that total in "seconds".
                 "Split it into scenes: the opening, each stage of the trouble (each bigger "
                 "than the last), the big finish, the ending. In each scene's \"text\" write "
                 "what happens as gag beats in order, one short line per beat (what we SEE "
-                "happen), about one beat for each clip the scene lasts.")
+                "happen), about one beat for each clip the scene lasts. In "
+                "\"visual_rules\" also say which side of the screen the hero keeps and which "
+                "side the nuisance keeps for the whole cartoon.\n" + craft.CUTE)
     else:
         task = f"""These are SONG LYRICS for a music video. The song is \
 {float(spec['song_seconds']):.0f} seconds long; use that as "seconds".
@@ -627,9 +605,8 @@ def suggest_cast(spec):
     direction = (f"The user's direction (follow it): {spec['direction']}"
                  if spec.get("direction") else "")
     what = kind_name(spec.get("kind"))
-    if spec.get("kind") == "cartoon":
-        what += (" (wordless slapstick: give each character a simple, appealing cartoon design "
-                 "with a clear shape and big readable eyes and expressions)")
+    cute = ("This is a wordless slapstick cartoon. " + craft.CUTE + "\n"
+            if spec.get("kind") == "cartoon" else "")
     res = C.ask(f"""Describe every recurring character who will appear on screen in this {what} \
 (if the direction means there is no main character, return an empty list), so an \
 image AI draws each one exactly the same in every picture. For each: name, and one fixed look in \
@@ -640,7 +617,7 @@ style itself into the look (it is added to every prompt separately). Each charac
 individual: groups and crowds (classmates, the animals, a choir) are not characters. A look never \
 mentions or compares to another character, not even for size (say "about one metre tall", not \
 "as tall as the girl"), because each look is also used for a picture of that character alone.
-{style}
+{cute}{style}
 {direction}
 {kept}
 
@@ -823,7 +800,15 @@ MOTION_RULES = ("the IMAGE-TO-VIDEO prompt for MiniMax Hailuo, SHORT: 1-2 senten
                 "and the words, plus a touch of natural movement (hair, leaves, water, light), "
                 "then the camera move in plain words. One continuous shot, only what is already "
                 "in the picture, believable motion (children move like real children), never "
-                "write 'no ...'.")
+                "write 'no ...'. Video AIs drift into slow motion and vague movement, so: use a "
+                "strong, specific verb (hops, turns, reaches, tumbles; never just 'moves'), say "
+                "where the action starts and where it ENDS, and give its pace (quickly, briskly, "
+                "at natural speed); leave out words that slow it down (dreamy, graceful, "
+                "gently drifting, slowly) unless the moment is meant to be slow. Don't describe "
+                "the picture again; spend the words on what moves. Say what stays still when it "
+                "matters, and when the camera doesn't move say 'the camera stays perfectly "
+                "still'. Anyone who isn't speaking keeps their mouth closed: say 'lips closed' "
+                "or give the mouth something to do (a smile, a yawn).")
 PICTURE_RULES_TYPED = PICTURE_RULES.replace(
     "Start with the shot size and angle (wide shot, medium shot, close-up, overhead, low "
     "angle...), then",
@@ -1235,6 +1220,8 @@ def set_type(r, n, code):
     style = r["style"] if r["style"].get("style") else find_style(r["style"]["id"])
     shot["picture_prompt"] = picture_prompt(shot, r, style, r["aspect"])
     shot["minimax_prompt"] = minimax_prompt(shot)
+    if any(x.get("edit_from") for x in r["shots"]):
+        same_place_prompts(r)
     check_shots(r)
     r["files"] = save(r)
     return {"shot": shot, "hints": shot_hints(r)}
@@ -1250,6 +1237,59 @@ def sheet_prompt(char, style, aspect):
             "pose, both hands visible, feet fully visible, the complete character from head to "
             "toe. Plain warm ivory studio background, centered composition, a clean consistent "
             f"character design reference.\n\nArt style: {style_block(style, aspect)}")
+
+
+KEEP_SAME = ("Use the attached picture of this character as the reference. Do not redesign "
+             "the character: the same face, proportions, colours, markings and outfit, and the "
+             "same art style.")
+
+
+def expressions_prompt(char, cartoon=False):
+    """Made from the character's reference picture: six faces to check the character stays
+    the same when the feeling changes (and to attach for close-ups)."""
+    moods = ("happy, sad, surprised, annoyed, sneaky, sleepy" if cartoon else
+             "happy, sad, surprised, worried, determined, sleepy")
+    return (f"{KEEP_SAME} Make an expression sheet of {char['name']}: six head-and-shoulders "
+            f"views of the same character in a grid of three across and two down, on a plain "
+            f"warm ivory background, one feeling each: {moods}. Big, clear expressions. Only "
+            "the character, with nothing written anywhere.")
+
+
+def turnaround_prompt(char):
+    """Made from the reference picture: front, side and back, so shots from behind match."""
+    return (f"{KEEP_SAME} Make a turnaround sheet of {char['name']}: the same character "
+            "standing in the same relaxed pose, seen from the front, from the side and from "
+            "the back, side by side, the whole body from head to toe each time, on a plain "
+            "warm ivory background. Only the character, with nothing written anywhere.")
+
+
+def character_extras(r):
+    for c in r.get("characters") or []:
+        c["expressions_prompt"] = expressions_prompt(c, r.get("kind") == "cartoon")
+        c["turnaround_prompt"] = turnaround_prompt(c)
+
+
+def same_place_prompts(r):
+    """Sets drift from picture to picture. So every shot after the first one in a scene also
+    gets an "edit" prompt: start from the scene's first picture and change only what the
+    shot shows. (Point-of-view and insert shots of new things still work this way: the place
+    and the light carry over.)"""
+    first = {}
+    for s in r["shots"]:
+        s.pop("edit_from", None)
+        s.pop("edit_prompt", None)
+        anchor = first.get(s["scene"])
+        if anchor is None:
+            first[s["scene"]] = s
+            continue
+        t = shot_type(s.get(TYPE_FIELD))
+        pic = (opening_first(s["picture"], t) if t else s["picture"]).strip()
+        s["edit_from"] = anchor["n"]
+        s["edit_prompt"] = (
+            f"Start from the attached picture (shot {anchor['n']}). Keep the same place, the "
+            "same time of day, light and colours, and the same art style, and keep every "
+            "character looking exactly the same. Make a new picture of this moment in that "
+            f"same place, changing only the view and what is happening: {pic}")
 
 
 # ---------------------------------------------------------------------------
@@ -1317,6 +1357,8 @@ def build(spec, progress=None, cancel=None):
     for c in plan["characters"]:
         c["sheet_prompt"] = sheet_prompt(c, style, aspect)
     main = [s for s in shots if not s.get("extra")]
+    same_place_prompts({"shots": shots})
+    character_extras({"characters": plan["characters"], "kind": spec["kind"]})
     for i, sc in enumerate(plan["scenes"]):                # each scene's place on the clock
         mine = [s for s in shots if s["scene"] == i + 1 and not s.get("extra")]
         sc["start"] = mine[0]["start"] if mine else 0.0
@@ -1418,6 +1460,10 @@ def as_text(r):
               "say \"use this picture for the character's look\").", ""]
         for c in r["characters"]:
             L += [f"{c['name']}: {c['look']}", "", "Character prompt:", c["sheet_prompt"], ""]
+            if c.get("expressions_prompt"):
+                L += ["Expressions (attach the character's picture):", c["expressions_prompt"],
+                      "", "Front, side and back (attach the character's picture):",
+                      c["turnaround_prompt"], ""]
     scene = None
     L += ["SHOTS", "-" * 60]
     for s in r["shots"]:
@@ -1441,7 +1487,11 @@ def as_text(r):
             for h in s.get("warnings") or []:
                 L.append(f"  Note: {h}")
         L += ["", "  Text-to-image prompt (ChatGPT / Nano Banana):",
-              "  " + s["picture_prompt"].replace("\n", "\n  "), "",
+              "  " + s["picture_prompt"].replace("\n", "\n  "), ""]
+        if s.get("edit_prompt"):
+            L += [f"  Or, to keep the place the same, attach shot {s['edit_from']}'s picture "
+                  "and paste:", "  " + s["edit_prompt"], ""]
+        L += [
               f"  Image-to-video prompt (MiniMax, {r['clip']}-second clip):",
               "  " + s["minimax_prompt"], ""]
     L += ["", "TIPS", "-" * 60,
@@ -1487,12 +1537,7 @@ EXTRAS = {
 }
 
 
-CARTOON_MUSIC = (" This is a SILENT CARTOON, so the music carries the whole short instead of "
-                 "sitting under narration: write the three Suno prompts as lively instrumental "
-                 "cartoon scores in the spirit of classic theatrical cartoon music (playful "
-                 "orchestra, pizzicato strings, bassoon, clarinet, xylophone, muted trumpet) "
-                 "that follow the action: for example a bouncy main theme, a sneaky tiptoe "
-                 "theme, and a fast chase or finale theme.")
+CARTOON_MUSIC = craft.MUSIC
 
 
 def extras(r, progress=None):
@@ -1744,6 +1789,8 @@ name, 2-6 words; "characters" lists the names of recurring characters visible (o
         shot.pop("camera2_asked", None)
         shot["picture_prompt"] = picture_prompt(shot, r, style, r["aspect"])
         shot["minimax_prompt"] = minimax_prompt(shot)
+        if any(x.get("edit_from") for x in r["shots"]):
+            same_place_prompts(r)
         check_shots(r)
         r["files"] = save(r)
         return {"shot": shot, "hints": shot_hints(r)}

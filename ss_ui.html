@@ -336,6 +336,35 @@ function readyCard() {
     <button class="btn primary" onclick="setupTools()">Download now</button></div></div>`;
 }
 async function setupTools() { const j = await api("setup_tools"); watchJob(j.job); }
+// ---------------------------------------------------------------- the step-by-step guide
+let LESSONS = null;
+async function openGuide() {
+  if (!LESSONS) { try { LESSONS = (await api("guide")).lessons; } catch (e) { LESSONS = []; } }
+  const go = (label, js) => `<div class="row" style="margin-top:10px"><button class="btn" onclick="${js}">${label}</button></div>`;
+  const lists = (H.shotlists || []).length ? go("Go to my shot lists", "goHome()") : "";
+  const steps = [
+    ["Plan it", `Open the script builder, choose <b>Silent cartoon</b>, and type your idea in one sentence (or tell it what you've already made). StoryStudio writes every shot: a picture prompt, a video prompt and its sound effects.` + go("Plan a cartoon", "guidePlan()")],
+    ["Make your characters first", `In the shot list, each character has a <b>Character prompt</b>. Make that picture in ChatGPT or Nano Banana and save it with the character's name, like <b>Biscuit.png</b>. Then open “two more pictures to make” and make the expressions and the front, side and back pictures from it. These keep the character the same in every shot.` + lists],
+    ["Make the picture for every shot", `Paste each shot's <b>Text-to-image prompt</b> and attach the character's picture every time. For the second and later shots in the same place, use the same-place prompt under it and attach the first shot's picture, so the room doesn't change. Save them as <b>shot 1.png</b>, <b>shot 2.png</b> and so on.`],
+    ["Check the pictures before you pay for video", `In the shot list press <b>Choose the folder and check them</b>. StoryStudio tells you which pictures are good and gives you new wording for the ones that aren't. Fixing a picture is cheap; a clip made from a bad picture is wasted.`],
+    ["Make the clips", `In MiniMax, upload the shot's picture and paste its <b>Image-to-video prompt</b> (keep the camera words in [brackets]). Save each as <b>shot 1.mp4</b>; a second try is <b>shot 1b.mp4</b>. Two or three tries for a shot is normal.`],
+    ["Check the clips", `Press <b>Check the new ones</b>. For each clip StoryStudio says: keep it, use only these seconds, or make it again with this new wording. It also checks that the shots match each other, and tells you when one faces the wrong way.`],
+    ["Put it together in Premiere", `Put the good clips on the timeline in shot order, using the seconds StoryStudio gave you. Cut straight from shot to shot; save fades for when time passes. Don't worry about exact timing yet.`],
+    ["Fix the timing", `Open the project in StoryStudio, click <b>Timing and pacing</b> and choose Silent cartoon. Then press <b>Make these changes for me</b>: StoryStudio trims, speeds up and tightens the shots in a copy ending in “(retimed)”.` + go("Open my Premiere project", "pickProject()")],
+    ["Add the sound effects", `Open the (retimed) copy in StoryStudio, click <b>Add sound effects</b> and choose <b>Cartoon: a sound for everything</b>. Sound goes in after the timing is right, so it stays in step.`],
+    ["Music, title and thumbnail", `The shot list has three music prompts for Suno (a strolling tune, a sneaky tune and a chase tune), a title picture prompt and a YouTube thumbnail prompt.`],
+    ["One last look", `Click <b>Edit feedback</b> and choose Everything for friendly notes on the finished cartoon before you export it.`],
+  ];
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Make a cartoon, step by step</h1><div class="sub" style="margin:0">You don't need to know how any of this works. Do one step at a time; StoryStudio checks your work as you go.</div></div></div>
+    <div class="sbsteps">${steps.map(([t, body], i) => sbStep(i + 1, t, `<div class="sub" style="margin:0">${body}</div>`)).join("")}</div>
+    ${LESSONS.length ? `<h2 style="margin:34px 0 12px">What makes a cute cartoon work</h2>
+    <div class="sub" style="margin:0 0 12px">These come from how the classic cartoon shorts were made. StoryStudio follows them when it writes your shots and checks your timing; knowing them helps you judge what you see.</div>
+    <div class="charlist">${LESSONS.map(l => `<div class="card"><b style="font-size:16px">${esc(l.title)}</b><div class="sub" style="margin:6px 0 0">${esc(l.text)}</div></div>`).join("")}</div>` : ""}
+    <div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button></div>`;
+  $("main").scrollTop = 0;
+}
+async function guidePlan() { await openBuilder(); sbSet("kind", "cartoon", true); }
 function kindLabel(k) { return k === "story" ? "Story" : k === "cartoon" ? "Silent cartoon" : "Music video"; }
 function renderHome() {
   if (!P) {
@@ -346,6 +375,7 @@ function renderHome() {
         ${task("film","#2b2414","#ffd27a","Plan a new video","Start from song lyrics, a story, or a silent cartoon idea. You get a shot list with a picture prompt and a video prompt for every shot.","openBuilder()")}
         ${task("folder","#3a2a14","var(--accent)","Work on a video I'm editing","Open your Premiere project to add sound effects, fix the audio, add karaoke lyrics or get edit feedback. StoryStudio works on its own copy.","pickProject()")}
         ${task("mic","#2a2142","#c9a7ff","Put karaoke lyrics on a finished video","Choose a video file (MP4) and paste the lyrics. No Premiere project needed.","pickVideo()")}
+        ${task("play","#13302a","var(--good)","Show me how, step by step","New to this? A guide to making a cartoon from the first idea to the finished video, and what makes a cute cartoon work.","openGuide()")}
       </div>
       ${lists.length || recent.length ? `<h2 style="margin:34px 0 12px">Pick up where you left off</h2>
       <div class="hero" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
@@ -948,6 +978,41 @@ function promptBox(label, sub, text, redo) {
     <button class="btn small" onclick="pbCopy(${i})">Copy</button>${redo ? `<button class="btn small ghost" onclick="pbRedo(${i})">${redo.which === "picture" ? "Different shot" : "New version"}</button>` : ""}</div>
     <div class="ptext">${esc(text)}</div><div class="pmsg"></div></div>`;
 }
+// ---- the pictures and clips made for the shots: what's good, what to redo, what's left
+const SHOT_STATUS = {done: ["✓ Clip ready", ""], "redo clip": ["Make the clip again", "warn"], "redo picture": ["Make the picture again", "warn"], picture: ["Picture ready: make the clip", "new"], unchecked: ["Clip not checked yet", ""]};
+function shotStatus(s) { const x = SHOT_STATUS[s.status]; return x ? `<span class="pill ${x[1]}">${x[0]}</span>` : ""; }
+function shotFiles(s) {
+  const f = (s.files || []).find(x => x.path === s.best) || null;
+  if (!f || !f.check) return "";
+  const c = f.check, clip = f.kind === "clip";
+  const part = clip && c.verdict !== "make again" && (c.best_from > 0.15 || c.best_to < (f.seconds || 0) - 0.15);
+  let line = `<b>${esc(f.name)}:</b> ${esc(c.what_to_do)}`;
+  if (part) line += ` <b>Use ${c.best_from.toFixed(1)} s to ${c.best_to.toFixed(1)} s.</b>`;
+  if (clip && c.verdict !== "make again" && c.speed && Math.abs(c.speed - 100) >= 10) line += ` <b>Play it at ${c.speed}%.</b>`;
+  if (c.problems && c.problems.length && c.verdict === "make again") line += ` (${c.problems.map(esc).join("; ")})`;
+  const failed = (s.files || []).filter(x => x.kind === "clip" && x.check && x.check.verdict === "make again").length;
+  if (failed >= 3 && c.verdict === "make again") line += `<br><b>${failed} tries haven't worked.</b> When a shot keeps going wrong it's usually the shot, not you: press “Different shot” on the picture prompt for a simpler idea, or show it as two shots with a cut between.`;
+  return `<div class="purpose">${line}</div>` + (c.verdict === "make again" && c.new_prompt ? promptBox(c.redo === "picture" ? "Paste this to make the picture again" : "Paste this to make the clip again", c.redo === "picture" ? "ChatGPT / Nano Banana" : "MiniMax", c.redo === "picture" ? c.new_prompt : c.new_prompt + (/\[[^\]]+\]\s*$/.test(c.new_prompt) ? "" : ` [${s.camera}${s.camera2 ? "," + s.camera2 : ""}]`), null) : "");
+}
+function clipsCard(r) {
+  const n = {}; r.shots.forEach(s => { const k = s.status || "todo"; n[k] = (n[k] || 0) + 1; });
+  const total = r.shots.length, done = n.done || 0;
+  if (!r.clip_folder) return `<div class="card" style="margin-top:26px"><h2>Your pictures and clips</h2>
+    <div class="sub" style="margin:0 0 12px">Once you've made some pictures or clips, StoryStudio can look at them and tell you which are good, which seconds of each clip to use, and exactly what to paste to redo the ones that went wrong. Name each file with its shot number, like <b>shot 5.png</b> and <b>shot 5.mp4</b> (<b>shot 5b.mp4</b> for another try). A picture named after a character${r.characters.length ? ` (<b>${esc(r.characters[0].name)}.png</b>)` : ""} is used to check that character looks the same everywhere.</div>
+    <button class="btn primary" onclick="clipsPick()">${ICON.folder} Choose the folder and check them</button></div>`;
+  const chip = (k, t, cls) => n[k] ? `<span class="chip ${cls || ""}">${n[k]} ${n[k] === 1 ? t[0] : t[1]}</span>` : "";
+  const next = n["redo picture"] ? "Next: make the pictures again that are marked below, then their clips." : n["redo clip"] ? "Next: make the marked clips again with the new wording below." : n.picture ? "Next: make the clips for the pictures that are ready." : n.todo ? "Next: make the pictures for the shots that haven't been started." : "Every shot has a good clip. Time to put them together in Premiere, then use Timing and pacing.";
+  return `<div class="card" style="margin-top:26px"><h2>Your pictures and clips</h2>
+    <div class="sub" style="margin:0 0 10px"><b>${done} of ${total}</b> shots ${done === 1 ? "has" : "have"} a clip that's ready for the edit. ${next}</div>
+    <div class="chips" style="margin:0 0 12px">${chip("done", ["ready", "ready"], "good")}${chip("redo clip", ["clip to make again", "clips to make again"], "warn")}${chip("redo picture", ["picture to make again", "pictures to make again"], "warn")}${chip("picture", ["picture waiting for a clip", "pictures waiting for a clip"])}${chip("todo", ["not started", "not started"])}</div>
+    ${(r.clip_notes || []).map(x => `<div class="sub" style="margin:0 0 8px">${esc(x)}</div>`).join("")}
+    ${(r.continuity || []).length ? `<div style="margin:0 0 12px"><b>Shots that don't match each other</b><ul class="notes">${r.continuity.map(x => `<li><b>Shot ${x.shot}</b> against shot ${x.against}: ${esc(x.problem)} <span style="color:var(--soft)">${esc(x.fix)}</span></li>`).join("")}</ul></div>` : ""}
+    ${(r.clip_unknown || []).length ? `<div class="sub" style="margin:0 0 8px">${r.clip_unknown.length} file${r.clip_unknown.length === 1 ? "" : "s"} had no shot number in the name, so StoryStudio left ${r.clip_unknown.length === 1 ? "it" : "them"} out (${r.clip_unknown.slice(0, 3).map(esc).join(", ")}${r.clip_unknown.length > 3 ? "…" : ""}).</div>` : ""}
+    <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn primary" onclick="clipsCheck()">Check the new ones</button><button class="btn" onclick="clipsPick()">${ICON.folder} Choose another folder</button><button class="btn ghost" onclick="clipsCheck(true)">Check everything again</button>
+    <span class="sub" style="margin:0">${esc(r.clip_folder)}${r.clip_checked ? " · checked " + esc(r.clip_checked) : ""}</span></div></div>`;
+}
+async function clipsPick() { if (picking) return; picking = true; let j; try { j = await api("sb_clips_pick"); } finally { picking = false; } if (j.folder) { const k = await api("sb_clips_check", {folder: j.folder}); watchJob(k.job); } }
+async function clipsCheck(again) { const k = await api("sb_clips_check", {again: !!again}); watchJob(k.job); }
 function sbTypeCounts(r) {          // how many of each type, most to least, and the tries
   const n = {}; let gens = 0;
   for (const s of r.shots) {
@@ -981,7 +1046,7 @@ function renderScript() {
   if (r.thumbnail) top += `<div class="card"><h2>YouTube thumbnail</h2>${promptBox("Thumbnail prompt", "ChatGPT / Nano Banana", r.thumbnail.prompt, {which:"thumbnail", n:0})}</div>`;
   if (r.suno && r.suno.length) top += `<div class="card"><h2>Background theme music</h2><div class="sub">Suno prompts that follow the feel of the story. Instrumental, made to sit under the narration.</div>${r.suno.map((m, i) => promptBox(esc(m.name), "Suno", m.prompt, {which:"suno", n:i})).join("")}</div>`;
   const chars = r.characters.length ? `<h2 style="margin-top:26px">Characters</h2><div class="sub">Make each character's picture first, then attach it whenever that character is in a shot, so they look the same every time.</div>
-    <div class="charlist">${r.characters.map((c, i) => `<div class="card"><b style="font-size:16px">${esc(c.name)}</b><div class="sub" style="margin:6px 0 4px">${esc(c.look)}</div>${promptBox("Character prompt", "", c.sheet_prompt, {which:"character", n:i})}</div>`).join("")}</div>` : "";
+    <div class="charlist">${r.characters.map((c, i) => `<div class="card"><b style="font-size:16px">${esc(c.name)}</b><div class="sub" style="margin:6px 0 4px">${esc(c.look)}</div>${promptBox("Character prompt", "", c.sheet_prompt, {which:"character", n:i})}${c.expressions_prompt ? `<details style="margin-top:8px"><summary class="sub" style="cursor:pointer;margin:0">Keep ${esc(c.name)} looking the same: two more pictures to make</summary><div class="sub" style="margin:8px 0 0">Make these from ${esc(c.name)}'s finished picture (attach it, then paste). Attach the expressions for close-ups, and the turnaround for shots from the side or behind.</div>${promptBox("Expressions", "attach the character's picture", c.expressions_prompt, null)}${promptBox("Front, side and back", "attach the character's picture", c.turnaround_prompt, null)}</details>` : ""}</div>`).join("")}</div>` : "";
   let scene = 0;
   const shots = r.shots.map(s => {
     let head = "";
@@ -992,11 +1057,13 @@ function renderScript() {
     const ty = s.shot_type ? SBT.find(t => t.code === s.shot_type) : null;
     return head + `<div class="card shot ${s.extra ? "extra" : ""}">
       <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${s.n}${s.title ? ": " + esc(s.title) : ""}</b>${ty ? `<select class="pill" title="${esc(ty.purpose)}" aria-label="Shot type" onchange="sbSetType(${s.n}, this.value, this)">${SBT.map(t => `<option value="${esc(t.code)}" ${t.code === ty.code ? "selected" : ""}>${esc(t.code)} · ${esc(t.name)}</option>`).join("")}</select>` : ""}<span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
-      <span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span></div>
+      <div class="row" style="gap:8px">${shotStatus(s)}<span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span></div></div>
       ${s.words ? `<div class="words">${r.kind === "cartoon" ? "🔊" : "💬"} ${esc(s.words)}</div>` : ""}
       ${s.purpose ? `<div class="purpose"><b>What this shot is for:</b> ${esc(s.purpose)}</div>` : ""}
       ${ty && (s.warnings || []).length ? `<div class="sub" style="margin:2px 0 0">${s.warnings.map(esc).join(" ")}</div>` : ""}
+      ${shotFiles(s)}
       ${promptBox("Text-to-image prompt", "ChatGPT / Nano Banana", s.picture_prompt, {which:"picture", n:s.n})}
+      ${s.edit_prompt ? `<details style="margin-top:8px"><summary class="sub" style="cursor:pointer;margin:0">Is the place changing from picture to picture? Edit shot ${s.edit_from}'s picture instead</summary>${promptBox("Same-place prompt", `attach shot ${s.edit_from}'s picture`, s.edit_prompt, null)}</details>` : ""}
       ${promptBox("Image-to-video prompt", `MiniMax · ${r.clip}-second clip${ty && s.trim ? ` · keep about ${s.trim} s` : ""}`, s.minimax_prompt, {which:"motion", n:s.n})}</div>`;
   }).join("");
   $("#view").innerHTML = `
@@ -1008,6 +1075,7 @@ function renderScript() {
     ${r.visual_rules ? `<div class="banner">${esc(r.visual_rules)}</div>` : ""}
     ${top ? `<div class="toplist">${top}</div>` : ""}
     ${chars}
+    ${clipsCard(r)}
     <h2 style="margin-top:26px">Shots</h2>
     ${shots}
     <div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><button class="btn" onclick="openBuilder()">Make another</button></div>`;
