@@ -658,6 +658,255 @@ class Writer:
         return str(out_path)
 
 
+# ---------------------------------------------------------------------------
+# retiming: trims, speed changes and removed shots, with the gaps closed
+# ---------------------------------------------------------------------------
+def _seq_tracks(w, seq):
+    """Every track of the sequence: [{"kind", "items": [..], "trans": <TrackItems el>}], each
+    item {"el", "cti", "id", "start", "end", "clip" (the inner Clip element), "in", "out",
+    "speed", "media" (seconds of source, or None)}; plus the ticks in one frame."""
+    tracks, frame = [], 0
+    for g in seq.findall("TrackGroups/TrackGroup"):
+        grp = w.get(g, "Second")
+        if grp is None or grp.tag not in ("VideoTrackGroup", "AudioTrackGroup"):
+            continue
+        kind = "video" if grp.tag == "VideoTrackGroup" else "audio"
+        if kind == "video":
+            try:
+                frame = int(grp.findtext("TrackGroup/FrameRate") or 0)
+            except ValueError:
+                frame = 0
+        for tr in w.refs(grp, "TrackGroup/Tracks/Track"):
+            ct = tr.find("ClipTrack")
+            if ct is None:
+                continue
+            items = []
+            for el in w.refs(ct, "ClipItems/TrackItems/TrackItem"):
+                cti = el.find("ClipTrackItem")
+                if cti is None or cti.find("TrackItem/Start") is None:
+                    continue
+                sub = w.get(cti, "SubClip")
+                clip = w.get(sub, "Clip") if sub is not None else None
+                c = clip.find("Clip") if clip is not None else None
+                if c is None:
+                    continue
+
+                def num(e, path, default=0):
+                    try:
+                        return int(float(e.findtext(path)))
+                    except (TypeError, ValueError):
+                        return default
+                src = w.get(c, "Source")
+                try:
+                    speed = float(c.findtext("PlaybackSpeed") or 1.0)
+                except ValueError:
+                    speed = 1.0
+                items.append({"el": el, "cti": cti, "c": c,
+                              "id": el.get("ObjectID") or el.get("ObjectUID"),
+                              "start": num(cti, "TrackItem/Start"),
+                              "end": num(cti, "TrackItem/End"),
+                              "in": num(c, "InPoint"), "out": num(c, "OutPoint"),
+                              "has_out": c.find("OutPoint") is not None,
+                              "speed": speed if speed > 0 else 1.0,
+                              "media": num(src, "OriginalDuration", 0) if src is not None else 0,
+                              "plain": c.find("PlaybackSpeed") is None or speed > 0})
+            tracks.append({"kind": kind, "items": items, "ct": ct})
+    return tracks, frame or int(TICKS / 24)
+
+
+def retime(project_path, seq_uid, edits, out_path):
+    """Save a copy of the project with timing changes made on the sequence's video shots and
+    every gap they leave closed up (everything later moves earlier, sound included).
+
+    edits: {video track item id: {"head": seconds to trim off the start, "tail": seconds off
+    the end, "speed": percent of the current speed (100 = leave), "more": seconds to hold
+    longer, "cut": True to remove the shot}}.
+    Returns {"project", "changed", "skipped": [reasons], "shorter": seconds}."""
+    w = Writer(project_path)
+    seq = w.sequence(seq_uid)
+    tracks, frame = _seq_tracks(w, seq)
+    T = float(TICKS)
+
+    def snap(t):                                   # timeline times sit on whole frames
+        return int(round(t / frame)) * frame
+    old_end = max([i["end"] for tr in tracks for i in tr["items"]] or [0])
+    done, skipped, plans = 0, [], {}
+    for tr in tracks:
+        if tr["kind"] != "video":
+            continue
+        for it in tr["items"]:
+            e = edits.get(str(it["id"]))
+            if not e:
+                continue
+            length = it["end"] - it["start"]
+            if not it["has_out"] or it["out"] <= it["in"] or length <= 0:
+                skipped.append("a shot StoryStudio can't safely retime (a title or still)")
+                continue
+            sp = (it["out"] - it["in"]) / length          # how the shot really plays now
+            if e.get("cut"):
+                plans[it["id"]] = {"cut": True, "len": 0}
+                done += 1
+                continue
+            head = max(0.0, float(e.get("head") or 0)) * T
+            tail = max(0.0, float(e.get("tail") or 0)) * T
+            if head + tail > length - 0.3 * T:           # never trim a shot away to nothing
+                k = max(0.0, (length - 0.3 * T)) / (head + tail)
+                head, tail = head * k, tail * k
+            new_in, new_out = it["in"] + head * sp, it["out"] - tail * sp
+            new_sp = sp * max(0.25, min(4.0, float(e.get("speed") or 100) / 100.0))
+            new_len = (new_out - new_in) / new_sp
+            more = max(0.0, float(e.get("more") or 0)) * T
+            if more:
+                spare = max(0.0, (it["media"] - new_out) / new_sp) if it["media"] else 0.0
+                use = min(more, spare)
+                new_out += use * new_sp
+                new_len += use
+                rest = more - use
+                if rest > 0.04 * T:                      # no more footage: play it a bit slower
+                    slow = max(0.6, new_len / (new_len + rest))
+                    new_sp *= slow
+                    new_len = (new_out - new_in) / new_sp
+            plans[it["id"]] = {"in": new_in, "out": new_out, "speed": new_sp, "len": new_len,
+                               "head": head, "old_speed": sp}
+            done += 1
+    if not done:
+        raise StoryError("None of the changes could be made on this project.")
+    # where every moment of the old timeline lands on the new one
+    edited = sorted(((it["start"], it["end"], plans[it["id"]]) for tr in tracks
+                     if tr["kind"] == "video" for it in tr["items"] if it["id"] in plans),
+                    key=lambda x: x[0])
+
+    def where(t):
+        shift = 0.0
+        for a, b, p in edited:
+            if t >= b:
+                shift += p["len"] - (b - a)
+            elif t > a:                                  # inside a changed shot
+                if p.get("cut"):
+                    return a + shift
+                inside = (t - a - p["head"]) * p["old_speed"] / p["speed"]
+                return a + shift + max(0.0, min(p["len"], inside))
+            else:
+                break
+        return t + shift
+    for tr in tracks:
+        keep = []
+        for it in tr["items"]:
+            p = plans.get(it["id"]) if tr["kind"] == "video" else None
+            if p is None and tr["kind"] == "audio":       # a shot's own sound follows its shot
+                p = next((q for a, b, q in edited if abs(a - it["start"]) < frame and
+                          abs(b - it["end"]) < frame and not q.get("cut") and
+                          it["has_out"]), None)
+                if p is not None:
+                    sp = (it["out"] - it["in"]) / max(1, it["end"] - it["start"])
+                    k = p["speed"] / p["old_speed"]
+                    p = {"in": it["in"] + p["head"] * sp, "speed": sp * k, "len": p["len"],
+                         "out": it["in"] + p["head"] * sp + p["len"] * sp * k}
+            if p is not None and p.get("cut"):
+                it["gone"] = True
+                continue
+            it["new_start"] = snap(where(it["start"]))
+            if p is not None:
+                it["new_end"] = max(it["new_start"] + frame, snap(where(it["start"]) + p["len"]))
+                it["new_in"], it["new_speed"] = int(round(p["in"])), p["speed"]
+            else:
+                it["new_end"] = it["new_start"] + (it["end"] - it["start"])
+            keep.append(it)
+        keep.sort(key=lambda i: i["new_start"])
+        for a, b in zip(keep, keep[1:]):                 # two clips never share a moment
+            if a["new_end"] > b["new_start"]:
+                a["new_end"] = max(a["new_start"] + frame, b["new_start"])
+                if a["new_end"] > b["new_start"]:        # no room left at all: it goes
+                    a["gone"] = True
+        for it in keep:
+            if it.get("gone"):
+                continue
+            cti, c = it["cti"], it["c"]
+            w.setx(cti, "TrackItem/Start", it["new_start"])
+            w.setx(cti, "TrackItem/End", it["new_end"])
+            new_len = it["new_end"] - it["new_start"]
+            if "new_in" in it:
+                sp = it["new_speed"]
+                while it["media"] and it["new_in"] + new_len * sp > it["media"] and \
+                        new_len > frame:
+                    new_len -= frame
+                    w.setx(cti, "TrackItem/End", it["new_start"] + new_len)
+                    it["new_end"] = it["new_start"] + new_len
+                w.setx(c, "InPoint", it["new_in"])
+                w.setx(c, "OutPoint", int(round(it["new_in"] + new_len * sp)))
+                if abs(sp - 1.0) < 0.005:
+                    w.drop(c, "PlaybackSpeed")
+                elif c.find("PlaybackSpeed") is not None:
+                    w.setx(c, "PlaybackSpeed", round(sp, 6))
+                else:                                    # goes just before the in point
+                    el = ET.Element("PlaybackSpeed")
+                    el.text = str(round(sp, 6))
+                    c.insert(list(c).index(c.find("InPoint")), el)
+            elif it["has_out"] and new_len != it["end"] - it["start"]:
+                sp = (it["out"] - it["in"]) / max(1, it["end"] - it["start"])
+                w.setx(c, "OutPoint", int(round(it["in"] + new_len * sp)))
+        # removed shots leave the track, with their transitions
+        gone = [it for it in tr["items"] if it.get("gone")]
+        lst = tr["ct"].find("ClipItems/TrackItems")
+        tlst = tr["ct"].find("TransitionItems/TrackItems")
+        dead = set()
+        for it in gone:
+            for ref in list(lst):
+                if (ref.get("ObjectRef") or ref.get("ObjectURef")) == it["id"]:
+                    lst.remove(ref)
+            for tag in ("HeadTransition", "TailTransition"):
+                r = it["cti"].find(tag)
+                if r is not None:
+                    dead.add(r.get("ObjectRef") or r.get("ObjectURef"))
+        # transitions stay with their cut: a clip's opening one starts where the clip now
+        # starts, its closing one ends where the clip now ends
+        cuts = {}
+        for it in tr["items"]:
+            if it.get("gone"):
+                continue
+            for tag, t in (("HeadTransition", it["new_start"]), ("TailTransition", it["new_end"])):
+                r = it["cti"].find(tag)
+                if r is not None:
+                    key = r.get("ObjectRef") or r.get("ObjectURef")
+                    cuts[key] = t
+                    dead.discard(key)                    # shared with a clip that stays
+        if tlst is not None:
+            for ref in list(tlst):
+                key = ref.get("ObjectRef") or ref.get("ObjectURef")
+                tel = w.objs.get(key)
+                if key in dead or tel is None:
+                    if key in dead:
+                        tlst.remove(ref)
+                    continue
+                ti = tel.find("TransitionTrackItem")
+                if ti is None or key not in cuts:
+                    continue
+                try:
+                    s0 = int(float(ti.findtext("TrackItem/Start")))
+                    e0 = int(float(ti.findtext("TrackItem/End")))
+                    al = int(float(ti.findtext("Alignment") or 0))
+                except (TypeError, ValueError):
+                    continue
+                start = max(0, cuts[key] - al)
+                w.setx(ti, "TrackItem/Start", start)
+                w.setx(ti, "TrackItem/End", start + (e0 - s0))
+            for i, ref in enumerate(list(tlst)):
+                if ref.get("Index") is not None:
+                    ref.set("Index", str(i))
+        if lst is not None:
+            for i, ref in enumerate(list(lst)):
+                if ref.get("Index") is not None:
+                    ref.set("Index", str(i))
+    new_end = max([i["new_end"] for tr in tracks for i in tr["items"]
+                   if not i.get("gone") and "new_end" in i and tr["kind"] == "video"] or [0])
+    old_video_end = max([i["end"] for tr in tracks if tr["kind"] == "video"
+                         for i in tr["items"]] or [0])
+    w.save(out_path)
+    log("wrote retimed project", out_path, "changed", done, "skipped", len(skipped))
+    return {"project": str(out_path), "changed": done, "skipped": skipped,
+            "shorter": round((old_video_end - new_end) / T, 2)}
+
+
 MARKER_CLASS = "a45508e0-3ff7-4d04-90a7-2e0dfff4c910"
 # Premiere's marker colours (stored as 0xAABBGGRR); green is Premiere's default (no colour)
 MARKER_COLOURS = {"red": 4281740498, "orange": 4280578025, "yellow": 4281049552,

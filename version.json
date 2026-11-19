@@ -1,5 +1,5 @@
 {
-  "version": "1.15.0",
+  "version": "1.16.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -27,5 +27,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "New: Timing and pacing. StoryStudio looks closely at every shot on your timeline and tells you what to trim, hold longer or speed up, with markers on a copy of your project. Choose Silent cartoon for comic timing."
+  "notes": "Silent cartoons: after a Timing and pacing check, press \"Make these changes for me\" and StoryStudio trims, speeds up and tightens the shots in a new copy ending in (retimed). Your project isn't changed."
 }

@@ -621,6 +621,7 @@ function renderFeedback() {
   const counts = k => F.notes.filter(n => n.severity === k).length;
   const shown = F.notes.filter(n => !fbFilter || n.severity === fbFilter);
   const kept = F.notes.filter(n => n.keep).length;
+  const canDo = F.notes.filter(n => n.keep && n.can_do).length;
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>Notes on “${esc(F.title)}”</h1><div class="sub" style="margin:0">${F.kind === "music" ? "Music video" : F.kind === "cartoon" ? "Silent cartoon" : "Story"} · ${st.shots} shots, ${(+st.average).toFixed(1)} s each on average${st.beat ? ` · ${st.beat.on_beat} of ${st.beat.cuts} cuts on the beat (${st.beat.bpm} beats a minute)` : ""}</div></div>
       <div class="row">${F.project ? `<button class="btn primary big" onclick='openFbProject()'>Open in Premiere ${arrow()}</button>` : ""}</div></div>
@@ -631,6 +632,10 @@ function renderFeedback() {
         ${s.overall ? `<div class="card" style="margin-top:16px"><h2>Overall</h2><p style="margin:0 0 12px">${esc(s.overall)}</p>
           ${(s.strengths||[]).length ? `<b class="good-t">What's working</b><ul class="notes">${s.strengths.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
           ${(s.top_fixes||[]).length ? `<b class="fix-t" style="display:block;margin-top:12px">What would help most</b><ul class="notes">${s.top_fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</div>` : ""}
+        ${F.can_retime ? `<div class="card" style="margin-top:16px"><h2>Want StoryStudio to do it?</h2>
+          <div class="sub" style="margin:0 0 12px">StoryStudio can make the ${canDo} timing change${canDo===1?"":"s"} that ${canDo===1?"is":"are"} switched on (trims, speed changes, longer holds and removed shots) and close the gaps, in a new copy ending in “(retimed)”. Switch off any note you don't agree with first. Your project isn't changed.</div>
+          <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn primary" id="rtbtn" ${canDo ? "" : "disabled"} onclick="fbRetime()">Make these changes for me</button>
+          ${F.retimed ? `<button class="btn" onclick='openFile(${esc(JSON.stringify(F.retimed))}, this, "Opening in Premiere…")'>Open the (retimed) copy</button>` : ""}</div><div class="pmsg" id="rtmsg"></div></div>` : ""}
         <div class="card" style="margin-top:16px">
           <div class="sub" style="margin:0 0 12px">${kept} note${kept===1?"":"s"} ${F.dirty ? "switched on. Update the copy to change the markers." : "are markers on the timeline in your “(feedback)” copy. Your project wasn't changed."}</div>
           <div class="row" style="flex-wrap:wrap;gap:10px">
@@ -650,11 +655,23 @@ function renderFeedback() {
       </div>
     </div>`;
 }
+async function fbRetime() {
+  const b = $("#rtbtn"), m = $("#rtmsg");
+  b.disabled = true; m.innerHTML = `<span class="spin"></span> Making the changes in a copy of your project…`;
+  let j;
+  try { j = await api("fb_retime"); }
+  catch (e) { b.disabled = false; m.innerHTML = `<span class="err">That didn't work: ${esc(e.message)}</span>`; return; }
+  F = j.feedback;
+  const t = $("#fbv") ? $("#fbv").currentTime : 0;
+  renderFeedback(); if ($("#fbv")) $("#fbv").currentTime = t;
+  const skipped = (j.skipped || []).length;
+  $("#rtmsg").innerHTML = `<span class="ok">✓ Done: ${j.changed} shot${j.changed===1?"":"s"} changed${j.shorter > 0.5 ? `, and the video is about ${Math.round(j.shorter)} seconds shorter` : ""}. It's in the copy ending in “(retimed)”.${skipped ? ` ${skipped} couldn't be changed.` : ""}</span>`;
+}
 function noteHtml(n) {
   return `<div class="note ${n.keep?"":"off"}">
     <i class="sev" style="background:${SEV[n.severity][1]}"></i>
     <div class="nb">
-      <div class="nh"><button class="tmb" title="Watch this moment" onclick="fbSeek(${n.t})">${ICON.play.replace('<svg','<svg width="11" height="11"')} ${n.time}</button><b>${esc(n.title)}</b>${n.ai ? `<span class="pill">${esc(F.by || "AI")}</span>` : ""}</div>
+      <div class="nh"><button class="tmb" title="Watch this moment" onclick="fbSeek(${n.t})">${ICON.play.replace('<svg','<svg width="11" height="11"')} ${n.time}</button><b>${esc(n.title)}</b>${n.ai ? `<span class="pill">${esc(F.by || "AI")}</span>` : ""}${n.can_do && F.can_retime ? `<span class="pill new" title="StoryStudio can make this change for you">Can do for you</span>` : ""}</div>
       <div>${esc(n.note)}</div>
       ${n.how ? `<div class="how">${esc(n.how)}</div>` : ""}
     </div>

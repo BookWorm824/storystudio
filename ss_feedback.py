@@ -541,7 +541,9 @@ def timing_notes(st, kind, seq, lines, work, progress=None, cancel=None, per_req
                 left_alone.append((a, f"{fmt_time(a)} {b - a:.1f}s (her intro, outro or "
                                       "title: left as it is, don't comment on it)"))
             continue                              # slivers
+        whole = abs(a - it["start"]) < 0.5 / fps and abs(b - it["end"]) < 0.5 / fps
         shots.append({"n": len(shots) + 1, "start": a, "end": b, "name": name,
+                      "item": it.get("id") if whole and it.get("kind") == "video" else None,
                       "speed": float(it.get("speed") or 1.0),
                       "before": (segs[i - 1][1] - segs[i - 1][0]) if i else None,
                       "after": (segs[i + 1][1] - segs[i + 1][0]) if i + 1 < len(segs) else None})
@@ -640,6 +642,7 @@ without this shot."""
         listing.append((s["start"], f"{fmt_time(s['start'])} {length:.1f}s [{v}"
                         f"{', ' + str(speed) + '%' if speed != 100 else ''}] {why}"))
         title = how = ""
+        edit = None
         if v in ("trim start", "trim end", "trim both"):
             head = head if v != "trim end" and head >= 0.4 else 0.0
             tail = tail if v != "trim start" and tail >= 0.4 else 0.0
@@ -652,8 +655,10 @@ without this shot."""
             how = (f"Trim {' and '.join(bits)}, so this shot runs for about "
                    f"{length - head - tail:.1f} seconds. {gap}")
             freed += head + tail
+            edit = {"head": round(head, 3), "tail": round(tail, 3)}
         elif v == "hold longer":
             more = max(0.3, k1 - s["end"])
+            edit = {"more": round(min(more, 3.0), 3)}
             title = "Hold this a little longer"
             how = (f"Give it about {more:.1f} seconds more ({_frames(more, fps)}): drag its end "
                    "out if the clip has more, or right-click > Speed/Duration and slow it a "
@@ -669,16 +674,20 @@ without this shot."""
                    f"about {length * 100 / speed:.1f} seconds). "
                    + (gap if speed > 100 else "Make room for it, or trim its end."))
             freed += max(0.0, length - length * 100 / speed)
+            edit = {"speed": speed}
         elif v == "cut it":
             title = "This shot could go"
             how = ("Try the edit without it: select it and press Shift+Delete to close the "
                    "gap." if kind == "cartoon" else
                    "Try the edit without it, and give its time to the shots around it.")
             freed += length
+            edit = {"cut": True}
         if not title:
             continue
         notes.append(_note(s["start"], "suggest", "pacing", title, why, how, s["end"],
                            source="ai"))
+        if edit and s.get("item"):                # StoryStudio can make this change itself
+            notes[-1]["edit"] = dict(edit, item=str(s["item"]))
     summary = {"overall": "", "top_fixes": []}
     if answers:
         if progress:
@@ -755,6 +764,7 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
           dur, mixwav)
     mono = M.wav_mono16k(mixwav)
     stop()
+    asked = kind if kind in ("music", "story", "cartoon") else "auto"
     if kind not in ("music", "story", "cartoon"):
         kind = guess_kind(seq, clips)
     st["feedback_kind"] = kind
@@ -807,6 +817,9 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
         except StoryError:
             story = ""
     stop()
+    if kind == "story" and asked == "auto" and sum(len(l["text"].split()) for l in lines) < 6 \
+            and not any(c["tag"].startswith("dialog") for c in clips):
+        kind = st["feedback_kind"] = "cartoon"   # nothing is said: a wordless film
     # 2. Claude watches
     summary = {"overall": "", "strengths": [], "top_fixes": []}
     import ss_claude as C
@@ -877,6 +890,27 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
     E.save(st)
     say(1.0, f"Done: {len(notes)} notes.")
     return out
+
+
+def retime(st):
+    """Make the timing changes of the notes that are switched on, in a new copy of the
+    project ending in "(retimed)": trims, speed changes, longer holds and removed shots, with
+    the gaps closed. The project itself and the "(feedback)" copy are not changed."""
+    import storysound as E
+    import ss_prwrite as W
+    fb = st.get("feedback") or {}
+    edits = {}
+    for n in fb.get("notes", []):
+        e = n.get("edit")
+        if e and n.get("keep", True):
+            edits.setdefault(e["item"], {}).update({k: v for k, v in e.items() if k != "item"})
+    if not edits:
+        raise StoryError("There are no timing changes switched on to make.")
+    proj = E.copy_path(Path(st["project"]), "retimed")
+    res = W.retime(st.get("snapshot") or st["project"], st["seq_uid"], edits, proj)
+    st.setdefault("outputs", {})["retimed"] = res["project"]
+    E.save(st)
+    return res
 
 
 def _dedupe(new, old):

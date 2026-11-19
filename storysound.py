@@ -1255,7 +1255,7 @@ def assign_tracks(cues):
     return tracks
 
 
-COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback")
+COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback", "retimed")
 
 
 def copy_path(project, tag):

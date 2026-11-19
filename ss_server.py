@@ -146,7 +146,8 @@ def note_view(n):
             "end": n.get("end"), "severity": n["severity"],
             "label": FB_LABEL.get(n["severity"], ""), "kind": n.get("kind", ""),
             "title": n["title"], "note": n["note"], "how": n.get("how", ""),
-            "keep": bool(n.get("keep", True)), "ai": n.get("source") in ("ai", "claude")}
+            "keep": bool(n.get("keep", True)), "ai": n.get("source") in ("ai", "claude"),
+            "can_do": bool(n.get("edit"))}
 
 
 def feedback_view():
@@ -162,6 +163,8 @@ def feedback_view():
             "project": out.get("project", ""), "project_error": out.get("project_error", ""),
             "folder": out.get("folder", ""), "list": out.get("list", ""),
             "dirty": bool(st.get("feedback_dirty")),
+            "can_retime": fb["kind"] == "cartoon" and any(n.get("edit") for n in fb["notes"]),
+            "retimed": out.get("retimed", ""),
             "snapshot_time": st.get("snapshot_time", "")}
 
 
@@ -663,6 +666,15 @@ def api(name, a):
         S.st["feedback_dirty"] = True
         E.save(S.st)
         return {"note": note_view(n), "dirty": True}
+    if name == "fb_retime":
+        import ss_feedback as F
+        if (S.st.get("feedback") or {}).get("kind") != "cartoon":
+            raise StoryError("StoryStudio only makes timing changes itself on silent cartoons, "
+                             "where nothing has to stay in step with a song or narration.")
+        res = F.retime(S.st)
+        return {"project": res["project"], "changed": res["changed"],
+                "shorter": res["shorter"], "skipped": res["skipped"],
+                "feedback": feedback_view()}
     if name == "fb_save":
         import ss_feedback as F
         F.write_outputs(S.st)
