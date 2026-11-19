@@ -384,7 +384,7 @@ def claude_notes(st, kind, story, lines, shots, facts, sheets, progress=None,
         hi = groups[gi + 1][0][0] if gi + 1 < len(groups) else dur
         if progress:
             progress(gi / len(groups), f"Claude is watching {fmt_time(lo)} to {fmt_time(hi)}…")
-        prompt = f"""This is a {"music video" if kind == "music" else "story / short movie"}: \
+        prompt = f"""This is a {"music video" if kind == "music" else "silent slapstick cartoon (no narration: gags, reactions and sound effects tell it)" if kind == "cartoon" else "story / short movie"}: \
 "{st['seq_name']}", {dur:.1f} seconds long.
 This request covers {lo:.1f}s to {hi:.1f}s{f' (part {gi + 1} of {len(groups)})' if len(groups) > 1 else ''}.
 
@@ -438,6 +438,279 @@ of the whole movie. Return notes as an empty list.""", SCHEMA, system=SYSTEM)
 # ---------------------------------------------------------------------------
 # 3. all of it
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 2b. timing and pacing, shot by shot
+# ---------------------------------------------------------------------------
+TIMING_SHOT = {
+    "type": "object",
+    "properties": {
+        "n": {"type": "integer", "description": "the shot's number, as given"},
+        "action_start": {"type": "number", "description": "second (movie time) where the "
+                         "part worth seeing begins: the first still where something happens"},
+        "action_end": {"type": "number", "description": "second where it is over: the "
+                       "action has finished and landed, or the picture starts to drift, "
+                       "repeat or go wrong"},
+        "verdict": {"type": "string", "enum": ["good", "trim start", "trim end", "trim both",
+                                               "hold longer", "too quick", "speed up",
+                                               "slow down", "cut it"]},
+        "keep_from": {"type": "number", "description": "second this shot should start at "
+                      "after the change (the shot's own start if no change)"},
+        "keep_to": {"type": "number", "description": "second it should end at"},
+        "speed": {"type": "integer", "description": "playback speed to use, in percent of "
+                  "how it plays now: 100 = leave it, 130 = a third faster"},
+        "note": {"type": "string", "description": "one or two plain sentences: what you see "
+                 "and why the change helps the timing; for 'good', what makes it work"},
+    },
+    "required": ["n", "action_start", "action_end", "verdict", "keep_from", "keep_to", "speed",
+                 "note"],
+    "additionalProperties": False,
+}
+TIMING = {"type": "object", "properties": {"shots": {"type": "array", "items": TIMING_SHOT}},
+          "required": ["shots"], "additionalProperties": False}
+PACING = {
+    "type": "object",
+    "properties": {
+        "overall": {"type": "string", "description": "3-4 warm, honest, plain sentences on "
+                    "the pacing of the whole movie: where it flows, where it drags or "
+                    "rushes, and how the rhythm of the cuts feels"},
+        "top_fixes": {"type": "array", "items": {"type": "string"},
+                      "description": "the 1-3 timing changes that would help most, plainly"},
+    },
+    "required": ["overall", "top_fixes"],
+    "additionalProperties": False,
+}
+TIMING_SYSTEM = """You are a kind, experienced film editor helping a storyteller with the \
+TIMING AND PACING of her edit in Adobe Premiere. Her shots are AI-generated video clips. She is \
+not technical: plain, warm, everyday words, no jargon.
+
+You see each shot as a run of stills a fraction of a second apart, with the movie time printed \
+on every still. Judge only timing: when each shot should start and end, how long it should \
+hold, and whether it should play faster or slower. Don't comment on looks, glitches or story \
+unless they decide where to cut.
+
+What good timing means:
+- AI clips usually start slowly and wander at the end. The part worth keeping is where \
+something clearly happens. Still or slow frames before the action begins, and frames after it \
+has landed (drifting, repeating, a face or hand starting to change), are dead time: trim them.
+- Come in as the action starts and leave as soon as it has landed. A cut during movement \
+feels smooth; a cut after everything has stopped feels slow.
+- Every shot needs long enough to be read: a simple close-up about 1 to 2 seconds, a busy \
+wide shot 3 seconds or more. Shorter than that is too quick.
+- Rhythm: shot lengths should vary. As a moment builds, shots get shorter; after the big \
+moment, one longer shot lets it breathe. Many shots of the same length in a row feel flat.
+- AI video often moves a little like slow motion. If an action floats, playing it faster \
+(120 to 150 percent) gives it life. Never speed up a quiet look, a blink or a tender moment.
+- Only suggest a change that a viewer would feel. If a shot works, say "good"."""
+TIMING_KIND = {
+    "story": "This is a NARRATED STORY. The words lead: a picture should change at the end of "
+             "a phrase or sentence, not in the middle of one, and should not stay long after "
+             "its words are over. When a shot is trimmed in a narrated story the gap must be "
+             "filled, so prefer a small trim, or say which neighbouring shot can stretch.",
+    "music": "This is a MUSIC VIDEO. Cuts on the beat are checked separately; here judge "
+             "whether each shot's movement fits the energy of that part of the song, and trim "
+             "dead time at the start and end of clips.",
+    "cartoon": "This is a SILENT SLAPSTICK CARTOON (no narration). Comic timing is everything:\n"
+               "- The wind-up (the character gets ready and we see it coming) needs time, "
+               "about half a second to a second and a half. Don't trim it away.\n"
+               "- The gag itself is fast. If the bonk, splash or tumble floats, speed it up "
+               "(130 to 200 percent) and cut just after the impact.\n"
+               "- Then HOLD the reaction: the big take, the slow blink, the dizzy eyes need 1 "
+               "to 2 seconds of near stillness to be funny. A reaction cut short kills the "
+               "joke; say 'hold longer'.\n"
+               "- Gags in threes get a little quicker each time, and a beat of calm before the "
+               "last, biggest gag makes it land.\n"
+               "- Opening and ending shots can be slower; the middle should move.",
+}
+
+
+def timing_notes(st, kind, seq, lines, work, progress=None, cancel=None, per_request=6,
+                 workers=3):
+    """A close look at every shot for timing: sharp stills a fraction of a second apart; the
+    AI says where the action starts and ends, and whether to trim, hold longer, speed up or
+    leave it. Returns (notes, {"overall", "top_fixes"})."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    import ss_claude as C
+    fps = seq["fps"] or 24.0
+    segs = [(a, b, it) for a, b, it in P.picture_segments(seq) if it is not None]
+    shots, left_alone = [], []
+    for i, (a, b, it) in enumerate(segs):
+        name = it.get("name") or "shot"
+        if b - a < 0.5 or BRANDED.search(name):
+            if b - a >= 0.5:                      # her intro / outro / titles stay as they are
+                left_alone.append((a, f"{fmt_time(a)} {b - a:.1f}s (her intro, outro or "
+                                      "title: left as it is, don't comment on it)"))
+            continue                              # slivers
+        shots.append({"n": len(shots) + 1, "start": a, "end": b, "name": name,
+                      "speed": float(it.get("speed") or 1.0),
+                      "before": (segs[i - 1][1] - segs[i - 1][0]) if i else None,
+                      "after": (segs[i + 1][1] - segs[i + 1][0]) if i + 1 < len(segs) else None})
+    if not shots:
+        return [], {"overall": "", "top_fixes": []}
+
+    def stills(s):
+        n = int(max(8, min(32, round((s["end"] - s["start"]) / 0.15))))
+        try:
+            frames = M.burst(st["picture"], s["start"], s["end"], n, work, f"t{s['n']:03d}")
+            s["sheets"] = M.contact_sheets(frames, work / "close", per_sheet=16, cols=4,
+                                           label=f"t{s['n']:03d}_", fmt=lambda t: f"{t:.2f}s")
+            s["step"] = (s["end"] - s["start"]) / max(1, len(frames))
+        except Exception:
+            log_error("timing stills")
+            s["sheets"] = []
+        return s
+    if progress:
+        progress(0.0, "Taking close-up pictures of every shot…")
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        shots = [s for s in ex.map(stills, shots) if s.get("sheets")]
+    if cancel and cancel():
+        raise StoryError("Stopped.")
+    groups = [shots[i:i + per_request] for i in range(0, len(shots), per_request)]
+    answers, lock, done = {}, threading.Lock(), [0]
+    rule = TIMING_KIND.get(kind, TIMING_KIND["story"])
+
+    def one(grp):
+        if cancel and cancel():
+            return
+        parts, images = [], []
+        for s in grp:
+            said = " ".join(l["text"] for l in lines if l["e"] > s["start"] and l["s"] < s["end"])
+            parts.append(
+                f"SHOT {s['n']}: {s['start']:.2f}s to {s['end']:.2f}s "
+                f"({s['end'] - s['start']:.1f} s on screen, a still every {s['step']:.2f}s; "
+                f"file \"{s['name']}\"; now plays at {s['speed'] * 100:.0f}% speed; "
+                f"shot before it: {'%.1f s' % s['before'] if s['before'] else 'none'}, "
+                f"after it: {'%.1f s' % s['after'] if s['after'] else 'none'})"
+                + (f"\n  Heard during it: {said[:300]}" if said and kind != "cartoon" else ""))
+            for a, b, p in s["sheets"]:
+                images.append((f"Shot {s['n']}, stills {a:.2f}s to {b:.2f}s:", p))
+        prompt = f"""Movie: "{st['seq_name']}", {st['duration']:.0f} seconds long.
+{rule}
+
+{chr(10).join(parts)}
+
+For EVERY shot above give: where the part worth seeing starts and ends (read the times off \
+the stills), a verdict, the times the shot should run from and to after your change (its own \
+start and end if you'd leave it), the speed in percent (100 = leave it), and a short note. \
+"trim" verdicts move keep_from and keep_to inside the shot; "hold longer" means it needs more \
+time than it has (keep_to may go past its end); "speed up" and "slow down" set speed; "too \
+quick" means it is over before a viewer can read it; "cut it" means the movie is better \
+without this shot."""
+        try:
+            res = C.ask(prompt, TIMING, system=TIMING_SYSTEM, images=images, timeout=900)
+        except StoryError as e:
+            log("timing look skipped for", len(grp), "shots:", e)
+            res = {}
+        except Exception:
+            log_error("timing look")
+            res = {}
+        with lock:
+            mine = {s["n"] for s in grp}
+            for a in res.get("shots", []):
+                if a.get("n") in mine:
+                    answers[a["n"]] = a
+            done[0] += 1
+            if progress:
+                progress(0.1 + 0.8 * done[0] / len(groups),
+                         f"{C.ai_name()} is checking the timing of every shot "
+                         f"({done[0]} of {len(groups)})…")
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(one, groups))
+    notes, listing, freed = [], [], 0.0
+    gap = {"cartoon": "Then close the gap.",
+           "music": "The song keeps its length, so fill the gap: let the shot before or after "
+                    "it run longer, or add another shot.",
+           }.get(kind, "Then fill the gap by letting the shot next to it run longer, so the "
+                       "pictures still fit the words.")
+    for s in shots:
+        a = answers.get(s["n"])
+        length = s["end"] - s["start"]
+        if not a:
+            listing.append((s["start"], f"{fmt_time(s['start'])} {length:.1f}s (not checked)"))
+            continue
+        v = a.get("verdict", "good")
+        try:
+            k0 = min(max(float(a["keep_from"]), s["start"]), s["end"] - 0.2)
+            k1 = max(float(a["keep_to"]), k0 + 0.2)
+            speed = int(a.get("speed") or 100)
+        except (TypeError, ValueError, KeyError):
+            continue
+        head, tail = k0 - s["start"], s["end"] - k1
+        why = (a.get("note") or "").strip()
+        listing.append((s["start"], f"{fmt_time(s['start'])} {length:.1f}s [{v}"
+                        f"{', ' + str(speed) + '%' if speed != 100 else ''}] {why}"))
+        title = how = ""
+        if v in ("trim start", "trim end", "trim both"):
+            head = head if v != "trim end" and head >= 0.4 else 0.0
+            tail = tail if v != "trim start" and tail >= 0.4 else 0.0
+            if not head and not tail:
+                continue
+            bits = ([f"{head:.1f} seconds ({_frames(head, fps)}) off the start"] if head else []) + \
+                   ([f"{tail:.1f} seconds ({_frames(tail, fps)}) off the end"] if tail else [])
+            title = ("Trim both ends" if head and tail else
+                     "Trim the start" if head else "Trim the end")
+            how = (f"Trim {' and '.join(bits)}, so this shot runs for about "
+                   f"{length - head - tail:.1f} seconds. {gap}")
+            freed += head + tail
+        elif v == "hold longer":
+            more = max(0.3, k1 - s["end"])
+            title = "Hold this a little longer"
+            how = (f"Give it about {more:.1f} seconds more ({_frames(more, fps)}): drag its end "
+                   "out if the clip has more, or right-click > Speed/Duration and slow it a "
+                   "little, or add a freeze frame on its last picture (right-click > Add Frame "
+                   "Hold).")
+        elif v == "too quick":
+            title = "Too quick to take in"
+            how = ("Let it run longer (at least a second or two), or take it out if the "
+                   "moment is clear without it.")
+        elif v in ("speed up", "slow down") and abs(speed - 100) >= 10:
+            title = f"{'Speed it up' if speed > 100 else 'Slow it down'} to about {speed}%"
+            how = (f"Right-click the clip > Speed/Duration and set {speed}% (it then lasts "
+                   f"about {length * 100 / speed:.1f} seconds). "
+                   + (gap if speed > 100 else "Make room for it, or trim its end."))
+            freed += max(0.0, length - length * 100 / speed)
+        elif v == "cut it":
+            title = "This shot could go"
+            how = ("Try the edit without it: select it and press Shift+Delete to close the "
+                   "gap." if kind == "cartoon" else
+                   "Try the edit without it, and give its time to the shots around it.")
+            freed += length
+        if not title:
+            continue
+        notes.append(_note(s["start"], "suggest", "pacing", title, why, how, s["end"],
+                           source="ai"))
+    summary = {"overall": "", "top_fixes": []}
+    if answers:
+        if progress:
+            progress(0.93, f"{C.ai_name()} is looking at the pacing of the whole movie…")
+        try:
+            res = C.ask(f"""Movie: "{st['seq_name']}", {st['duration']:.0f} seconds long.
+{rule}
+
+Every shot in order: when it starts, how long it is on screen, your verdict on its timing, \
+and your note:
+{chr(10).join(t for _, t in sorted(listing + left_alone))}
+
+Now look at the PACING OF THE WHOLE MOVIE: the rhythm of the shot lengths (do they vary? do \
+they tighten toward the big moments and breathe after them?), where it drags, where it \
+rushes, and how the opening and the ending are timed. Give times when you point at a place.""",
+                        PACING, system=TIMING_SYSTEM, timeout=600)
+            summary = {"overall": (res.get("overall") or "").strip(),
+                       "top_fixes": [x.strip() for x in res.get("top_fixes") or [] if x.strip()][:3]}
+        except StoryError as e:
+            log("pacing overview skipped:", e)
+    if freed >= 2:
+        summary["overall"] = (summary["overall"] + " " + (
+            f"Together these changes would make the cartoon about {freed:.0f} seconds shorter "
+            "and snappier." if kind == "cartoon" else
+            f"Together these changes take out about {freed:.0f} seconds of slow moments. "
+            f"The {'song' if kind == 'music' else 'narration'} keeps its length, so that time "
+            "needs filling: let your strongest shots run longer, or add about "
+            f"{max(1, round(freed / 4))} more shots.")).strip()
+    log("timing look:", len(shots), "shots,", len(answers), "answered,", len(notes), "notes")
+    return notes, summary
+
+
 def guess_kind(seq, clips):
     """'music' when the sound is mostly one song with no narration clips."""
     dur = seq["duration"] or 1
@@ -449,7 +722,10 @@ def guess_kind(seq, clips):
     return "music" if music > 0.6 * dur else "story"
 
 
-def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=True):
+def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=True,
+             focus="all"):
+    """focus: "all" = everything; "timing" = the timeline checks plus the shot-by-shot timing
+    and pacing look only (no notes on looks, glitches or sound)."""
     import storysound as E
     say = progress or (lambda f, m: None)
 
@@ -479,16 +755,18 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
           dur, mixwav)
     mono = M.wav_mono16k(mixwav)
     stop()
-    if kind not in ("music", "story"):
+    if kind not in ("music", "story", "cartoon"):
         kind = guess_kind(seq, clips)
     st["feedback_kind"] = kind
+    timing_only = focus == "timing"
     # 1. the exact checks
     say(0.27, "Checking every cut on the timeline…")
-    notes, stats = picture_notes(seq, kind == "music")
+    notes, stats = picture_notes(seq, kind in ("music", "cartoon"))
     peak = 20 * math.log10(max(1e-9, float(np.abs(mono).max()) if len(mono) else 1e-9))
     lufs = M.loudness(mono[:, None], RATE) if len(mono) else -70.0
     try:
-        notes += sound_notes(seq, mono, peak, lufs)
+        if not timing_only:
+            notes += sound_notes(seq, mono, peak, lufs)
     except Exception:
         log_error("feedback sound notes")
     beat_sum = None
@@ -539,7 +817,7 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
                               "come from the timeline checks only. Open Settings to set up "
                               "ChatGPT.")
     shots = [(a, b, (it or {}).get("name", "black")) for a, b, it in P.picture_segments(seq)]
-    if use_claude:
+    if use_claude and not timing_only:
         say(0.47, "Taking a picture of every second…")
         every = 1.0 if dur <= 420 else 2.0
         st["_still_every"] = every
@@ -547,7 +825,7 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
         sheets = M.contact_sheets(frames, work, label="fb")
         try:
             res = claude_notes(st, kind, story, lines, shots, notes, sheets,
-                               lambda f, m: say(0.5 + 0.4 * f, m.replace("Claude", by)))
+                               lambda f, m: say(0.5 + 0.22 * f, m.replace("Claude", by)))
             notes += _dedupe(res["notes"], notes)
             summary = {k: res[k] for k in ("overall", "strengths", "top_fixes")}
         except StoryError as ex:
@@ -555,11 +833,35 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
             summary["overall"] = (f"{by} couldn't watch the movie this time ({ex}) These "
                                   "notes come from the timeline checks only.")
     stop()
+    if use_claude:                               # timing and pacing, shot by shot
+        lo, span = (0.47, 0.44) if timing_only else (0.73, 0.18)
+        try:
+            tn, pace = timing_notes(st, kind, seq, lines, work,
+                                    lambda f, m: say(lo + span * f, m), cancel)
+            # the close look knows better than the simple length check on the same shot
+            notes = [n for n in notes if not (
+                n["kind"] == "pacing" and n["source"] == "timeline" and
+                any(abs(n["time"] - t["time"]) < 0.05 for t in tn))]
+            notes += tn
+            if timing_only or not summary.get("overall"):
+                summary.update(overall=pace["overall"], top_fixes=pace["top_fixes"])
+            elif pace["overall"]:
+                summary["overall"] = (summary["overall"].rstrip() + " Timing and pacing: "
+                                      + pace["overall"])
+                summary["top_fixes"] = (summary.get("top_fixes") or [])[:2] + pace["top_fixes"][:2]
+        except StoryError as ex:
+            if str(ex) == "Stopped.":
+                raise
+            log("feedback: timing look skipped", ex)
+        except Exception:
+            log_error("feedback timing look")
+    stop()
     notes.sort(key=lambda n: n["time"])
     for i, n in enumerate(notes):
         n["id"] = i + 1
         n["keep"] = True
-    st["feedback"] = {"kind": kind, "notes": notes, "summary": summary, "by": by, "stats": {
+    st["feedback"] = {"kind": kind, "focus": focus, "notes": notes, "summary": summary,
+                      "by": by, "stats": {
         "shots": stats["shots"], "average": round(stats["average"], 2),
         "lufs": round(lufs, 1), "peak": round(peak, 1), "beat": beat_sum}}
     # a preview with sound, for clicking through the notes
@@ -622,7 +924,8 @@ def write_outputs(st):
 def notes_text(st, notes):
     fb = st["feedback"]
     s, stt = fb["summary"], fb["stats"]
-    lines = [f"Edit feedback for \"{st['seq_name']}\"", ""]
+    lines = [("Timing and pacing notes" if fb.get("focus") == "timing" else "Edit feedback")
+             + f" for \"{st['seq_name']}\"", ""]
     if s.get("overall"):
         lines += [s["overall"], ""]
     if s.get("strengths"):

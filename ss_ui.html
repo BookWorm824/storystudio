@@ -382,7 +382,8 @@ function renderHome() {
       ${pickTask("sounds","sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","setupSounds()")}
       ${pickTask("fix","wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
       ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
-      ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback()")}
+      ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback('all')")}
+      ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Looks closely at every shot and tells you what to trim, hold longer or speed up.","setupFeedback('timing')")}
       ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","See last time's sounds","The sounds StoryStudio made for this project before.","openPrevious()") : ""}
       ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","See last time's feedback","The notes from the last time it watched this project.","openPreviousFeedback()") : ""}
     </div>
@@ -422,7 +423,7 @@ function renderPlan() {
       <div class="opt"><div><label class="t">Look</label><div class="hint">For kids: big, bold words that fill with colour. Elegant: finer letters that glow softly as they're sung.</div></div>${kSeg("karaoke_style",[["kids","For kids"],["elegant","Elegant"]],"kids")}</div>
       <div class="opt"><div><label class="t">Colours</label><div class="hint">The words, and the colour they light up in as they're sung.</div></div><div class="swrow"><label class="sub" style="margin:0;display:flex;align-items:center;gap:6px">Words <input type="color" style="width:44px;height:30px;padding:0;margin:0" value="${kColour("karaoke_color")}" onchange="kOpt('karaoke_color', this.value)"></label><label class="sub" style="margin:0;display:flex;align-items:center;gap:6px">Highlight <input type="color" style="width:44px;height:30px;padding:0;margin:0" value="${kColour("karaoke_highlight")}" onchange="kOpt('karaoke_highlight', this.value)"></label>${opts.karaoke_color || opts.karaoke_highlight ? `<button class="btn small ghost" onclick="opts.karaoke_color='';kOpt('karaoke_highlight','')">Use the look's colours</button>` : ""}</div></div>
       <div style="margin-top:10px"><img id="ksample" alt="How the lyrics will look" style="display:block;width:100%;max-width:520px;border-radius:12px;border:1px solid var(--line);min-height:60px;background:var(--bg2)"></div></div>`;
-    if (id === "feedback") body = `<div class="opt"><div><label class="t">This is a</label></div>${fbSeg("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"]])}</div>`;
+    if (id === "feedback") body = `<div class="opt"><div><label class="t">This is a</label></div>${fbSeg("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"],["cartoon","Silent cartoon"]])}</div>`;
     return `<div class="planstep"><div class="sbn">${i + 1}</div><div style="flex:1;min-width:0"><b>${STEPS[id]}</b>${body ? `<div style="margin-top:8px">${body}</div>` : ""}</div></div>`;
   }).join("");
   $("#setup").innerHTML = `<div class="card panel"><h2>Your plan</h2>${parts}
@@ -434,7 +435,7 @@ async function planLoadLyrics() { const j = await api("pick_lyrics"); if (j.text
 async function startChain() {
   if ($("#plan_lyrics")) H.lyrics = $("#plan_lyrics").value;
   if (PICK.includes("karaoke") && !(H.lyrics || "").trim()) return toast("Paste the song's lyrics for the karaoke step first.", true);
-  CHAIN = {steps: PICK.slice(), i: 0, lyrics: H.lyrics, fb: Object.assign({}, fbOpts), opts: Object.assign({}, opts)};
+  CHAIN = {steps: PICK.slice(), i: 0, lyrics: H.lyrics, fb: Object.assign({}, fbOpts, {focus:"all"}), opts: Object.assign({}, opts)};
   runStep();
 }
 function chainBar(html) { const b = $("#chainbar"); if (!html) { b.classList.add("hidden"); return; } b.innerHTML = html; b.classList.remove("hidden"); }
@@ -588,19 +589,22 @@ async function loadLyrics() { const j = await api("pick_lyrics"); if (j.text) $(
 async function startKaraoke() { H.lyrics = $("#lyrics").value; const j = await api("start_karaoke", Object.assign({lyrics: H.lyrics}, kChoices())); watchJob(j.job); }
 
 // ---------------------------------------------------------------- setup: edit feedback
-let fbOpts = {kind:"auto", claude:true};
-function setupFeedback() {
+let fbOpts = {kind:"auto", claude:true, focus:"all"};
+function setupFeedback(focus) {
+  if (focus) fbOpts.focus = focus;
+  const timing = fbOpts.focus === "timing", ai = fbOpts.claude || timing;
   const segFb = (key, items) => `<div class="seg">${items.map(([v,t]) => `<button class="${fbOpts[key]===v?"on":""}" onclick='fbOpts.${key}=${esc(JSON.stringify(v))};setupFeedback()'>${t}</button>`).join("")}</div>`;
-  const mins = Math.max(1, Math.round((25 + P.seconds * 0.12 + (fbOpts.claude ? 20 + 75 * Math.ceil(P.seconds / (P.seconds <= 420 ? 160 : 320)) : 0)) / 60));
+  const mins = Math.max(1, Math.round((25 + P.seconds * 0.12 + (ai && !timing ? 20 + 75 * Math.ceil(P.seconds / (P.seconds <= 420 ? 160 : 320)) : 0) + (ai ? 50 + P.shots * 0.6 + Math.ceil(Math.ceil(P.shots / 6) / 3) * 45 : 0)) / 60));
   $("#setup").innerHTML = `
     <div class="card panel">
-      <h2>Edit feedback</h2>
-      <p class="sub" style="margin-bottom:6px">StoryStudio checks every cut, the sound and the beat, then ${aiName()} watches the movie with your story and gives friendly notes: what's working, what to fix, and how. Every note becomes a marker on the timeline in a copy ending in “(feedback)”.</p>
-      <div class="opt"><div><label class="t">This is a</label><div class="hint">Music videos also get notes about cutting on the beat.</div></div>${segFb("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"]])}</div>
-      <div class="opt"><div><label class="t">${aiName()} watches it</label><div class="hint">Catches AI glitches, characters that change between shots, and story and pacing. Off: only the timeline checks (a minute or less).</div></div><div class="swrow"><button class="switch ${fbOpts.claude?"on":""}" onclick="fbOpts.claude=!fbOpts.claude;setupFeedback()" aria-label="AI watches it"></button></div></div>
+      <h2>${timing ? "Timing and pacing" : "Edit feedback"}</h2>
+      <p class="sub" style="margin-bottom:6px">${timing ? `${aiName()} looks closely at every shot, a fraction of a second at a time, and tells you what to trim, what to hold longer, what to speed up, and how the pacing of the whole video feels.` : `StoryStudio checks every cut, the sound and the beat, then ${aiName()} watches the movie with your story and gives friendly notes: what's working, what to fix, and how. It also checks the timing of every shot.`} Every note becomes a marker on the timeline in a copy ending in “(feedback)”.</p>
+      <div class="opt"><div><label class="t">This is a</label><div class="hint">${fbOpts.kind === "cartoon" ? "Judged for comic timing: time for the wind-up, a fast gag, a held reaction." : "Music videos also get notes about cutting on the beat. Choose Silent cartoon for a cartoon with no narration."}</div></div>${segFb("kind",[["auto","Let StoryStudio tell"],["story","Story or movie"],["music","Music video"],["cartoon","Silent cartoon"]])}</div>
+      <div class="opt"><div><label class="t">Look at</label></div>${segFb("focus",[["all","Everything"],["timing","Timing and pacing only"]])}</div>
+      <div class="opt" ${timing ? 'style="display:none"' : ""}><div><label class="t">${aiName()} watches it</label><div class="hint">Catches AI glitches, characters that change between shots, and story and pacing. Off: only the timeline checks (a minute or less).</div></div><div class="swrow"><button class="switch ${fbOpts.claude?"on":""}" onclick="fbOpts.claude=!fbOpts.claude;setupFeedback()" aria-label="AI watches it"></button></div></div>
       <div class="footerbar">
         <div class="est">About <b>&nbsp;${mins} minute${mins>1?"s":""}&nbsp;</b></div>
-        <button class="btn primary big" onclick="startFeedback()">Get feedback ${arrow()}</button>
+        <button class="btn primary big" onclick="startFeedback()">${timing ? "Check my timing" : "Get feedback"} ${arrow()}</button>
       </div>
     </div>`;
   $("#setup").scrollIntoView({behavior:"smooth"});
@@ -618,7 +622,7 @@ function renderFeedback() {
   const shown = F.notes.filter(n => !fbFilter || n.severity === fbFilter);
   const kept = F.notes.filter(n => n.keep).length;
   $("#view").innerHTML = `
-    <div class="rhead"><div><h1>Notes on “${esc(F.title)}”</h1><div class="sub" style="margin:0">${F.kind === "music" ? "Music video" : "Story"} · ${st.shots} shots, ${(+st.average).toFixed(1)} s each on average${st.beat ? ` · ${st.beat.on_beat} of ${st.beat.cuts} cuts on the beat (${st.beat.bpm} beats a minute)` : ""}</div></div>
+    <div class="rhead"><div><h1>Notes on “${esc(F.title)}”</h1><div class="sub" style="margin:0">${F.kind === "music" ? "Music video" : F.kind === "cartoon" ? "Silent cartoon" : "Story"} · ${st.shots} shots, ${(+st.average).toFixed(1)} s each on average${st.beat ? ` · ${st.beat.on_beat} of ${st.beat.cuts} cuts on the beat (${st.beat.bpm} beats a minute)` : ""}</div></div>
       <div class="row">${F.project ? `<button class="btn primary big" onclick='openFbProject()'>Open in Premiere ${arrow()}</button>` : ""}</div></div>
     ${F.project_error ? `<div class="banner">${esc(F.project_error)}</div>` : ""}
     <div class="fb">

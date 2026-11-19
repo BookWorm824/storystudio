@@ -634,14 +634,19 @@ def api(name, a):
         import ss_feedback as F
         st, s = S.st, choices()
         kind = a.get("kind") or "auto"
-        use_claude = bool(a.get("claude", True))
+        focus = "timing" if a.get("focus") == "timing" else "all"
+        use_claude = bool(a.get("claude", True)) or focus == "timing"
         dur = st["duration"]
         est = 25 + dur * 0.12 + (0 if st.get("picture") or st.get("export") else dur * 0.35)
-        if use_claude:
+        n_shots = (st.get("info") or {}).get("shots") or max(4, round(dur / 5))
+        if use_claude and focus != "timing":
             est += 20 + 75 * math.ceil(dur / (160 if dur <= 420 else 320))
+        if use_claude:                              # the shot-by-shot timing look
+            est += 20 + n_shots * 0.6 + math.ceil(math.ceil(n_shots / 6) / 3) * 45 + 30
         st["feedback_dirty"] = False
-        return {"job": run_job("Watching your edit",
-                               lambda p, c, ph: F.feedback(st, s, p, c, kind, use_claude),
+        return {"job": run_job("Checking your timing and pacing" if focus == "timing"
+                               else "Watching your edit",
+                               lambda p, c, ph: F.feedback(st, s, p, c, kind, use_claude, focus),
                                "feedback", [est])}
     if name == "feedback":
         return {"feedback": feedback_view()}

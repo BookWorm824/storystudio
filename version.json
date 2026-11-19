@@ -1,5 +1,5 @@
 {
-  "version": "1.14.0",
+  "version": "1.15.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -27,5 +27,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "New start page with three clear choices. New in the script builder: Silent cartoon (no words, silly gags, a sound list for every shot), from scratch or from one you've already started. The sound machine has a Cartoon level: a sound for everything."
+  "notes": "New: Timing and pacing. StoryStudio looks closely at every shot on your timeline and tells you what to trim, hold longer or speed up, with markers on a copy of your project. Choose Silent cartoon for comic timing."
 }
