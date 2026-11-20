@@ -279,17 +279,20 @@ def run_jobs(jobs, key, progress=None, cancel=None):
 
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         list(ex.map(one, range(len(jobs))))
-    if stop:
+    credit_out = bool(stop) and "out of credit" in stop[0]
+    if stop and not credit_out:
         raise StoryError(stop[0])
     if cancel and cancel():
         raise StoryError("Stopped.")
     for i, j in enumerate(jobs):
         if i not in errors and not Path(j["cands"][0]).exists():
-            errors[i] = "no sound came out"
+            errors[i] = "out of credit" if credit_out else "no sound came out"
     cost = sum(PRICE[k] * v for k, v in used.items())
     log("fal made sounds:", {k.split("/")[1]: round(v) for k, v in used.items()},
-        f"seconds, about ${cost:.2f}; failed: {len(errors)} of {len(jobs)}")
-    return errors, {"seconds": used, "cost": cost}
+        f"seconds, about ${cost:.2f}; failed: {len(errors)} of {len(jobs)}"
+        + ("; the Fal account ran out of credit" if credit_out else ""))
+    # out of credit: what was made is kept, and the rest is offered free (it is not an error)
+    return errors, {"seconds": used, "cost": cost, "credit_out": credit_out}
 
 
 def estimate(seconds_synced, seconds_text, samples=2, shots=False):

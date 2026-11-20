@@ -175,7 +175,8 @@ def cue_view(c):
             "kind": KIND_NAMES.get(c["kind"], c["kind"]), "kind_id": c["kind"],
             "keep": bool(c.get("keep")), "made": bool(c.get("file")),
             "source": {"pc": "Made on this PC", "fal": "Made with Fal", "freesound": "Freesound",
-                       "adobe": "Not made"}.get(c.get("source", ""), ""),
+                       "library": "Free recorded sound", "adobe": "Not made"}.get(
+                c.get("source", ""), ""),
             "audio": media_url(c.get("file")), "prompt": c.get("sound_prompt", ""),
             "adobe": c.get("adobe_prompt", ""), "suno": c.get("suno_prompt", ""),
             "note": c.get("note", ""), "credit": c.get("credit", ""),
@@ -193,6 +194,7 @@ def review_view():
     return {"title": st["seq_name"], "notes": st.get("plan_notes", ""),
             "notice": st.get("notice", ""), "levels": st.get("levels", []),
             "can_voice": bool(st.get("cartoon") or st.get("movie_type") == "cartoon"),
+            "fal_out": bool(st.get("fal_out")),
             "voices": sum(1 for c in st.get("cues", []) if c["kind"] == "voice"),
             "cues": [cue_view(c) for c in st.get("cues", [])]}
 
@@ -894,6 +896,12 @@ def api(name, a):
                                    "review", [sec])}
         E.save(st)
         return {"cue": cue_view(c)}
+    if name == "free_sounds":
+        st, s = S.st, choices()
+        n = sum(1 for c in st["cues"] if c.get("keep", True) and not c.get("file"))
+        return {"job": run_job("Getting free sound effects",
+                               lambda p, c, ph: E.make_free(st, s, p, c), "review",
+                               [60 + 4 * n])}
     if name == "add_voices":
         st, s = S.st, choices()
         n = len(st.get("shots") or [])

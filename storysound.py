@@ -227,6 +227,7 @@ def _sequence(st):
 # ---------------------------------------------------------------------------
 def analyze(st, settings, progress=None, cancel=None):
     work = Path(st["work"])
+    _keep_made_run(st)
     seq = _sequence(st)
     dur = seq["duration"]
 
@@ -608,6 +609,213 @@ def add_voices(st, settings, progress=None, cancel=None):
     return st
 
 
+# ---------------------------------------------------------------------------
+# free sound effects: real recordings from Adobe's free library (no account, no credit)
+# ---------------------------------------------------------------------------
+FREE_MUSIC = ("There's no free music to use, so make this one in Suno with the wording in the "
+              "sound list.")
+FREE_NONE = "Nothing in the free library sounded right for this one. Try “Change” with other words."
+PICKS = {"type": "object", "properties": {"picks": {"type": "array", "items": {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "choice": {"type": "integer", "description": "the number of the best recording, or "
+                   "0 when none of them would sound right"},
+        "pitch": {"type": "number", "description": "1.0 normally; for a character's own noise "
+                  "made by a person: how much to raise it so it suits the character (about "
+                  "1.5 to 1.8 for a small cartoon animal)"},
+    },
+    "required": ["id", "choice", "pitch"], "additionalProperties": False}}},
+    "required": ["picks"], "additionalProperties": False}
+
+
+def _library_words(c):
+    """The words to look the sound up by (a character sound: what is heard, not who)."""
+    desc = c.get("sound_prompt", "")
+    if c["kind"] == "voice" and ":" in desc:
+        desc = desc.split(":", 1)[1]
+    return " ".join([c.get("what", ""), c.get("search_words", ""), c.get("feeling", ""), desc])
+
+
+def pick_library(st, cues, progress=None, cancel=None):
+    """{cue id: (library entry, pitch)}: for each sound, the free recording that fits it
+    best, chosen by the AI from the closest names (or the closest name without an AI)."""
+    import ss_library as L
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    lists = {}
+    for c in cues:
+        found = L.candidates(_library_words(c), n=12, long=c["kind"] in BEDS)
+        if found:
+            lists[c["id"]] = found
+    out = {}
+    for c in cues:                                # without an AI: the closest name
+        if c["id"] in lists:
+            e = lists[c["id"]][0]
+            human = e["pack"] == "human_elements" or "Human" in e["name"]
+            out[c["id"]] = (e, 1.6 if c["kind"] == "voice" and human else 1.0)
+    try:
+        import ss_claude as C
+        if not C.provider():
+            return out
+    except Exception:
+        return out
+    todo = [c for c in cues if c["id"] in lists]
+    groups = [todo[i:i + 20] for i in range(0, len(todo), 20)]
+    cartoon = bool(st.get("cartoon") or st.get("movie_type") == "cartoon")
+    lock, done = threading.Lock(), [0]
+
+    def one(grp):
+        if cancel and cancel():
+            return
+        parts = []
+        for c in grp:
+            names = "\n".join(f"    {k + 1}. {L.title(e)}  [{e['pack'].replace('_', ' ')}]"
+                              for k, e in enumerate(lists[c["id"]]))
+            parts.append(f"SOUND {c['id']} ({c['kind']}, about {c['end'] - c['start']:.1f} s): "
+                         f"{c['what']}. {_library_words(c)[:260]}\n{names}")
+        prompt = (f"Movie: \"{st.get('seq_name', '')}\". Each planned sound below has a list of "
+                  "real recorded sound effects from a free library (their names describe them). "
+                  "Choose the recording that would sound right placed at that moment, or 0 when "
+                  "none of them would: a wrong sound is worse than none."
+                  + (" This is a silent slapstick cartoon: classic cartoon sounds (squeaks, "
+                     "slide whistles, boings, woodblocks) are often the best choice."
+                     if cartoon else "")
+                  + "\nA character's own noise (kind \"voice\") must never be talking or words: "
+                  "choose a wordless gasp, sniff, grunt, giggle, sigh, squeak or animal noise. "
+                  "When it is a person's noise and the character is small (a squirrel, a mouse, "
+                  "a bird), give pitch about 1.5 to 1.8 so it sounds like the character; "
+                  "otherwise pitch is 1.0.\n\n" + "\n\n".join(parts))
+        try:
+            res = C.ask(prompt, PICKS, system="You are a sound designer choosing library "
+                        "sound effects for a family cartoon. Answer for every sound id.",
+                        timeout=600)
+        except Exception as ex:
+            log("free sounds: choosing skipped for", len(grp), "sounds:", ex)
+            res = {}
+        with lock:
+            for p in res.get("picks", []):
+                cid = str(p.get("id", "")).strip()
+                if cid not in lists:
+                    continue
+                k = int(p.get("choice") or 0)
+                if k <= 0:
+                    out.pop(cid, None)
+                elif k <= len(lists[cid]):
+                    try:
+                        pitch = float(p.get("pitch") or 1.0)
+                    except (TypeError, ValueError):
+                        pitch = 1.0
+                    out[cid] = (lists[cid][k - 1], max(1.0, min(2.0, pitch)))
+            done[0] += 1
+            _say(progress, done[0] / max(1, len(groups)),
+                 f"{C.ai_name()} is choosing free sounds ({done[0]} of {len(groups)})…")
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        list(ex.map(one, groups))
+    return out
+
+
+def make_free(st, settings, progress=None, cancel=None):
+    """Make every sound that isn't made yet from free recordings (Adobe's free sound effects
+    library: no account, no credit). Shots that were to be made by watching the picture go
+    back to their own planned sounds, each placed on its moment. Music has no free source:
+    it keeps its Suno wording."""
+    import ss_library as L
+    cues = st["cues"]
+    holes = [c for c in cues if c["kind"] == "shot" and not c.get("file")]
+    if holes and st.get("planned_effects"):
+        spans = [(c["start"], c["end"]) for c in holes]
+        top = max([int(c["id"][1:]) for c in cues if c["id"][1:].isdigit()] or [0])
+        add = []
+        for e in st["planned_effects"]:
+            if e.get("keep", True) and any(a - 0.05 <= e["start"] < b for a, b in spans):
+                top += 1
+                add.append(dict(e, id=f"c{top:03d}", keep=True, source="", file="",
+                                place_at=e["start"], note=""))
+        cues = [c for c in cues if not (c["kind"] == "shot" and not c.get("file"))] + add
+        st["cues"] = cues = sorted(cues, key=lambda c: (c["start"], c["end"]))
+    todo = [c for c in cues if c.get("keep", True) and not c.get("file") and c["kind"] != "music"]
+    for c in cues:
+        if c["kind"] == "music" and not c.get("file"):
+            c["source"], c["note"] = "adobe", FREE_MUSIC
+    if not todo:
+        save(st)
+        return st
+    _say(progress, 0.02, "Opening the free sound library…")
+    L.index()
+    chosen = pick_library(st, todo, lambda f, m: _say(progress, 0.05 + 0.35 * f, m), cancel)
+    if cancel and cancel():
+        raise StoryError("Stopped.")
+    wanted = {e["name"]: e for e, _ in chosen.values()}
+    got = L.fetch_many(list(wanted.values()),
+                       lambda f, m: _say(progress, 0.4 + 0.45 * f, m)) if wanted else {}
+    if wanted and not got:
+        raise StoryError("StoryStudio couldn't reach the free sound library. Check the internet "
+                         "and try again.")
+    sounds = sounds_dir(st, fresh=not any(c.get("file") for c in cues))
+    sounds.mkdir(parents=True, exist_ok=True)
+    motion, mfps = M.motion_curve(st["picture"])
+    made = 0
+    for i, c in enumerate(todo):
+        if cancel and cancel():
+            raise StoryError("Stopped.")
+        _say(progress, 0.85 + 0.15 * i / max(1, len(todo)), "Lining up and levelling sounds…")
+        e, pitch = chosen.get(c["id"], (None, 1.0))
+        path = got.get(e["name"]) if e else None
+        c.pop("match", None)
+        if not path:
+            c.update(source="adobe", file="", note=FREE_NONE)
+            continue
+        c.update(source="library", note="", credit=L.CREDIT, library_name=L.title(e))
+        c["_fs"] = path
+        if pitch > 1.05:
+            c["pitch"] = round(pitch, 2)
+        else:
+            c.pop("pitch", None)
+        try:
+            _shape(st, c, sounds, motion, mfps)
+            made += bool(c.get("file"))
+        except Exception:
+            log_error(f"free sound {c['id']}")
+            c.update(source="adobe", file="", note="Something went wrong with this one.")
+        c.pop("_fs", None)
+    left = sum(1 for c in cues if c.get("keep", True) and not c.get("file"))
+    st.pop("fal_out", None)
+    st["notice"] = (f"{made} sounds were made free, from real recordings in Adobe's free sound "
+                    "library. They're placed on the right moments but they don't watch the "
+                    "picture the way Fal does, so give them a listen."
+                    + (f" {left} still aren't made (music, or nothing in the library fit)."
+                       if left else ""))
+    st["stage"] = "sounds"
+    save(st)
+    log("free sounds:", made, "made from the library;", left, "not made")
+    _say(progress, 1.0, "All sounds are ready to review.")
+    return st
+
+
+def _pitched(a, factor):
+    """Higher and quicker, like a smaller creature (a person's gasp becomes a squirrel's)."""
+    if factor <= 1.0 or len(a) < 4:
+        return a
+    n = max(2, int(len(a) / factor))
+    x = np.linspace(0, len(a) - 1, n)
+    idx = np.arange(len(a))
+    return np.stack([np.interp(x, idx, a[:, ch]) for ch in range(a.shape[1])],
+                    axis=1).astype(np.float32)
+
+
+def _keep_made_run(st):
+    """Before a new plan replaces a run whose sounds were made (and maybe paid for), keep a
+    copy of it beside it, so it can always be brought back."""
+    f = Path(st["work"], "state.json")
+    try:
+        old = json.loads(f.read_text(encoding="utf-8-sig"))
+        if any(c.get("file") for c in old.get("cues", [])):
+            shutil.copyfile(f, f.with_name(time.strftime("state_sounds_%Y-%m-%d_%H%M.json")))
+    except (OSError, ValueError):
+        pass
+
+
 def tidy_cues(cues, dur, cuts):
     out = []
     for c in cues:
@@ -776,7 +984,7 @@ def sounds_dir(st, fresh=False):
         in_use = any(f.name.startswith(base + " (") for f in proj.parent.glob("*.prlock"))
     except OSError:
         in_use = False
-    if in_use and d.exists() and any(d.glob("*.wav")):
+    if d.exists() and any(d.glob("*.wav")):     # never over an earlier run's (paid) files
         d = d / time.strftime("run %Y-%m-%d %H%M")
     st["sounds_dir"] = str(d)
     return d
@@ -809,6 +1017,8 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             import ss_fal
             errs, used = ss_fal.run_jobs(jobs, fal_key, prog, cancel)
             spent[0] += used["cost"]
+            if used.get("credit_out"):
+                st["fal_out"] = True
             return errs
         return S.run_local(jobs, prog, cancel)
 
@@ -824,6 +1034,8 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     hf_key = (settings.get("hf_key") or "").strip() if use_pc and not use_fal else ""
     if ids is None:
         st["fal_cost"] = 0.0
+    if use_fal:
+        st.pop("fal_out", None)
     # plan where each sound comes from
     pc_cues, sao_cues = [], []
     for c in cues:
@@ -901,8 +1113,9 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             ok = [j for j in js if j["out"] not in bad]
             if not ok or (c["kind"] not in BEDS and len(ok) < len(js)):
                 c["source"] = "freesound" if fs_key and not use_fal else "adobe"
-                c["note"] = ("Fal couldn't make this one." if use_fal else
-                             "The PC sound AI couldn't make this one.")
+                c["note"] = ("Not made: your Fal account ran out of credit."
+                             if st.get("fal_out") else "Fal couldn't make this one."
+                             if use_fal else "The PC sound AI couldn't make this one.")
             else:
                 c["_jobs"] = ok                       # a background can do without a piece
                 c["engine"] = "fal" if use_fal else "mmaudio"
@@ -1003,6 +1216,12 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     st["stage"] = "sounds"
     if use_fal:
         st["fal_cost"] = round(float(st.get("fal_cost") or 0.0) + spent[0], 2)
+    if st.get("fal_out"):
+        left = sum(1 for c in st["cues"] if c.get("keep", True) and not c.get("file"))
+        st["notice"] = ("Your Fal account ran out of credit, so " + (
+            f"{left} sounds weren't made. " if left else "some sounds weren't made. ") +
+            "You can make them now for free (press “Use free sound effects”), or add credit "
+            "at fal.ai (Dashboard, then Billing) and press “Make the missing”.")
     save(st)
     _say(progress, 1.0, "All sounds are ready to review.")
     return st
@@ -1195,8 +1414,10 @@ def _shape(st, c, sounds, motion, mfps):
             if c["kind"] == "voice":                  # made from words: begin on its first
                 a = a[S.onset(a):]                    # sound, right on the planned moment
             a = S.fades(S.trim_tail(a), 0.005, 0.12)
-    elif c["source"] == "freesound" and c.get("_fs"):
+    elif c["source"] in ("freesound", "library") and c.get("_fs"):
         a = S.load48(c["_fs"])
+        if c.get("pitch"):                       # a person's noise, made small and quick
+            a = _pitched(a, float(c["pitch"]))
         if c["kind"] in BEDS:
             start_at = int(min(len(a) * 0.1, 2 * S.SR))  # skip any handling noise at the top
             a, place = _bed(st, c, a[start_at:])
@@ -1205,7 +1426,7 @@ def _shape(st, c, sounds, motion, mfps):
             a = S.trim_tail(a[: int((length + 1.0) * S.SR)])
             a = S.fades(a, 0.003, min(0.3, len(a) / S.SR / 4))
             place = c["start"]
-            if c.get("synced"):
+            if c.get("synced") and c["kind"] != "voice":     # a feeling isn't a bump
                 hit = S.best_hit_time(motion, mfps, c["start"] - 0.4, c["start"] + 0.8)
                 if hit is not None:
                     place = hit
@@ -1520,7 +1741,8 @@ def write_list(st, kept, path):
     for c in st["cues"]:
         mark = "✓" if c in kept else "–"
         src = {"pc": "made on this PC", "fal": "made with Fal", "freesound": "Freesound",
-               "adobe": "not made yet"}.get(c.get("source"), "")
+               "library": "free recorded sound", "adobe": "not made yet"}.get(
+            c.get("source"), "")
         lines.append(f"{mark} {fmt_time(c.get('place_at', c['start']))}–{fmt_time(c['end'])}  "
                      f"{c['what']}  ({src})")
         if c.get("includes"):

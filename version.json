@@ -1,5 +1,5 @@
 {
-  "version": "1.21.2",
+  "version": "1.22.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -24,6 +24,7 @@
     "ss_roughcut.py",
     "ss_place.py",
     "ss_voices.py",
+    "ss_library.py",
     "ss_craft.py",
     "ss_shottypes.json",
     "ss_styles.json",
@@ -33,5 +34,5 @@
     "storysound.ico",
     "ss_audio_template.xml"
   ],
-  "notes": "After Update now, StoryStudio reopens what you had open (your sounds, your project or your shot list) instead of going back to the start page."
+  "notes": "When your Fal account runs out of credit, StoryStudio keeps what was made, tells you, and offers Use free sound effects: real recorded sounds from Adobe's free library, no account needed. A new sound run never writes over the sounds you already have."
 }
