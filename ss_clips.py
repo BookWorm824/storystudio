@@ -34,8 +34,12 @@ def shot_number(name):
 def find_files(r, folder):
     """{shot number: [paths]}, {character name: picture path}, [files with no shot number]."""
     if r.get("placed"):                 # made from finished clips: each shot has its files
-        return ({s["n"]: [p for p in s.get("paths") or [] if Path(p).exists()]
-                 for s in r["shots"]}, {}, list(r.get("clip_unknown") or []))
+        found = {}
+        for s in r["shots"]:
+            mine = [p for p in s.get("paths") or [] if Path(p).exists()]
+            clips = [p for p in mine if Path(p).suffix.lower() in CLIPS]
+            found[s["n"]] = clips or mine                # its picture only stands in
+        return found, {}, list(r.get("clip_unknown") or [])
     folder = Path(folder)
     if not folder.is_dir():
         raise StoryError("That folder couldn't be opened.")
@@ -153,7 +157,8 @@ def _about(r, s):
     who = "; ".join(f"{n}: {cast[n.lower()].get('short') or cast[n.lower()]['look']}"
                     for n in s.get("characters") or [] if n.lower() in cast)
     return (f"SHOT {s['n']} ({kind}): {s.get('title', '')}. {s.get('purpose', '')}\n"
-            f"  The picture asked for: {s.get('picture', '')}\n"
+            f"  {'What the picture shows' if r.get('placed') else 'The picture asked for'}: "
+            f"{s.get('picture', '')}\n"
             f"  The movement asked for: {s.get('motion', '')} [camera: {s.get('camera', '')}"
             f"{', ' + s['camera2'] if s.get('camera2') else ''}]\n"
             + (f"  Characters in it: {who}\n" if who else "")

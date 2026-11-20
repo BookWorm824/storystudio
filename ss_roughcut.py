@@ -117,16 +117,26 @@ def plan(r, folder=None):
             it.update(file=f, a=0.0, b=want, stand_in=True)
         elif clips:
             f = max(clips, key=lambda f: f["mtime"])
-            it.update(file=f, a=0.0, b=f["seconds"], stand_in=True)
+            c = f.get("check") or {}
+            lo, hi = float(c.get("best_from") or 0), float(c.get("best_to") or 0)
+            if not (hi - lo >= 1.5 and hi - lo < f["seconds"] - 0.5):
+                lo, hi = 0.0, f["seconds"]               # no clean part was pointed out
+            it.update(file=f, a=lo, b=min(hi, f["seconds"]), stand_in=True)
         else:
             missing.append(s.get("label") or s["n"])
             it = {"n": s["n"], "label": s.get("label") or s["n"], "title": s.get("title", ""),
                   "file": None}
         if r.get("timed"):               # each shot has the time its words are said
-            it["at"] = float(s.get("start") or 0)
+            slot = max(0.2, float(s.get("end") or 0) - float(s.get("start") or 0))
+            planned = r.get("timed_by") == "script"       # a plan, not a recording to follow
+            if not planned:
+                it["at"] = float(s.get("start") or 0)
             if it.get("file"):
-                _fit(it, max(0.2, float(s.get("end") or 0) - it["at"]),
-                     r.get("kind") == "cartoon")
+                asked = it["speed"]
+                _fit(it, slot, r.get("kind") == "cartoon", stretch=not planned)
+                if planned and it["file"]["kind"] == "clip" and it["speed"] == 100 and \
+                        (it["b"] - it["a"]) * 100.0 / max(asked, 100) <= slot:
+                    it["speed"] = max(asked, 100)         # the speed the clip check gave
         items.append(it)
     return items, missing
 
@@ -137,11 +147,13 @@ FAST, SLOW = 1.15, 0.75         # how far a clip may be sped up or slowed to fit
 CARTOON_FAST = 1.25             # cartoons are snappier: the user speeds shots up 110-125%
 
 
-def _fit(it, slot, cartoon=False):
+def _fit(it, slot, cartoon=False, stretch=True):
     """Make a shot fill the time its words take. A clip that nearly fits is sped up or
     slowed a little so all of it plays; one that is much too long plays at its own speed
     (a cartoon's at 125%) with its end trimmed; one that is much too short is slowed as far
-    as looks natural (what is still missing is kept as it["short"], and leaves a gap)."""
+    as looks natural (what is still missing is kept as it["short"], and leaves a gap).
+    With stretch=False a clip shorter than its time is left at its own speed and simply ends
+    sooner: the shots then follow each other with no gap."""
     it["slot"] = slot
     if it["file"]["kind"] != "clip":
         it["b"] = it["a"] + slot
@@ -149,10 +161,12 @@ def _fit(it, slot, cartoon=False):
     ratio = (it["b"] - it["a"]) / slot
     fast = CARTOON_FAST if cartoon else FAST
     pct = (125 if cartoon else 100) if ratio > fast else int(round(max(SLOW, ratio) * 100))
+    if not stretch:
+        pct = max(pct, 100)
     it["speed"] = 100 if abs(pct - 100) < 4 else pct
     it["b"] = min(it["b"], it["a"] + slot * it["speed"] / 100.0)
     short = slot - (it["b"] - it["a"]) * 100.0 / it["speed"]
-    if short > 0.25:
+    if short > 0.25 and stretch:
         it["short"] = round(short, 1)
 
 
@@ -283,8 +297,10 @@ def xml(r, items, name, audio=None):
             continue
         ratio = it["speed"] / 100.0
         length = max(1, int(round((it["b"] - it["a"]) / ratio * fps)))
-        if "slot" in it:
+        if "slot" in it and "at" in it:
             length = max(1, min(length, int(round((it["at"] + it["slot"]) * fps)) - cursor))
+        elif "slot" in it:
+            length = max(1, min(length, int(round(it["slot"] * fps))))
         if f["kind"] == "clip":
             w, h = f.get("w") or W, f.get("h") or H
             ftb, fntsc = _rate(f.get("fps") or fps)

@@ -1089,14 +1089,14 @@ function roughText(j) {
   const long = m ? `${m} min ${s} s` : `${s} seconds`;
   let t = `<span class="ok">✓ Your rough cut is made:</span> ${j.shots} shot${j.shots === 1 ? "" : "s"} in order, about ${long} long.`;
   const did = [];
-  if (j.timed && j.timed_by === "script") t += ` Every clip sits at the time your script gives it. A clip that runs longer than its time ${j.cartoon ? "plays a little faster (125%) and is trimmed at the end" : "is trimmed at the end"}; one that nearly fits is sped up or slowed a little to fit.`;
+  if (j.timed && j.timed_by === "script") t += ` The clips follow your script's order, and each gets up to the time the script gives it. A clip that runs longer ${j.cartoon ? "plays a little faster (125%) and is trimmed at the end" : "is trimmed at the end"}; a shorter one simply ends sooner, so nothing is slowed down and there are no gaps.`;
   else if (j.timed) t += ` Every clip starts where its words are said in <b>${esc(j.recording || "")}</b>. A clip that runs longer than its words is trimmed at the end; one that nearly fits is sped up or slowed a little.` + (j.sound ? ` The recording is on the timeline under the clips.` : ` <b>One thing to do in Premiere:</b> drag ${esc(j.recording || "your recording")} onto the first sound track so it starts at the very beginning of the timeline (0:00). Then the words and the clips line up.`);
   else if (j.sound) t += ` <b>${esc(j.sound)}</b> is on the timeline under them.`;
   if (j.short && j.short.length) t += ` ${listShots(j.short.map(x => x[0]))} ${j.short.length === 1 ? "is" : "are"} still too short for ${j.short.length === 1 ? "its" : "their"} ${j.timed_by === "script" ? "time" : "words"}, so there's a gap after ${j.short.length === 1 ? "it" : "each"} (a marker shows where and how long).`;
   if (j.trimmed && !j.timed) did.push(`${j.trimmed} clip${j.trimmed === 1 ? " is" : "s are"} cut to ${j.trimmed === 1 ? "its" : "their"} good seconds`);
   if (j.sped) did.push(`${j.sped} play${j.sped === 1 ? "s" : ""} at a new speed`);
   if (did.length) t += ` ${did.join(" and ")[0].toUpperCase()}${did.join(" and ").slice(1)}.`;
-  if (j.stand_ins.length) t += ` ${listShots(j.stand_ins)} ${j.stand_ins.length === 1 ? "isn't" : "aren't"} ready yet, so ${j.stand_ins.length === 1 ? "its picture holds its" : "their pictures hold their"} place (orange on the timeline, with a marker).`;
+  if (j.stand_ins.length) t += ` ${listShots(j.stand_ins)} ${j.stand_ins.length === 1 ? "isn't" : "aren't"} ready yet, so a stand-in (${j.stand_ins.length === 1 ? "its" : "their"} picture, or the cleanest part of the last try) holds ${j.stand_ins.length === 1 ? "its" : "their"} place (orange on the timeline, with a marker).`;
   if (j.unchecked.length) t += ` ${listShots(j.unchecked)} ${j.unchecked.length === 1 ? "hasn't" : "haven't"} been checked, so ${j.unchecked.length === 1 ? "it went" : "they went"} in whole (purple).`;
   if (j.missing.length) t += ` ${listShots(j.missing)} ${j.missing.length === 1 ? "has" : "have"} nothing made yet; a marker shows where ${j.missing.length === 1 ? "it goes" : "they go"}.`;
   return t;

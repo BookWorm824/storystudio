@@ -1,5 +1,5 @@
 {
-  "version": "1.20.0",
+  "version": "1.20.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -32,5 +32,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Put my finished clips on a timeline now follows the times printed in your script (for a cartoon planned clip by clip), keeps each clip's sound-effect notes, and can take a folder of separate voice files: it puts them in script order, joins them into one narration file and times your clips to it."
+  "notes": "Placing finished clips now remembers what the script says happens in each shot, so the clip check can pick each clip's best seconds. Placing the same folder again updates the same shot list instead of making a second one."
 }

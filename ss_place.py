@@ -137,6 +137,10 @@ MATCH = {
                 "title": {"type": "string", "description": "two to four words naming the shot"},
                 "sees": {"type": "string", "description": "one plain sentence: what is on "
                          "screen in this clip"},
+                "action": {"type": "string", "description": "what the script says HAPPENS in "
+                           "this shot (the movement and the acting), in the script's own "
+                           "words, kept to one or two sentences; empty when the script "
+                           "doesn't describe the shot's action"},
                 "words": {"type": "string", "description": "the exact words of the script "
                           "that are heard while this clip is on screen, word for word; empty "
                           "when nothing is said over it. For a silent cartoon: the shot's "
@@ -147,7 +151,7 @@ MATCH = {
                 "end": {"type": "number", "description": "where the script says it ends, in "
                         "seconds from the start of the film; 0 when the script gives no time"},
             },
-            "required": ["shot", "title", "sees", "words", "start", "end"],
+            "required": ["shot", "title", "sees", "action", "words", "start", "end"],
             "additionalProperties": False}},
     },
     "required": ["summary", "shots"], "additionalProperties": False,
@@ -252,6 +256,7 @@ def match(kind, script, shots, work, say=None, cancel=None):
                 continue
             s["title"] = (x.get("title") or "").strip()
             s["purpose"] = s["picture"] = (x.get("sees") or "").strip()
+            s["motion"] = (x.get("action") or "").strip()
             s["words"] = " ".join((x.get("words") or "").split())
             try:
                 a_t, b_t = float(x.get("start") or 0), float(x.get("end") or 0)
@@ -340,6 +345,30 @@ def _list(labels):
     if len(labels) == 1:
         return f"Shot {labels[0]} has"
     return "Shots " + ", ".join(labels[:-1]) + " and " + labels[-1] + " have"
+
+
+def _same_list(r):
+    """If these clips were placed before, use that shot list's file again (not a "Title 2")
+    and keep what the clip check found, so nothing is checked twice."""
+    import json
+    import ss_script as S
+    from ss_core import safe_name
+    js = S.out_dir() / f"{safe_name(r['title'])[:80]} - shot list.json"
+    try:
+        old = json.loads(js.read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return
+    if not old.get("placed") or old.get("clip_folder") != r["clip_folder"]:
+        return
+    r["files"] = {"json": str(js), "text": str(js.with_name(js.name[:-5] + ".txt")),
+                  "folder": str(js.parent)}
+    was = {s.get("label"): s for s in old.get("shots") or []}
+    for s in r["shots"]:
+        if s["label"] in was and was[s["label"]].get("files"):
+            s["files"] = was[s["label"]]["files"]
+    for k in ("clip_checked", "continuity", "clip_notes"):
+        if old.get(k):
+            r[k] = old[k]
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +561,7 @@ def build(spec, progress=None, cancel=None):
          "clip_folder": str(folder), "audio": audio, "script": script, "voices": voices,
          "voice_order": (joined or {}).get("order") or [],
          "place_notes": notes, "clip_unknown": unknown[:40]}
+    _same_list(r)
     say(0.95, "Putting your clips on the timeline…")
     RC.build(r, folder, spec.get("out_dir"))               # also saves the shot list
     say(1.0, "Done.")
