@@ -743,8 +743,50 @@ def api(name, a):
             raise StoryError("The update couldn't be downloaded. Check the internet and try "
                              "again; your StoryStudio still works as it is.")
         log("updated to", info["version"], "- restarting")
+        try:                                  # so the new version reopens what was open
+            st = S.st if S.st and not S.st.get("video") else {}
+            (core.APP_DATA / "resume.json").write_text(json.dumps({
+                "page": str(a.get("page") or ""), "at": time.time(),
+                "project": st.get("project", ""), "seq_uid": st.get("seq_uid", ""),
+                "shot_list": ((S.sb or {}).get("files") or {}).get("json", "")}),
+                encoding="utf8")
+        except Exception:
+            log_error("resume note")
         S.restart = True
         return {"ok": True, "version": info["version"]}
+    if name == "resume":
+        # after "Update now": go back to the shot list, the sounds or the project that was
+        # open (the note is used once, and only if it is fresh)
+        f = core.APP_DATA / "resume.json"
+        try:
+            note = json.loads(f.read_text(encoding="utf8"))
+            f.unlink()
+        except (OSError, ValueError):
+            return {"view": ""}
+        if time.time() - float(note.get("at") or 0) > 900:
+            return {"view": ""}
+        page, proj, sl = note.get("page"), note.get("project") or "", note.get("shot_list") or ""
+        try:
+            if page == "script" and sl and os.path.exists(sl):
+                import ss_script as SB
+                S.sb = SB.load(sl)
+                return {"view": "script", "result": S.sb, "shot_types": SB.type_menu()}
+            if page in ("project", "review", "done", "feedback") and proj and os.path.exists(proj):
+                S.st = E.open_project(proj, note.get("seq_uid") or None)
+                S.st["thumb"] = make_thumb(S.st)
+                view = project_view()
+                if page in ("review", "done") and view.get("previous"):
+                    prev = E.load(S.st["work"], "cues")
+                    prev["story"] = S.st.get("story") or prev.get("story")
+                    prev["thumb"] = S.st.get("thumb")
+                    S.st = prev
+                    return {"view": "review", "project": view, "review": review_view()}
+                return {"view": "project", "project": view}
+        except StoryError as e:
+            log("resume skipped:", e)
+        except Exception:
+            log_error("resume")
+        return {"view": ""}
     if name == "client_error":
         log("window problem:", str(a.get("msg", ""))[:3000])
         return {"ok": True}

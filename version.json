@@ -1,5 +1,5 @@
 {
-  "version": "1.21.1",
+  "version": "1.21.2",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -33,5 +33,5 @@
     "storysound.ico",
     "ss_audio_template.xml"
   ],
-  "notes": "Two fixes for cartoons. A timeline with no sound on it (like a silent cartoon's rough cut) now gets its Premiere copy with the new sounds; before, only the preview video was made. And the characters' own sounds are strictly wordless: squeaks, chitters, gasps, grunts and sighs, never anything like speech."
+  "notes": "After Update now, StoryStudio reopens what you had open (your sounds, your project or your shot list) instead of going back to the start page."
 }

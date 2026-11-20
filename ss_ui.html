@@ -367,6 +367,7 @@ async function openGuide() {
 async function guidePlan() { await openBuilder(); sbSet("kind", "cartoon", true); }
 function kindLabel(k) { return k === "story" ? "Story" : k === "cartoon" ? "Silent cartoon" : "Music video"; }
 function renderHome() {
+  PAGE = P ? "project" : "home";
   if (!P) {
     const lists = H.shotlists || [], recent = H.recent || [];
     $("#view").innerHTML = readyCard() + `
@@ -647,6 +648,7 @@ async function openPreviousFeedback() { const j = await api("open_previous_feedb
 let F = null, fbFilter = "";
 const SEV = {fix:["Please fix","var(--bad)"], suggest:["Ideas","var(--warn)"], beat:["Beat","#7cc4ff"], good:["Nicely done","var(--good)"]};
 function renderFeedback() {
+  PAGE = "feedback";
   if (CHAIN && CHAIN.steps[CHAIN.i] === "feedback" && F) { CHAIN = null; chainBar('<span>✓ Your plan is finished. The notes are below and on your timeline.</span>'); }
   const s = F.summary || {}, st = F.stats || {};
   const counts = k => F.notes.filter(n => n.severity === k).length;
@@ -1144,6 +1146,7 @@ async function sbSetType(n, code, sel) {        // a new type: both prompts agai
 }
 function renderScript() {
   const r = SBR; if (!r) return openBuilder();
+  PAGE = "script";
   PB = [];
   const types = sbTypeCounts(r);
   const story = r.kind === "story";
@@ -1262,6 +1265,7 @@ function watchJob(first) {
 
 // ---------------------------------------------------------------- review
 function renderReview() {
+  PAGE = "review";
   if (CHAIN) chainStatus(`<span class="cnext">Check the sounds, then press “Put them in my movie”: the plan carries on after that.</span>`);
   const kinds = [...new Set(R.cues.map(c => c.kind))];
   const shown = R.cues.filter(c => !filter || c.kind === filter);
@@ -1364,6 +1368,7 @@ async function runAgain(editLyrics) {
   if (o.mode === "audio") setupFix(); else setupSounds();
 }
 async function renderDone() {
+  PAGE = "done";
   const o = (await api("outputs")).outputs;
   DONE = o;
   setTimeout(() => chainNext(o), 50);
@@ -1477,11 +1482,24 @@ async function checkUpdate() {
   bar.innerHTML = `<span>✨ A new version of StoryStudio (${esc(UPD.version)}) is ready.${UPD.notes ? " " + esc(UPD.notes) : ""}</span><button class="btn small primary" onclick="updateNow()">Update now</button><button class="btn small ghost" onclick="$('#updbar').classList.add('hidden')">Later</button>`;
   bar.classList.remove("hidden");
 }
+let PAGE = "";            // what is on screen, so an update can bring you back to it
+async function startUp() {
+  await goHome();
+  let j;
+  try { j = await api("resume"); } catch (e) { return; }
+  if (!j || !j.view || polling) return;
+  if (j.view === "script") { SBR = j.result; SBT = j.shot_types || SBT; renderScript(); }
+  else if (j.view === "review") { VID = null; P = j.project; R = j.review; filter = ""; renderReview(); }
+  else if (j.view === "project") { VID = null; P = j.project; renderHome(); }
+  else return;
+  $("main").scrollTop = 0;
+  toast("StoryStudio is updated. You're back where you were.");
+}
 async function updateNow() {
   const bar = $("#updbar");
   bar.innerHTML = `<span><span class="spin"></span> Updating StoryStudio… it will reopen by itself in a few seconds.</span>`;
   let j;
-  try { j = await api("update_now"); } catch (e) { checkUpdate(); return; }
+  try { j = await api("update_now", {page: PAGE}); } catch (e) { checkUpdate(); return; }
   if (!j.ok) { bar.innerHTML = `<span>${esc(j.message || "You already have the newest version.")}</span>`; setTimeout(() => bar.classList.add("hidden"), 4000); return; }
   bar.innerHTML = `<span>✓ Updated to ${esc(j.version)}. StoryStudio is reopening…</span>`;
   setTimeout(() => { try { window.close(); } catch (e) {} }, 4000);
@@ -1489,7 +1507,7 @@ async function updateNow() {
 setTimeout(checkUpdate, 4000);
 setInterval(checkUpdate, 30 * 60 * 1000);
 
-goHome();
+startUp();
 </script>
 </body>
 </html>
