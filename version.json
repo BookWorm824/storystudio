@@ -1,5 +1,5 @@
 {
-  "version": "1.22.0",
+  "version": "1.22.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -34,5 +34,5 @@
     "storysound.ico",
     "ss_audio_template.xml"
   ],
-  "notes": "When your Fal account runs out of credit, StoryStudio keeps what was made, tells you, and offers Use free sound effects: real recorded sounds from Adobe's free library, no account needed. A new sound run never writes over the sounds you already have."
+  "notes": "When your Fal account runs out of credit, StoryStudio keeps what was made, tells you, and offers Use free sound effects: real recorded sounds from Adobe's free library, no account needed. A new sound run never writes over the sounds you already have, and opening StoryStudio when it's already open now shows the open one instead of starting a second copy."
 }

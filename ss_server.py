@@ -1105,13 +1105,58 @@ def window_open(profile):
     return None
 
 
+RUNNING = APP_DATA / "running.json"     # which StoryStudio is open (only one at a time)
+
+
+def already_running():
+    """The address of a StoryStudio that is already open on this computer, or None. Two
+    copies working on the same project would save over each other's work."""
+    try:
+        import urllib.request
+        url = json.loads(RUNNING.read_text(encoding="utf8"))["url"]
+        with urllib.request.urlopen(url, timeout=3) as r:
+            if b"StoryStudio" in r.read(6000):
+                return url
+    except Exception:
+        return None
+    return None
+
+
+def _not_running(url):
+    """Forget this copy as the open one (only if it still is)."""
+    try:
+        if json.loads(RUNNING.read_text(encoding="utf8")).get("url") == url:
+            RUNNING.unlink()
+    except (OSError, ValueError, KeyError):
+        pass
+
+
+def open_window(url, profile, edge):
+    if edge:
+        return subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}",
+                                 "--window-size=1320,880", "--no-first-run",
+                                 "--no-default-browser-check",
+                                 "--disable-features=Translate,IntensiveWakeUpThrottling",
+                                 "--disable-background-timer-throttling",
+                                 "--disable-renderer-backgrounding"], **core.NOWIN)
+    import webbrowser
+    webbrowser.open(url)
+    return None
+
+
 def main():
+    edge = find_edge()
+    profile = APP_DATA / "window"
+    if not os.environ.get("STORYSTUDIO_NO_WINDOW"):
+        there = already_running()
+        if there:                            # one is open already (perhaps hidden behind
+            log("StoryStudio is already open; showing its window")    # Premiere): show it
+            open_window(there, profile, edge)
+            return
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
     url = f"http://127.0.0.1:{port}/"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    edge = find_edge()
-    profile = APP_DATA / "window"
     if os.environ.get("STORYSTUDIO_NO_WINDOW"):          # for testing in another browser
         (APP_DATA / "test_url.txt").write_text(url, encoding="utf8")
         while not S.restart:
@@ -1121,18 +1166,11 @@ def main():
         ss_update.restart()
         srv.shutdown()
         return
-    window = None
-    if edge:
-        window = subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}",
-                                   "--window-size=1320,880", "--no-first-run",
-                                   "--no-default-browser-check",
-                                   "--disable-features=Translate,IntensiveWakeUpThrottling",
-                                   "--disable-background-timer-throttling",
-                                   "--disable-renderer-backgrounding"],
-                                  **core.NOWIN)
-    else:
-        import webbrowser
-        webbrowser.open(url)
+    try:
+        RUNNING.write_text(json.dumps({"url": url, "pid": os.getpid()}), encoding="utf8")
+    except OSError:
+        pass
+    window = open_window(url, profile, edge)
     opened = time.time()
     log("StoryStudio window at", url)
     # When does StoryStudio close? When its window is really closed: the Edge window we
@@ -1150,6 +1188,7 @@ def main():
         tick = time.time()
         if S.restart:                          # updated: open the new version, close this one
             time.sleep(1.5)                    # let the window get its answer first
+            _not_running(url)                  # so the new version doesn't think it's open
             import ss_update
             ss_update.restart()
             break
@@ -1172,6 +1211,7 @@ def main():
             if open_now is None and quiet > 8 * 3600:
                 log("StoryStudio closing: window silent for hours")
                 break
+    _not_running(url)
     srv.shutdown()
 
 
