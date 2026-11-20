@@ -148,6 +148,12 @@ video{width:100%;border-radius:14px;background:#000;border:1px solid var(--line)
 /* feedback */
 .fb{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:22px;align-items:start}
 .fb > div:first-child{position:sticky;top:0}
+.fb.fbg > div:first-child{position:static}
+.fbsteps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.fbstep{display:grid;grid-template-columns:10px 1fr;gap:12px;padding:10px 12px;border-radius:12px;background:var(--bg2);border:1px solid transparent}
+.fbstep .sev{margin-top:7px}
+.fbstep.on{border-color:var(--line)}
+.fbcopy{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 12px;border-radius:12px;background:var(--bg2);margin-bottom:8px}
 .sev{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none}
 .note{display:grid;grid-template-columns:10px 1fr auto;gap:14px;align-items:start;padding:14px 16px;border-radius:14px;background:var(--card);border:1px solid var(--line)}
 .note .sev{margin-top:7px}
@@ -434,9 +440,9 @@ function renderHome() {
       ${pickTask("sounds","sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","setupSounds()")}
       ${pickTask("fix","wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
       ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
-      ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback('all')")}
-      ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Looks closely at every shot and tells you what to trim, hold longer or speed up.","setupFeedback('timing')")}
-      ${MULTI ? "" : task("book","#2b2414","#ffd27a","Story check","Watches it like a first-time viewer, without your script, and tells you where the story doesn't come across, with fixes: edits, sounds, new prompts, new shots.","setupAudit()")}
+      ${MULTI ? "" : task("book","#2b2414","#ffd27a","Story check","Does the story make sense to someone seeing it for the first time? Shows where it gets lost, with fixes: sounds, new prompts, new shots.","setupAudit()")}
+      ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Picture problems (glitches, characters that change), timing and colour. A big check: notes sorted into groups.","setupFeedback('all')")}
+      ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Only the timing: what to trim, hold longer or speed up. On cartoons StoryStudio makes the changes for you.","setupFeedback('timing')")}
       ${MULTI ? "" : task("chat","#22262f","#e6e9ef","Tell StoryStudio what to fix","Pause where you see something you'd like better, say it in your own words, and get the fix.","openNotes()")}
       ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","See last time's sounds","The sounds StoryStudio made for this project before.","openPrevious()") : ""}
       ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","See last time's feedback","The notes from the last time it watched this project.","openPreviousFeedback()") : ""}
@@ -666,7 +672,7 @@ function setupFeedback(focus) {
   $("#setup").scrollIntoView({behavior:"smooth"});
 }
 async function startFeedback() { const j = await api("start_feedback", fbOpts); watchJob(j.job); }
-async function openPreviousFeedback() { const j = await api("open_previous_feedback"); F = j.feedback; renderFeedback(); }
+async function openPreviousFeedback() { const j = await api("open_previous_feedback"); F = j.feedback; fbFilter = ""; renderFeedback(); $("main").scrollTop = 0; }
 
 // ---------------------------------------------------------------- feedback page
 let F = null, fbFilter = "";
@@ -675,44 +681,83 @@ function renderFeedback() {
   PAGE = "feedback";
   if (CHAIN && CHAIN.steps[CHAIN.i] === "feedback" && F) { CHAIN = null; chainBar('<span>✓ Your plan is finished. The notes are below and on your timeline.</span>'); }
   const s = F.summary || {}, st = F.stats || {};
-  const counts = k => F.notes.filter(n => n.severity === k).length;
-  const shown = F.notes.filter(n => !fbFilter || n.severity === fbFilter);
+  const groups = FBG.map(g => ({g, notes: F.notes.filter(n => fbGroup(n) === g[0])}));
+  const count = id => groups.find(x => x.g[0] === id).notes.length;
+  if (!fbFilter || (fbFilter !== "all" && !count(fbFilter))) fbFilter = fbFirst();
+  const cur = FBG.find(g => g[0] === fbFilter);
+  const shown = fbFilter === "all" ? F.notes : groups.find(x => x.g[0] === fbFilter).notes;
   const kept = F.notes.filter(n => n.keep).length;
   const canDo = F.notes.filter(n => n.keep && n.can_do).length;
+  const nDone = count("done");
+  const openBtn = (path, label, primary) => `<button class="btn small ${primary ? "primary" : ""}" onclick='openFile(${esc(JSON.stringify(path))}, this, "Opening in Premiere…")'>${label}</button>`;
+  // "Start here": one line per group, in the order she'd work through them
+  const step = (id, text, act) => count(id) ? `<li class="fbstep ${fbFilter === id ? "on" : ""}"><i class="sev" style="background:${FBG.find(g => g[0] === id)[2]}"></i><div><div>${text}</div>${act ? `<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">${act}</div>` : ""}</div></li>` : "";
+  const see = id => `<button class="btn small" onclick="fbSet('${id}')">See ${count(id) === 1 ? "it" : "them"}</button>`;
+  const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  const steps = [
+    step("done", F.retimed
+        ? `<b>Timing: ${plural(nDone, "change", "changes")}.</b> ✓ StoryStudio already made ${nDone === 1 ? "it" : "them"} for you in the “(retimed)” copy. Nothing to read here.`
+        : `<b>Timing: ${plural(nDone, "change", "changes")} StoryStudio can make for you</b> (trims, speed-ups, longer holds). You don't need to read them all.`,
+      (F.retimed ? openBtn(F.retimed, "Open the (retimed) copy", true) : `<button class="btn small primary" id="rtbtn" ${canDo ? "" : "disabled"} onclick="fbRetime()">Make them for me</button>`) + see("done")),
+    step("redo", `<b>${plural(count("redo"), "shot", "shots")} to make again.</b> Something looks wrong in the clip: a glitch, or a character or prop that changes. Make the clip again, or cut it.`, see("redo")),
+    step("story", `<b>${plural(count("story"), "story or pacing note", "story and pacing notes")}</b> to change by hand in Premiere.`, see("story")),
+    step("look", `<b>${plural(count("look"), "colour or sound fix", "colour and sound fixes")}.</b> Small fixes in Premiere.`, see("look")),
+    step("good", `<b>${plural(count("good"), "thing", "things")} that ${count("good") === 1 ? "works" : "work"} well.</b> Nothing to do.`, see("good"))].join("");
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>Notes on “${esc(F.title)}”</h1><div class="sub" style="margin:0">${F.kind === "music" ? "Music video" : F.kind === "cartoon" ? "Silent cartoon" : "Story"} · ${st.shots} shots, ${(+st.average).toFixed(1)} s each on average${st.beat ? ` · ${st.beat.on_beat} of ${st.beat.cuts} cuts on the beat (${st.beat.bpm} beats a minute)` : ""}</div></div>
-      <div class="row">${F.project ? `<button class="btn primary big" onclick='openFbProject()'>Open in Premiere ${arrow()}</button>` : ""}</div></div>
+      <div class="row"><button class="btn ghost" onclick="goHome()">Home</button></div></div>
     ${F.project_error ? `<div class="banner">${esc(F.project_error)}</div>` : ""}
-    <div class="fb">
+    <div class="fb fbg">
       <div>
         <div class="card" style="padding:12px"><video id="fbv" src="${F.video}" controls preload="metadata"></video></div>
-        ${s.overall ? `<div class="card" style="margin-top:16px"><h2>Overall</h2><p style="margin:0 0 12px">${esc(s.overall)}</p>
-          ${(s.strengths||[]).length ? `<b class="good-t">What's working</b><ul class="notes">${s.strengths.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-          ${(s.top_fixes||[]).length ? `<b class="fix-t" style="display:block;margin-top:12px">What would help most</b><ul class="notes">${s.top_fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</div>` : ""}
-        ${F.can_retime ? `<div class="card" style="margin-top:16px"><h2>Want StoryStudio to do it?</h2>
-          <div class="sub" style="margin:0 0 12px">StoryStudio can make the ${canDo} timing change${canDo===1?"":"s"} that ${canDo===1?"is":"are"} switched on (trims, speed changes, longer holds and removed shots) and close the gaps, in a new copy ending in “(retimed)”. Switch off any note you don't agree with first. Your project isn't changed.</div>
-          <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn primary" id="rtbtn" ${canDo ? "" : "disabled"} onclick="fbRetime()">Make these changes for me</button>
-          ${F.retimed ? `<button class="btn" onclick='openFile(${esc(JSON.stringify(F.retimed))}, this, "Opening in Premiere…")'>Open the (retimed) copy</button>` : ""}</div><div class="pmsg" id="rtmsg"></div></div>` : ""}
-        <div class="card" style="margin-top:16px">
-          <div class="sub" style="margin:0 0 12px">${kept} note${kept===1?"":"s"} ${F.dirty ? "switched on. Update the copy to change the markers." : "are markers on the timeline in your “(feedback)” copy. Your project wasn't changed."}</div>
-          <div class="row" style="flex-wrap:wrap;gap:10px">
-            ${F.dirty ? `<button class="btn primary" onclick="fbSave()">Update the (feedback) copy</button>` : ""}
-            <button class="btn" onclick='api("open",{path:${esc(JSON.stringify(F.folder))}})'>${ICON.folder} Open the folder</button>
-            ${F.list ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(F.list))}})'>Notes list</button>` : ""}
-            <button class="btn ghost" onclick="goHome()">Home</button>
+        <div class="card" style="margin-top:16px"><h2>Start here</h2>
+          <div class="sub" style="margin:0 0 10px">${F.notes.length} notes sounds like a lot, but they fall into a few groups. Work down the list.</div>
+          <ol class="fbsteps">${steps}</ol><div class="pmsg" id="rtmsg"></div></div>
+        ${(s.top_fixes||[]).length || s.overall ? `<div class="card" style="margin-top:16px"><h2>What would help most</h2>
+          ${(s.top_fixes||[]).length ? `<ul class="notes">${s.top_fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          ${s.overall ? `<details style="margin-top:10px"><summary style="cursor:pointer" class="sub">Read the whole summary</summary><p style="margin:10px 0 12px">${esc(s.overall)}</p>
+            ${(s.strengths||[]).length ? `<b class="good-t">What's working</b><ul class="notes">${s.strengths.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</details>` : ""}</div>` : ""}
+        <div class="card" style="margin-top:16px"><h2>Your copies</h2>
+          <div class="sub" style="margin:0 0 10px">StoryStudio never changes your own project. It made ${F.retimed ? "two copies" : "a copy"} next to it:</div>
+          ${F.project ? `<div class="fbcopy"><div><b>(feedback)</b> copy<div class="sub" style="margin:0">Your timeline with a coloured marker for every note${F.dirty ? `. <b>You switched some notes on or off</b>, so update it.` : "."}</div></div>
+            <div class="row" style="gap:8px">${F.dirty ? `<button class="btn small primary" onclick="fbSave()">Update it</button>` : ""}<button class="btn small" onclick="openFbProject()">Open in Premiere</button></div></div>` : ""}
+          ${F.retimed ? `<div class="fbcopy"><div><b>(retimed)</b> copy<div class="sub" style="margin:0">The timing changes made for you. Keep editing in this one.</div></div>
+            <div class="row" style="gap:8px">${F.can_retime ? `<button class="btn small" id="rtbtn" ${canDo ? "" : "disabled"} onclick="fbRetime()" title="Make it again with only the timing notes that are switched on">Make it again</button>` : ""}${openBtn(F.retimed, "Open in Premiere", true)}</div></div>` : ""}
+          <div class="row" style="flex-wrap:wrap;gap:10px;margin-top:10px">
+            <button class="btn small ghost" onclick='api("open",{path:${esc(JSON.stringify(F.folder))}})'>${ICON.folder} Open the folder</button>
+            ${F.list ? `<button class="btn small ghost" onclick='api("open",{path:${esc(JSON.stringify(F.list))}})'>Notes as a text list</button>` : ""}
           </div>
         </div>
-        ${F.retimed ? nextCard(F.retimed, "", ["sounds", "story", "fix"], "These open the “(retimed)” copy, with the timing changes in it.")
+        ${F.retimed ? nextCard(F.retimed, "", ["story", "notes", "sounds", "fix"], "These open the “(retimed)” copy, with the timing changes in it.")
           : nextCard(F.source, F.seq_uid, ["story", "notes", F.focus === "timing" ? "feedback" : "timing", "sounds", "fix"], "")}
       </div>
       <div>
         <div class="filters">
-          <span class="chip ${!fbFilter?"on":""}" onclick="fbSet('')">All ${F.notes.length}</span>
-          ${Object.keys(SEV).filter(k => counts(k)).map(k => `<span class="chip ${fbFilter===k?"on":""}" onclick="fbSet('${k}')"><i class="sev" style="background:${SEV[k][1]}"></i>${SEV[k][0]} ${counts(k)}</span>`).join("")}
+          ${groups.filter(x => x.notes.length).map(x => `<span class="chip ${fbFilter===x.g[0]?"on":""}" onclick="fbSet('${x.g[0]}')"><i class="sev" style="background:${x.g[2]}"></i>${x.g[1]} ${x.notes.length}</span>`).join("")}
+          <span class="chip ${fbFilter==="all"?"on":""}" onclick="fbSet('all')">All ${F.notes.length}</span>
         </div>
+        <div class="sub" style="margin:0 0 12px">${fbFilter === "all" ? "Every note, in time order. Switch a note off if you don't agree: it then isn't a marker, and StoryStudio won't make that change." : esc(cur[3](F))}</div>
         <div class="list">${shown.map(noteHtml).join("") || '<div class="sub">No notes here.</div>'}</div>
       </div>
     </div>`;
+}
+// the groups on the feedback page: id, name, colour, what to do with them
+const FBG = [
+  ["done", "Timing done for you", "#7cc4ff", F => F.retimed ? "StoryStudio already made these in the “(retimed)” copy. You don't need to read them. If you disagree with one, switch it off and press “Make it again”." : "StoryStudio can make all of these at once in a copy ending in “(retimed)”. Switch off any you don't agree with, then press “Make them for me”."],
+  ["redo", "Make again", "var(--bad)", F => "Something looks wrong in these clips. Make the clip again with the prompt in the grey box, or cut the shot. Press the time to watch it."],
+  ["story", "Story and pacing", "var(--warn)", F => "Changes to make by hand in Premiere. The grey box says how."],
+  ["look", "Colour and sound", "#c9a7ff", F => "Small fixes in Premiere: colour with Lumetri Color, sound with StoryStudio's “Fix the audio”."],
+  ["good", "Nicely done", "var(--good)", F => "What's working. Nothing to do here."]];
+function fbGroup(n) {
+  if (n.severity === "good") return "good";
+  if (n.can_do && F.can_retime) return "done";
+  if (n.kind === "ai_glitch" || n.kind === "continuity") return "redo";
+  if (n.kind === "picture" || n.kind === "sound") return "look";
+  return "story";
+}
+function fbFirst() {
+  const order = F.retimed ? ["redo", "story", "look", "done", "good"] : ["done", "redo", "story", "look", "good"];
+  return order.find(id => F.notes.some(n => fbGroup(n) === id)) || "all";
 }
 async function fbRetime() {
   const b = $("#rtbtn"), m = $("#rtmsg");

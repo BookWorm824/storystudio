@@ -1,5 +1,5 @@
 {
-  "version": "1.23.0",
+  "version": "1.23.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -35,5 +35,5 @@
     "ss_audio_template.xml",
     "ss_audit.py"
   ],
-  "notes": "New: Story check. StoryStudio watches your video like a first-time viewer, without your script, tells you where the story doesn't come across, and gives you fixes: edits, sounds to add, new prompts to make a clip again, and new shots. Pause the video and tell StoryStudio what you'd like better in your own words. After every tool, What next? takes you straight to the next one."
+  "notes": "Edit feedback is easier to read: the notes are sorted into a few groups (timing done for you, shots to make again, story and pacing, colour and sound, nicely done) with a Start here list, and it explains which copy is which."
 }
