@@ -230,6 +230,26 @@ video{width:100%;border-radius:14px;background:#000;border:1px solid var(--line)
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#232937;border:1px solid #3a4252;padding:12px 18px;border-radius:12px;z-index:70;box-shadow:var(--shadow);max-width:80vw}
 .toast.err{border-color:rgba(255,107,107,.5)}
 ::-webkit-scrollbar{width:12px}::-webkit-scrollbar-thumb{background:#2a303c;border-radius:10px;border:3px solid var(--bg)}
+.fix{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--bg2);border:1px solid var(--line)}
+.fix .fh{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fix .what{margin-top:4px;font-size:14px}
+.fix .ptext{background:var(--card)}
+.fix .pbox{margin-top:8px}
+.fxacts{display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:14px}
+.fxacts:empty{display:none}
+.fxacts .ok{color:var(--good)}
+.aud > div:first-child{position:static}
+.moment{display:grid;grid-template-columns:auto 10px 1fr;gap:10px;align-items:start;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px}
+.moment:last-child{border-bottom:0}
+.clarity{position:relative;height:14px;border-radius:7px;background:var(--card2);overflow:hidden;margin:10px 0 4px;cursor:pointer}
+.clarity i{position:absolute;top:0;bottom:0}
+.nexts{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.nexttool{display:flex;gap:12px;align-items:flex-start;text-align:left;padding:12px;border-radius:12px;background:var(--card2);border:1px solid var(--line);transition:.15s}
+.nexttool:hover{border-color:var(--accent)}
+.nexttool .ti{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none}
+.nexttool .ti svg{width:19px;height:19px}
+.nexttool b{display:block;font-size:14.5px}
+.nexttool small{display:block;color:var(--soft);font-size:13px;line-height:1.35;margin-top:2px}
 </style>
 </head>
 <body>
@@ -416,8 +436,11 @@ function renderHome() {
       ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
       ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Watches your edit and leaves friendly notes as markers on your timeline.","setupFeedback('all')")}
       ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Looks closely at every shot and tells you what to trim, hold longer or speed up.","setupFeedback('timing')")}
+      ${MULTI ? "" : task("book","#2b2414","#ffd27a","Story check","Watches it like a first-time viewer, without your script, and tells you where the story doesn't come across, with fixes: edits, sounds, new prompts, new shots.","setupAudit()")}
+      ${MULTI ? "" : task("chat","#22262f","#e6e9ef","Tell StoryStudio what to fix","Pause where you see something you'd like better, say it in your own words, and get the fix.","openNotes()")}
       ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","See last time's sounds","The sounds StoryStudio made for this project before.","openPrevious()") : ""}
       ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","See last time's feedback","The notes from the last time it watched this project.","openPreviousFeedback()") : ""}
+      ${!MULTI && P.previous_audit ? task("book","#22262f","var(--soft)","See last time's story check","The story notes, and what you asked, from last time.","openPreviousAudit()") : ""}
     </div>
     <div id="setup"></div>`;
   if (MULTI && PICK.length) renderPlan();
@@ -679,6 +702,8 @@ function renderFeedback() {
             <button class="btn ghost" onclick="goHome()">Home</button>
           </div>
         </div>
+        ${F.retimed ? nextCard(F.retimed, "", ["sounds", "story", "fix"], "These open the “(retimed)” copy, with the timing changes in it.")
+          : nextCard(F.source, F.seq_uid, ["story", "notes", F.focus === "timing" ? "feedback" : "timing", "sounds", "fix"], "")}
       </div>
       <div>
         <div class="filters">
@@ -717,6 +742,172 @@ function fbSeek(t) { const v = $("#fbv"); if (!v) return; v.currentTime = Math.m
 async function fbToggle(id) { const n = F.notes.find(x => x.id === id); const j = await api("fb_toggle", {id, keep:!n.keep}); Object.assign(n, j.note); F.dirty = true; const t = $("#fbv") ? $("#fbv").currentTime : 0; renderFeedback(); if ($("#fbv")) $("#fbv").currentTime = t; }
 async function fbSave() { toast("Updating the markers…"); const j = await api("fb_save"); F = j.feedback; renderFeedback(); toast("The (feedback) copy is up to date"); }
 async function openFbProject() { if (F.dirty) { const j = await api("fb_save"); F = j.feedback; renderFeedback(); } api("open", {path: F.project}); toast("Opening in Premiere…"); }
+
+// ---------------------------------------------------------------- story check
+ICON.book = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M9 8h6M9 12h5"/></svg>';
+ICON.chat = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/><path d="M8.5 11h7M8.5 14h4"/></svg>';
+let A = null, AFX = [], askAt = true, ASKDRAFT = "";
+function auditMinutes() { return Math.max(2, Math.round((40 + P.seconds * 0.15 + (P.export ? 0 : P.seconds * 0.35) + 30 + 90 * Math.ceil(Math.ceil(P.seconds / 120) / 3) + 150) / 60)); }
+function setupAudit() {
+  $("#setup").innerHTML = `<div class="card panel"><h2>Story check</h2>
+    <p class="sub" style="margin-bottom:8px">${aiName()} watches your video the way a first-time viewer would, <b>without</b> reading your script, and says what it thinks is happening and where it gets lost. Then it compares that with your story and your shot list and tells you every place where the story doesn't come across, with fixes you can use straight away: changes to the edit, sounds to add, new action prompts to make a clip again, and new shots with their picture prompts.</p>
+    <p class="sub" style="margin-bottom:8px">Afterwards you can tell StoryStudio in your own words what you'd like better (“at 1:20 it looks like he's dancing, not pulling”) and get fixes for that too. Every note also becomes a marker on the timeline in a copy ending in “(story check)”.</p>
+    <div class="footerbar"><div class="est">About <b>&nbsp;${auditMinutes()} minutes&nbsp;</b></div>
+    <button class="btn primary big" onclick="startAudit()">Check my story ${arrow()}</button></div></div>`;
+  $("#setup").scrollIntoView({behavior:"smooth"});
+}
+async function startAudit() { const j = await api("start_audit"); watchJob(j.job); }
+async function openPreviousAudit() { const j = await api("open_previous_audit"); A = j.audit; renderAudit(); $("main").scrollTop = 0; }
+async function openNotes() {
+  if (P && P.previous_audit) return openPreviousAudit();
+  const j = await api("audit_prepare"); watchJob(j.job);
+}
+const CLEAR = {clear:["Clear","var(--good)"], unsure:["Unsure","var(--warn)"], lost:["Lost","var(--bad)"]};
+const ACROSS = {yes:"The story comes across", mostly:"The story mostly comes across", partly:"The story only partly comes across", no:"The story doesn't come across yet"};
+const FIXCOL = {edit:"#7cc4ff", sound:"var(--accent)", redo_clip:"#ff8fa3", new_shot:"#c9a7ff", words:"var(--good)"};
+function renderAudit() {
+  PAGE = "audit"; AFX = [];
+  const s = A.summary || {};
+  const fixes = A.notes.filter(n => n.severity === "fix").length;
+  const unclear = A.moments.filter(m => m.clear !== "clear").length;
+  const tm = (t, label) => `<button class="tmb" title="Watch this moment" onclick="fbSeek(${t})">${ICON.play.replace('<svg','<svg width="11" height="11"')} ${label}</button>`;
+  const dur = A.seconds || 1;
+  const strip = A.moments.length ? `<div class="clarity" title="Green: clear. Yellow: a guess. Red: lost. Click to watch." onclick="fbSeek(event.offsetX / this.clientWidth * ${dur} + 1.5)">${A.moments.map((m, i) => { const e = i + 1 < A.moments.length ? A.moments[i + 1].t : dur; return `<i style="left:${(m.t / dur * 100).toFixed(2)}%;width:${Math.max(0.4, (e - m.t) / dur * 100).toFixed(2)}%;background:${CLEAR[m.clear][1]}"></i>`; }).join("")}</div>` : "";
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Story check: “${esc(A.title)}”</h1><div class="sub" style="margin:0">${A.checked ? `${esc(ACROSS[s.comes_across] || "")} · ${A.notes.length} note${A.notes.length === 1 ? "" : "s"}${fixes ? `, ${fixes} to fix` : ""}` : "Tell StoryStudio what you'd like better, or check the whole story."}${A.matched ? ` · matched to your shot list (${A.matched} of ${A.shots} shots)` : ""}</div></div>
+      <div class="row">${A.project ? `<button class="btn primary big" onclick='openFile(${esc(JSON.stringify(A.project))}, this, "Opening in Premiere…")'>Open in Premiere ${arrow()}</button>` : ""}</div></div>
+    ${A.project_error ? `<div class="banner">${esc(A.project_error)}</div>` : ""}
+    <div class="fb aud">
+      <div>
+        <div class="card" style="padding:12px"><video id="fbv" src="${A.video}" controls preload="metadata"></video>${strip}</div>
+        <div class="card" style="margin-top:16px"><h2>${ICON.chat.replace('<svg','<svg width="18" height="18" style="vertical-align:-3px;margin-right:6px"')}Tell StoryStudio what you'd like better</h2>
+          <div class="sub" style="margin:0 0 10px">Pause the video where you see it and say it in your own words: something that looks wrong or doesn't make sense, a sound you'd like, a shot that's missing. StoryStudio looks closely at that moment and gives you the fix: a change to the edit, a sound, a new prompt to make the clip again, or a new shot.</div>
+          <textarea id="asktext" rows="3" class="sbin" style="width:100%" placeholder="For example: here it looks like he's dancing, not pulling the acorn. Or: I want to hear him get an idea.">${esc(ASKDRAFT)}</textarea>
+          <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:10px">
+            <label class="sub" style="margin:0;cursor:pointer;display:flex;align-items:center;gap:8px"><input type="checkbox" ${askAt ? "checked" : ""} onchange="askAt=this.checked" style="width:auto;margin:0"> About this moment: <b id="asktime">0:00</b></label>
+            <button class="btn primary" onclick="sendAsk()">Ask StoryStudio</button></div></div>
+        ${A.asks.length ? `<h2 style="margin:20px 0 10px">What you asked</h2><div class="list">${A.asks.slice().reverse().map(askHtml).join("")}</div>` : ""}
+        ${A.checked ? `<div class="card" style="margin-top:16px"><h2>Does the story come across?</h2><p style="margin:0 0 12px">${esc(s.overall || "")}</p>
+          ${A.viewer_story ? `<div class="how" style="margin:0 0 12px"><b>How a first-time viewer would tell it:</b> ${esc(A.viewer_story)}</div>` : ""}
+          ${(s.working || []).length ? `<b class="good-t">What tells the story well</b><ul class="notes">${s.working.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          ${(s.top_fixes || []).length ? `<b class="fix-t" style="display:block;margin-top:12px">What would help the story most</b><ul class="notes">${s.top_fixes.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          <div class="row" style="flex-wrap:wrap;gap:10px;margin-top:12px">${A.list ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(A.list))}})'>Notes list</button>` : ""}${A.folder ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(A.folder))}})'>${ICON.folder} Open the folder</button>` : ""}<button class="btn ghost" onclick="startAudit()">↻ Check it again</button></div></div>`
+        : `<div class="card" style="margin-top:16px"><h2>Check the whole story</h2><div class="sub" style="margin:0 0 12px">${aiName()} watches the whole video like a first-time viewer, without your script, then tells you every place where the story doesn't come across, with fixes.</div><button class="btn primary" onclick="startAudit()">Check my story</button></div>`}
+        ${nextCard(A.source, A.seq_uid, ["sounds", "fix", "feedback", "timing"].concat(A.shot_list ? ["shotlist"] : []), "These open your project again, as it is now in Premiere.", A.shot_list)}
+      </div>
+      <div>
+        ${A.checked ? `<h2 style="margin:0 0 10px">Where the story gets lost</h2><div class="list">${A.notes.map(auditNoteHtml).join("") || `<div class="sub">Nothing! A first-time viewer would follow this story.</div>`}</div>
+        ${A.moments.length ? `<details class="card" style="margin-top:16px"><summary style="cursor:pointer"><b>What a first-time viewer understood</b> <span class="sub" style="margin:0">${A.moments.length} moments · ${unclear} not clear</span></summary>
+          <div class="sub" style="margin:10px 0 6px">${esc(A.by || aiName())} watched without your script. Green: clear. Yellow: they could only guess. Red: lost.</div>
+          ${A.moments.map(m => `<div class="moment">${tm(m.t, m.time)}<i class="sev" style="margin-top:8px;background:${CLEAR[m.clear][1]}"></i><div>${esc(m.happens)}${m.wondering ? `<div class="sub" style="margin:2px 0 0">${esc(m.wondering)}</div>` : ""}</div></div>`).join("")}</details>` : ""}` : `<div class="card"><h2>How this works</h2><div class="sub" style="margin:0">Play the video and pause where something isn't right. Type what you see, the way you'd tell a friend. StoryStudio looks at the pictures around that moment, with your shot list and the sounds there, and answers with fixes. You can ask as many times as you like, and follow up (“make it funnier”, “shorter”).</div></div>`}
+      </div>
+    </div>`;
+  const v = $("#fbv");
+  if (v) v.addEventListener("timeupdate", () => { const t = $("#asktime"); if (t) t.textContent = mmss(v.currentTime); });
+}
+function auditNoteHtml(n) {
+  return `<div class="note" style="grid-template-columns:10px 1fr"><i class="sev" style="background:${n.severity === "fix" ? "var(--bad)" : "var(--warn)"}"></i><div class="nb">
+    <div class="nh"><button class="tmb" title="Watch this moment" onclick="fbSeek(${n.t})">${ICON.play.replace('<svg','<svg width="11" height="11"')} ${n.time}</button><b>${esc(n.title)}</b><span class="pill">${n.severity === "fix" ? "Please fix" : "Idea"}</span></div>
+    <div>${esc(n.problem)}</div>${n.fixes.map(fixHtml).join("")}</div></div>`;
+}
+function askHtml(x) {
+  return `<div class="note" style="grid-template-columns:1fr"><div class="nb">
+    <div class="nh">${x.time ? `<button class="tmb" title="Watch this moment" onclick="fbSeek(${x.at})">${ICON.play.replace('<svg','<svg width="11" height="11"')} ${x.time}</button>` : ""}<b>You:</b> <span>“${esc(x.text)}”</span></div>
+    <div style="margin-top:6px">${esc(x.reply)}</div>
+    ${x.question ? `<div class="how"><b>A question for you:</b> ${esc(x.question)} Answer it in the box above.</div>` : ""}
+    ${x.fixes.map(fixHtml).join("")}</div></div>`;
+}
+function fixHtml(f) {
+  const box = (label, sub, text) => { const i = AFX.length; AFX.push(text); return `<div class="pbox"><div class="ptitle">${label} <span class="sub">${sub}</span><span style="flex:1"></span><button class="btn small" onclick="afxCopy(${i})">Copy</button></div><div class="ptext">${esc(text)}</div></div>`; };
+  let body = "", acts = "";
+  if (f.type === "sound") {
+    body = box(f.character ? "The character's sound" : "The sound", "for the sound AI or Adobe", f.sound);
+    acts = f.added ? `<span class="ok">✓ In your sound list</span><button class="btn small" onclick='openSoundsOf(${esc(JSON.stringify(f.added))})'>Open my sounds</button>`
+      : `<button class="btn small primary" onclick="fxAddSound('${f.ref}',${f.k},this)">Add to my sounds</button><span class="sub" style="margin:0">at ${f.time}</span>`;
+  } else if (f.type === "redo_clip" || f.type === "new_shot") {
+    if (f.picture) body += box("Text-to-image prompt", "ChatGPT / Nano Banana", f.picture);
+    if (f.motion) body += box("Image-to-video prompt", "MiniMax", f.motion);
+    if (A.shot_list && (f.picture || f.motion)) acts = f.saved ? `<span class="ok">✓ In your shot list as shot ${esc(f.saved)}</span><button class="btn small" onclick='openShotList(${esc(JSON.stringify(A.shot_list))})'>Open my shot list</button>`
+      : `<button class="btn small primary" onclick="fxToList('${f.ref}',${f.k},this)">${f.type === "new_shot" ? "Add it to my shot list" : "Save it in my shot list"}</button>`;
+  }
+  return `<div class="fix"><div class="fh"><span class="pill" style="color:${FIXCOL[f.type]};border-color:${FIXCOL[f.type]}">${esc(f.name)}</span><b>${esc(f.title)}</b>${f.shot ? `<span class="pill">${f.type === "new_shot" ? "after shot" : "shot"} ${esc(f.shot)}</span>` : ""}</div>
+    <div class="what">${esc(f.what)}</div>${body}<div class="fxacts">${acts}</div></div>`;
+}
+async function afxCopy(i) { await navigator.clipboard.writeText(AFX[i]); toast("Copied"); }
+function auditKeep() {
+  const y = $("main").scrollTop, v = $("#fbv"), t = v ? v.currentTime : 0;
+  ASKDRAFT = $("#asktext") ? $("#asktext").value : ASKDRAFT;
+  const open = !!document.querySelector(".aud details[open]");
+  renderAudit(); $("main").scrollTop = y;
+  if ($("#fbv") && t) $("#fbv").currentTime = t;
+  if (open && document.querySelector(".aud details")) document.querySelector(".aud details").open = true;
+}
+async function sendAsk() {
+  const text = $("#asktext").value.trim();
+  if (!text) { toast("Type what you'd like better first.", true); return; }
+  const v = $("#fbv"), at = askAt && v && v.currentTime > 0.05 ? v.currentTime : null;
+  ASKDRAFT = text;
+  const j = await api("audit_ask", {text, at}); watchJob(j.job);
+}
+async function fxAddSound(ref, k, b) {
+  b.disabled = true;
+  try { const j = await api("audit_add_sound", {ref, k}); A = j.audit; auditKeep(); toast(j.already ? "It's already in your sound list." : `Added “${j.what}” to your sounds. Make it on the sounds page.`); }
+  catch (e) { b.disabled = false; }
+}
+async function fxToList(ref, k, b) {
+  b.disabled = true;
+  try { const j = await api("audit_to_shotlist", {ref, k}); A = j.audit; auditKeep(); toast(j.new ? `Added to your shot list as shot ${j.label}.` : `Shot ${j.label} has the new prompt in your shot list, marked to make again.`); }
+  catch (e) { b.disabled = false; }
+}
+async function openShotList(path) {
+  toast("Opening your shot list…");
+  try { if (!SBD) SBD = await api("sb_styles"); await sbOpen(path); } catch (e) {}
+}
+async function openSoundsOf(path) {
+  toast("Opening your sounds…");
+  try {
+    const r = await api("open_project", {path}); P = r.project; VID = null;
+    const j = await api("open_previous"); R = j.review; filter = ""; renderReview(); $("main").scrollTop = 0;
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------- what next? (after a tool)
+const TOOLS = {
+  sounds: ["sound", "#3a2a14", "var(--accent)", "Sound effects", "Add sounds, or see and add to the ones you have."],
+  fix: ["wave", "#13302a", "var(--good)", "Even out the volume", "Fix the audio: cleans the voices and balances narration, music and effects."],
+  story: ["book", "#2b2414", "#ffd27a", "Story check", "Watches it like a first-time viewer and says where the story gets lost, with fixes."],
+  notes: ["chat", "#22262f", "var(--soft)", "Tell StoryStudio what to fix", "Say what you see in your own words and get the fix."],
+  feedback: ["eye", "#142838", "#7cc4ff", "Edit feedback", "Notes on glitches, characters that change, and pacing, as markers."],
+  timing: ["scissors", "#3a1a22", "#ff8fa3", "Timing and pacing", "What to trim, hold longer or speed up, shot by shot."],
+  karaoke: ["mic", "#2a2142", "#c9a7ff", "Karaoke lyrics", "Every word lights up as it's sung."],
+  shotlist: ["film", "#22262f", "var(--soft)", "My shot list", "The prompts, with the shots to make again and the new ones."],
+  home: ["folder", "#22262f", "var(--soft)", "All the tools", "This video's page, with everything StoryStudio can do."]};
+let NEXT = null;
+function nextCard(path, seq, ids, note, list) {
+  if (!path) return "";
+  NEXT = {path, seq, list: list || ""};
+  return `<div class="card" style="margin-top:16px"><h2>What next?</h2>${note ? `<div class="sub" style="margin:0 0 12px">${note}</div>` : ""}
+    <div class="nexts">${ids.concat(["home"]).map(id => { const t = TOOLS[id]; return `<button class="nexttool" onclick="goTool('${id}')"><span class="ti" style="background:${t[1]};color:${t[2]}">${ICON[t[0]]}</span><span><b>${t[3]}</b><small>${t[4]}</small></span></button>`; }).join("")}</div></div>`;
+}
+async function goTool(id) {
+  const n = NEXT; if (!n) return;
+  if (id === "shotlist") return openShotList(n.list);
+  let path = n.path, seq = n.seq;
+  if (id === "sounds") {                        // sounds belong to the project they were made for
+    try { const w = await api("where_sounds", {path}); if (w.project && w.project !== path) { path = w.project; } } catch (e) {}
+  }
+  toast("Opening your project…");
+  let r;
+  try { r = await api("open_project", {path, seq_uid: seq}); } catch (e) { return; }
+  VID = null; P = r.project; MULTI = false; PICK = []; renderHome(); $("main").scrollTop = 0;
+  if (id === "sounds") return P.previous ? openPrevious() : setupSounds();
+  if (id === "fix") return setupFix();
+  if (id === "karaoke") return setupKaraoke();
+  if (id === "feedback") return setupFeedback("all");
+  if (id === "timing") return setupFeedback("timing");
+  if (id === "story") return setupAudit();
+  if (id === "notes") return openNotes();
+}
 
 // ---------------------------------------------------------------- script builder
 let SBD = null;                       // styles, aspects, recent shot lists
@@ -1169,7 +1360,8 @@ function renderScript() {
       <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${esc(s.label || s.n)}${s.title ? ": " + esc(s.title) : ""}</b>${ty ? `<select class="pill" title="${esc(ty.purpose)}" aria-label="Shot type" onchange="sbSetType(${s.n}, this.value, this)">${SBT.map(t => `<option value="${esc(t.code)}" ${t.code === ty.code ? "selected" : ""}>${esc(t.code)} · ${esc(t.name)}</option>`).join("")}</select>` : ""}<span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${s.say ? `<span class="pill" title="Roughly how long these words take to narrate">about ${Math.round(s.say)} s to say</span>` : ""}${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
       <div class="row" style="gap:8px">${r.placed && !r.clip_checked ? "" : shotStatus(s)}${s.camera ? `<span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span>` : ""}</div></div>
       ${s.words ? `<div class="words">${r.kind === "cartoon" ? "🔊" : "💬"} ${esc(s.words)}</div>` : ""}
-      ${s.purpose ? `<div class="purpose"><b>${r.placed ? "On screen:" : "What this shot is for:"}</b> ${esc(s.purpose)}</div>` : ""}
+      ${s.purpose ? `<div class="purpose"><b>${r.placed && !s.added_by_story_check ? "On screen:" : "What this shot is for:"}</b> ${esc(s.purpose)}</div>` : ""}
+      ${s.story_note ? `<div class="purpose"><span class="pill new">${s.added_by_story_check ? "New shot from the story check" : "From the story check"}</span> ${s.added_by_story_check ? "Make the picture, then the clip, and name it " + esc("Shot " + (s.label || s.n)) + "." : esc(s.story_note)}</div>` : ""}
       ${ty && (s.warnings || []).length ? `<div class="sub" style="margin:2px 0 0">${s.warnings.map(esc).join(" ")}</div>` : ""}
       ${shotFiles(s)}
       ${s.picture_prompt ? promptBox("Text-to-image prompt", "ChatGPT / Nano Banana", s.picture_prompt, {which:"picture", n:s.n}) : ""}
@@ -1254,12 +1446,13 @@ function watchJob(first) {
     draw(j);
     if (j.done) {
       clearInterval(polling); polling = null;
-      if (j.failed) { if (j.error === "Stopped.") toast(j.error, true); else setTimeout(() => showProblem(j.error), 50); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } goHome(); return; }
+      if (j.failed) { if (j.error === "Stopped.") toast(j.error, true); else setTimeout(() => showProblem(j.error), 50); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } if (j.then === "audit" && A && j.title === "Looking at what you said") { renderAudit(); return; } goHome(); return; }
       if (j.then === "review") { R = (await api("review")).review; filter = ""; renderReview(); }
       else if (j.then === "done") renderDone();
       else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
       else if (j.then === "script") { const k = await api("sb_result"); SBR = k.result; SBT = k.shot_types || SBT; renderScript(); $("main").scrollTop = 0; }
       else if (j.then === "feedback") { F = (await api("feedback")).feedback; fbFilter = ""; renderFeedback(); }
+      else if (j.then === "audit") { const was = PAGE; A = (await api("audit")).audit; ASKDRAFT = ""; if (!A) { goHome(); return; } renderAudit(); if (was !== "audit" || j.title === "Checking your story") $("main").scrollTop = 0; }
     }
   }, 700);
 }
@@ -1397,7 +1590,8 @@ async function renderDone() {
         ${o.levels && o.levels.length ? `<ul class="notes">${o.levels.slice(0,6).map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
         <div class="footerbar">${audioMode || karaoke ? "<span></span>" : `<button class="btn ghost" onclick="api('review').then(j=>{R=j.review;renderReview()})">Back to the sounds</button>`}<button class="btn ghost" onclick="goHome()">Home</button></div>
       </div>
-    </div>`;
+    </div>
+    ${o.project && !o.video_out && !CHAIN ? nextCard(o.project, o.seq_uid, audioMode ? ["story", "notes", "feedback", "karaoke"] : karaoke ? ["feedback", "story"] : ["fix", "story", "notes", "feedback"], `These open the copy that was just made (${esc(o.project.split(/[\\/]/).pop().replace(/\.prproj$/i, ""))}).`) : ""}`;
 }
 
 // ---------------------------------------------------------------- settings
@@ -1494,6 +1688,7 @@ async function startUp() {
   if (j.view === "script") { SBR = j.result; SBT = j.shot_types || SBT; renderScript(); }
   else if (j.view === "review") { VID = null; P = j.project; R = j.review; filter = ""; renderReview(); }
   else if (j.view === "project") { VID = null; P = j.project; renderHome(); }
+  else if (j.view === "audit") { VID = null; P = j.project; A = j.audit; renderAudit(); }
   else return;
   $("main").scrollTop = 0;
   toast("StoryStudio is updated. You're back where you were.");

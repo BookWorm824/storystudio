@@ -1,5 +1,5 @@
 {
-  "version": "1.22.1",
+  "version": "1.23.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -32,7 +32,8 @@
     "ss_fal.py",
     "ss_update.py",
     "storysound.ico",
-    "ss_audio_template.xml"
+    "ss_audio_template.xml",
+    "ss_audit.py"
   ],
-  "notes": "When your Fal account runs out of credit, StoryStudio keeps what was made, tells you, and offers Use free sound effects: real recorded sounds from Adobe's free library, no account needed. A new sound run never writes over the sounds you already have, and opening StoryStudio when it's already open now shows the open one instead of starting a second copy."
+  "notes": "New: Story check. StoryStudio watches your video like a first-time viewer, without your script, tells you where the story doesn't come across, and gives you fixes: edits, sounds to add, new prompts to make a clip again, and new shots. Pause the video and tell StoryStudio what you'd like better in your own words. After every tool, What next? takes you straight to the next one."
 }

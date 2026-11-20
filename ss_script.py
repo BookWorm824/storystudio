@@ -1426,12 +1426,21 @@ def placed_text(r):
     L += ["", "Your clips in order" + (", timed to your recording" if r.get("timed") else "")
           + ":", ""]
     for s in r["shots"]:
-        L.append(f"Shot {s['n']}  {mmss(s['start'])}-{mmss(s['end'])}"
-                 + (f"  {s['title']}" if s.get("title") else ""))
+        L.append(f"Shot {s.get('label') or s['n']}  {mmss(s['start'])}-{mmss(s['end'])}"
+                 + (f"  {s['title']}" if s.get("title") else "")
+                 + ("  (NEW SHOT TO MAKE)" if s.get("added_by_story_check") else
+                    "  (MAKE AGAIN)" if s.get("status") in ("redo clip", "redo picture") else ""))
         if s.get("words"):
             L.append("  Words: " + s["words"])
         if s.get("picture"):
             L.append("  On screen: " + s["picture"])
+        if s.get("story_note"):
+            L.append("  Why: " + s["story_note"])
+        if s.get("picture_prompt") and (s.get("added_by_story_check") or
+                                        s.get("status") == "redo picture"):
+            L.append("  Text-to-image prompt: " + s["picture_prompt"])
+        if s.get("minimax_prompt"):
+            L.append("  Image-to-video prompt: " + s["minimax_prompt"])
         L.append("")
     return chr(10).join(L)
 

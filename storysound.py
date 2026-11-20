@@ -115,7 +115,8 @@ def work_dir(project_path, seq_name):
 
 # an earlier run's sounds or edit notes are set aside, not lost, when a different kind of
 # job (karaoke, fix the audio, a stopped run, a freshly opened project) saves over them
-KEPT_ASIDE = {"cues": "state_sounds.json", "feedback": "state_feedback.json"}
+KEPT_ASIDE = {"cues": "state_sounds.json", "feedback": "state_feedback.json",
+              "audit": "state_audit.json"}
 
 
 def save(st):
@@ -208,7 +209,9 @@ def open_project(path, seq_uid=None, snap=None):
         try:
             prev = load(st["work"], "cues")
             st["previous"] = {"cues": len(prev.get("cues", [])), "stage": prev.get("stage"),
-                              "feedback": bool(load(st["work"], "feedback").get("feedback"))}
+                              "feedback": bool(load(st["work"], "feedback").get("feedback")),
+                              "audit": bool((load(st["work"], "audit").get("audit") or {})
+                                            .get("checked"))}
         except (OSError, ValueError):
             pass
     return st
@@ -1657,7 +1660,7 @@ def assign_tracks(cues):
     return tracks
 
 
-COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback", "retimed")
+COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback", "retimed", "story check")
 
 
 def copy_path(project, tag):

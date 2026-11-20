@@ -102,7 +102,8 @@ def project_view():
             # ("planned": a run that was stopped while its sounds were being made)
             (st.get("previous", {}).get("cues", 0) > 0 and
              st.get("previous", {}).get("stage") in ("karaoke", "feedback", "planned")),
-            "previous_feedback": bool(st.get("previous", {}).get("feedback"))}
+            "previous_feedback": bool(st.get("previous", {}).get("feedback")),
+            "previous_audit": bool(st.get("previous", {}).get("audit"))}
 
 
 def shot_lists():
@@ -158,6 +159,7 @@ def feedback_view():
         return None
     out = st.get("outputs") or {}
     return {"title": st["seq_name"], "kind": fb["kind"], "summary": fb["summary"],
+            "focus": fb.get("focus", "all"),
             "by": fb.get("by", "Claude"),
             "stats": fb["stats"], "notes": [note_view(n) for n in fb["notes"]],
             "video": media_url(st.get("feedback_preview") or st.get("picture")),
@@ -166,7 +168,50 @@ def feedback_view():
             "dirty": bool(st.get("feedback_dirty")),
             "can_retime": fb["kind"] == "cartoon" and any(n.get("edit") for n in fb["notes"]),
             "retimed": out.get("retimed", ""),
+            "source": st["project"], "seq_uid": st["seq_uid"],
             "snapshot_time": st.get("snapshot_time", "")}
+
+
+def fix_view(f, ref, k):
+    import ss_audit as A
+    return {"ref": ref, "k": k, "type": f["type"], "name": A.FIX_NAMES.get(f["type"], ""),
+            "title": f["title"], "what": f["what"], "shot": f.get("shot", ""),
+            "at": f.get("at", 0), "time": fmt_time(f.get("at", 0)), "sound": f.get("sound", ""),
+            "character": f.get("sound_kind") == "character",
+            "picture": f.get("picture", ""),
+            "motion": (f["motion"] + f" [{f['camera']}]") if f.get("motion") else "",
+            "added": f.get("added", ""), "saved": f.get("saved", "")}
+
+
+def audit_view():
+    st = S.st
+    a = (st or {}).get("audit")
+    if not a or not a.get("shots"):
+        return None
+    out = a.get("outputs") or {}
+    return {"title": st["seq_name"], "kind": a.get("kind", "story"),
+            "checked": bool(a.get("checked")), "by": a.get("by", ""),
+            "made": a.get("made", ""), "summary": a.get("summary") or {},
+            "viewer_story": a.get("viewer_story", ""),
+            "moments": [{"t": m["time"], "time": fmt_time(m["time"]), "happens": m["happens"],
+                         "clear": m["clear"], "wondering": m["wondering"]}
+                        for m in a.get("moments", [])],
+            "notes": [{"id": n["id"], "t": n["time"], "time": fmt_time(n["time"]),
+                       "severity": n["severity"], "title": n["title"], "problem": n["problem"],
+                       "fixes": [fix_view(f, f"n{n['id']}", i) for i, f in enumerate(n["fixes"])]}
+                      for n in a.get("notes", [])],
+            "asks": [{"id": x["id"], "text": x["text"], "at": x.get("at"),
+                      "time": fmt_time(x["at"]) if x.get("at") is not None else "",
+                      "reply": x.get("reply", ""), "question": x.get("question", ""),
+                      "fixes": [fix_view(f, f"a{x['id']}", i) for i, f in enumerate(x["fixes"])]}
+                     for x in a.get("asks", [])],
+            "video": media_url(a.get("preview") or st.get("picture")),
+            "shot_list": a.get("shot_list", ""),
+            "shots": len(a.get("shots", [])), "matched": len(a.get("mapping") or {}),
+            "seconds": a.get("duration") or st["duration"],
+            "project": out.get("project", ""), "project_error": out.get("project_error", ""),
+            "folder": out.get("folder", ""), "list": out.get("list", ""),
+            "source": st["project"], "seq_uid": st["seq_uid"]}
 
 
 def cue_view(c):
@@ -773,10 +818,17 @@ def api(name, a):
                 import ss_script as SB
                 S.sb = SB.load(sl)
                 return {"view": "script", "result": S.sb, "shot_types": SB.type_menu()}
-            if page in ("project", "review", "done", "feedback") and proj and os.path.exists(proj):
+            if page in ("project", "review", "done", "feedback", "audit") and proj and \
+                    os.path.exists(proj):
                 S.st = E.open_project(proj, note.get("seq_uid") or None)
                 S.st["thumb"] = make_thumb(S.st)
                 view = project_view()
+                if page == "audit":
+                    prev = E.load(S.st["work"], "audit")
+                    if (prev.get("audit") or {}).get("shots"):
+                        prev["thumb"] = S.st.get("thumb")
+                        S.st = prev
+                        return {"view": "audit", "project": view, "audit": audit_view()}
                 if page in ("review", "done") and view.get("previous"):
                     prev = E.load(S.st["work"], "cues")
                     prev["story"] = S.st.get("story") or prev.get("story")
@@ -813,6 +865,69 @@ def api(name, a):
                                "feedback", [est])}
     if name == "feedback":
         return {"feedback": feedback_view()}
+    # --- story check -----------------------------------------------------------------
+    if name == "start_audit":
+        import math
+        import ss_audit as A
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        dur = st["duration"]
+        est = (40 + dur * 0.15 + (0 if st.get("picture") or st.get("export") else dur * 0.35)
+               + 30 + 90 * math.ceil(math.ceil(dur / 120) / 3) + 150)
+        return {"job": run_job("Checking your story",
+                               lambda p, c, ph: A.audit(st, choices(), p, c), "audit", [est])}
+    if name == "audit":
+        return {"audit": audit_view()}
+    if name == "audit_prepare":                # "Tell StoryStudio what to fix", no check yet
+        import ss_audit as A
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+
+        def work(progress, cancel, phase):
+            A.prepare(st, progress, cancel)
+            st["stage"] = "audit"
+            E.save(st)
+        return {"job": run_job("Getting your video ready", work, "audit",
+                               [40 + st["duration"] * (0.1 if st.get("picture") or
+                                                       st.get("export") else 0.5)])}
+    if name == "where_sounds":                 # the project this movie's sounds were made for
+        import ss_audit as A
+        st = S.st
+        if not st or st.get("video"):
+            return {"project": ""}
+        proj, _ = A.sound_home(dict(st, project=a.get("path") or st["project"]))
+        return {"project": proj or ""}
+    if name == "open_previous_audit":
+        prev = E.load(S.st["work"], "audit")
+        if not (prev.get("audit") or {}).get("shots"):
+            raise StoryError("There's no story check from last time for this project.")
+        prev["thumb"] = S.st.get("thumb")
+        S.st = prev
+        return {"audit": audit_view()}
+    if name == "audit_ask":
+        import ss_audit as A
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        text, at = str(a.get("text") or "").strip(), a.get("at")
+        if not text:
+            raise StoryError("Type what you'd like better first.")
+        ready = bool((st.get("audit") or {}).get("shots")) and \
+            os.path.exists(st.get("picture") or "")
+        est = 70 + (0 if ready else 30 + st["duration"] * 0.4)
+        return {"job": run_job("Looking at what you said",
+                               lambda p, c, ph: A.ask(st, text, at, p, c), "audit", [est])}
+    if name == "audit_add_sound":
+        import ss_audit as A
+        res = A.add_sound(S.st, a.get("ref", ""), a.get("k", 0))
+        return dict(res, audit=audit_view())
+    if name == "audit_to_shotlist":
+        import ss_audit as A
+        res = A.to_shot_list(S.st, a.get("ref", ""), a.get("k", 0))
+        S.sb = None                                # opened again fresh when she goes there
+        return dict(res, audit=audit_view())
     if name == "open_previous_feedback":
         prev = E.load(S.st["work"], "feedback")
         if not prev.get("feedback"):
