@@ -149,7 +149,8 @@ def note_view(n):
             "label": FB_LABEL.get(n["severity"], ""), "kind": n.get("kind", ""),
             "title": n["title"], "note": n["note"], "how": n.get("how", ""),
             "keep": bool(n.get("keep", True)), "ai": n.get("source") in ("ai", "claude"),
-            "can_do": bool(n.get("edit"))}
+            "can_do": bool(n.get("edit")),
+            "fixes": [fix_view(f, f"f{n['id']}", i) for i, f in enumerate(n.get("fixes") or [])]}
 
 
 def feedback_view():
@@ -168,6 +169,8 @@ def feedback_view():
             "dirty": bool(st.get("feedback_dirty")),
             "can_retime": fb["kind"] == "cartoon" and any(n.get("edit") for n in fb["notes"]),
             "retimed": out.get("retimed", ""),
+            "shot_list": fb.get("shot_list", ""), "redo_written": fb.get("redo_written", ""),
+            "looks": fb.get("looks", ""),
             "source": st["project"], "seq_uid": st["seq_uid"],
             "snapshot_time": st.get("snapshot_time", "")}
 
@@ -941,6 +944,23 @@ def api(name, a):
         S.st["feedback_dirty"] = True
         E.save(S.st)
         return {"note": note_view(n), "dirty": True}
+    if name == "fb_prompts":                    # full prompts for the clips to make again
+        import math
+        import ss_audit as A
+        st = S.st
+        if not (st or {}).get("feedback"):
+            raise StoryError("Open the feedback first.")
+        k = len(A.redo_notes(st["feedback"]))
+        if not k:
+            raise StoryError("There are no clips to make again in these notes.")
+        est = 20 + 3 * k + 70 * math.ceil(math.ceil(k / 5) / 3)
+        return {"job": run_job("Writing the prompts",
+                               lambda p, c, ph: A.redo_prompts(st, p, c), "fb_prompts", [est])}
+    if name == "fb_to_shotlist":
+        import ss_audit as A
+        res = A.to_shot_list(S.st, a.get("ref", ""), a.get("k", 0))
+        S.sb = None
+        return dict(res, feedback=feedback_view())
     if name == "fb_retime":
         import ss_feedback as F
         if (S.st.get("feedback") or {}).get("kind") != "cartoon":

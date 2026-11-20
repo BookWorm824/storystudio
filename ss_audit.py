@@ -842,8 +842,12 @@ def to_shot_list(st, ref, k):
     like "20.1" (the way she names extra shots)."""
     import storysound as E
     import ss_script as SB
-    a = st.get("audit") or {}
-    item, fx = find_fix(a, ref, k)
+    if str(ref).startswith("f"):                   # a "make again" note on the feedback page
+        a = st.get("feedback") or {}
+        item, fx = find_fb_fix(a, ref, k)
+    else:
+        a = st.get("audit") or {}
+        item, fx = find_fix(a, ref, k)
     if fx["type"] not in ("redo_clip", "new_shot"):
         raise StoryError("Only new clips and new shots go into the shot list.")
     if not a.get("shot_list"):
@@ -906,6 +910,233 @@ def to_shot_list(st, ref, k):
     E.save(st)
     log("story check: shot list", fx["type"], "shot", shot_label(shot))
     return {"label": shot_label(shot), "path": r["files"]["json"], "new": fx["type"] == "new_shot"}
+
+
+# ---------------------------------------------------------------------------
+# "make again" notes from Edit feedback: full prompts, ready for the shot list
+# ---------------------------------------------------------------------------
+REDO_KINDS = ("ai_glitch", "continuity")
+
+REDO_SYSTEM = """You are an experienced director helping a storyteller who makes children's \
+stories, silent cartoons and music videos with AI pictures (ChatGPT or Nano Banana), AI video \
+clips (MiniMax Hailuo, image to video) and Adobe Premiere. She is not a professional: write in \
+plain, warm, everyday words.
+
+An editor watched her video and found clips that look wrong: AI glitches (bodies that stretch or \
+melt, extra tails, things that morph) or things that change between shots (a character's colour \
+or shape, a prop's size, the season). For each one, look at the stills and the shot's old \
+prompts and write what she needs to make that clip again so it comes out right:
+- redo_clip: the shot made again. Always write the full new image-to-video prompt: the same \
+action and story purpose as before, described so the glitch can't happen (simple, steady \
+movement; one clear action; the character's look stated plainly). When the problem is already \
+in the starting picture (wrong colour, wrong size, wrong season, a missing cap), also write a \
+full new text-to-image prompt; otherwise leave the picture empty.
+- edit: only when making it again isn't worth it because a trim or a cut hides the problem \
+completely. Say exactly what to trim or cut.
+Use the shot numbers exactly as listed. Describe characters by their looks, never by name.
+Many of these problems ARE things changing between shots, so the new prompts must all match: \
+describe each character, the main props and the place with the words given under CHARACTERS \
+AND HOW THINGS LOOK, the same words in every prompt.
+
+Prompt rules:
+TEXT-TO-IMAGE: {picture}
+IMAGE-TO-VIDEO: {motion}
+
+Studio rules: no religious symbols or churches; Jesus or God only ever as a warm light; no \
+Christmas, Halloween, Easter or St. Patrick's Day imagery."""
+
+
+LOOKS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "characters": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"who": {"type": "string", "description": "a short plain label, e.g. "
+                                   "'the squirrel'"},
+                           "look": {"type": "string", "description": "one fixed description "
+                                    "for prompts, 12-30 words: kind, size, colours, face, "
+                                    "clothes, anything that makes them recognisable"}},
+            "required": ["who", "look"], "additionalProperties": False}},
+        "props": {"type": "string", "description": "the main objects the story is about, "
+                  "described the same fixed way (size compared with the character, colours, "
+                  "shape, parts), one sentence each; empty if none"},
+        "place": {"type": "string", "description": "the place, season, time of day and light, "
+                  "as one fixed description"},
+    },
+    "required": ["characters", "props", "place"],
+    "additionalProperties": False,
+}
+
+
+def _hint(fb):
+    """The editor's own advice on keeping things the same, if it gave one."""
+    for t in (fb.get("summary") or {}).get("top_fixes") or []:
+        m = re.search(r"(?:description|describe)[^:]{0,60}:\s*(.+)", t, flags=re.I)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def fixed_looks(st, picture, dur, r, work, say):
+    """One fixed description of the characters, props and place, taken from how they look in
+    MOST of the shots, so every new prompt matches the rest of the movie."""
+    import ss_claude as C
+    fb = st["feedback"]
+    if fb.get("looks"):
+        return fb["looks"]
+    every = max(2.0, round(dur / 30.0))
+    frames = M.stills(picture, work, every=every)
+    sheets = M.contact_sheets(frames, work, per_sheet=16, cols=4, label="looks_")
+    cast = _cast(r)
+    prompt = f"""Stills from the whole of a {kind_text(fb.get('kind') or 'story')} called \
+"{st['seq_name']}", one every {every:g} seconds. The clips were made by AI, so some shots show \
+a character or prop looking different (another colour, size or shape). Write ONE fixed \
+description of each recurring character, the main props and the place, going by how they look \
+in MOST of the shots, so that every clip made again matches the rest of the movie. \
+{('Characters listed in the shot list:' + chr(10) + cast) if r and r.get('characters') else ''}
+{('The editor suggested: ' + _hint(fb)) if _hint(fb) else ''}"""
+    images = [(f"Stills {fmt_time(x)} to {fmt_time(y)}:", p) for x, y, p in sheets]
+    res = C.ask(prompt, LOOKS_SCHEMA, images=images, timeout=600)
+    lines = [f"- {c['who']}: {c['look']}" for c in res.get("characters") or []]
+    if res.get("props"):
+        lines.append(f"- props: {res['props']}")
+    if res.get("place"):
+        lines.append(f"- place: {res['place']}")
+    fb["looks"] = "\n".join(lines)
+    log("feedback: fixed looks", fb["looks"].replace("\n", " | ")[:400])
+    return fb["looks"]
+
+
+def redo_notes(fb):
+    return [n for n in fb.get("notes", []) if n.get("kind") in REDO_KINDS and
+            n.get("severity") != "good" and not (n.get("edit") and fb.get("kind") == "cartoon")]
+
+
+def redo_schema():
+    item = fix_schema()
+    item["properties"]["type"] = {"type": "string", "enum": ["redo_clip", "edit"]}
+    item["properties"]["note"] = {"type": "integer", "description": "the note's number"}
+    item["required"] = ["note"] + item["required"]
+    return {"type": "object", "properties": {"fixes": {"type": "array", "items": item}},
+            "required": ["fixes"], "additionalProperties": False}
+
+
+def find_fb_fix(fb, ref, k):
+    try:
+        item = next(x for x in fb.get("notes", []) if x["id"] == int(str(ref)[1:]))
+        return item, item["fixes"][int(k)]
+    except (StopIteration, ValueError, IndexError, KeyError):
+        raise StoryError("That prompt isn't there any more. Write the prompts again.")
+
+
+def redo_prompts(st, progress=None, cancel=None, per_request=5, workers=3):
+    """Write the new prompts for every "make again" note on the feedback page."""
+    import storysound as E
+    import ss_claude as C
+    import ss_script as SB
+    import threading
+    say = progress or (lambda f, m: None)
+    fb = st.get("feedback") or {}
+    notes = redo_notes(fb)
+    if not notes:
+        raise StoryError("There are no clips to make again in these notes.")
+    if not C.provider():
+        raise StoryError("This needs Claude or ChatGPT. Open Settings (the gear at the top) to "
+                         "set up ChatGPT.")
+    say(0.02, "Finding your shot list…")
+    seq = E._sequence(st)
+    dur = seq["duration"]
+    tl = timeline_shots(seq)
+    path, r, mapping = find_shot_list(tl)
+    labels = _labels({}, r)
+    picture = st.get("picture") or ""
+    if not Path(picture).exists():
+        say(0.04, "Getting the picture ready…")
+        picture = st["picture"] = M.build_picture(seq, Path(st["work"]), lambda f: say(
+            0.04 + 0.1 * f, "Getting the picture ready…"))
+    work = Path(st["work"]) / "redo"
+    work.mkdir(parents=True, exist_ok=True)
+    say(0.15, "Taking a close look at each clip…")
+    looks = []
+    for i, n in enumerate(notes):
+        if cancel and cancel():
+            raise StoryError("Stopped.")
+        lo = max(0.0, float(n["time"]) - 0.5)
+        hi = min(dur, max(lo + 2.0, min(float(n.get("end") or n["time"]), lo + 8.0)) + 0.5)
+        frames = M.burst(picture, lo, hi, 8, work, f"n{n['id']:03d}")
+        sheet = M.contact_sheets(frames, work, per_sheet=8, cols=4, label=f"n{n['id']:03d}_",
+                                 fmt=lambda t: f"{t:.1f}s")
+        looks.append((n, lo, hi, sheet[0][2] if sheet else None))
+        say(0.15 + 0.2 * (i + 1) / len(notes), "Taking a close look at each clip…")
+    say(0.36, "Working out how the characters and everything else should look…")
+    try:
+        look_text = fixed_looks(st, picture, dur, r, work, say)
+    except StoryError:
+        raise
+    except Exception:
+        log_error("feedback fixed looks")
+        look_text = ""
+    system = REDO_SYSTEM.format(picture=SB.PICTURE_RULES, motion=SB.MOTION_RULES)
+    kind = kind_text(fb.get("kind") or (r or {}).get("kind") or "story")
+    head = f"""A {kind} called "{st['seq_name']}".
+WHAT THE STORY IS ABOUT: {((r or {}).get('summary') or '')[:1500] or '(not given)'}
+CHARACTERS AND HOW THINGS LOOK (use these exact words in every prompt; never use names):
+{look_text or _cast(r)}
+"""
+    groups =[looks[i:i + per_request] for i in range(0, len(looks), per_request)]
+    got, lock, done = {}, threading.Lock(), [0]
+
+    def one(group):
+        parts, images = [], []
+        for n, lo, hi, sheet in group:
+            parts.append(f"""NOTE {n['id']} at {fmt_time(n['time'])} ({lo:.1f}s to {hi:.1f}s): {n['title']}
+What the editor saw: {n['note']}
+The editor's suggestion: {n.get('how') or '(none)'}
+The shots there:
+{_shot_listing(tl, r, mapping, lo, hi)}""")
+            if sheet:
+                images.append((f"Note {n['id']}: stills {lo:.1f}s to {hi:.1f}s", sheet))
+        prompt = head + "\n" + "\n\n".join(parts) + """
+
+For each note, give one fix (two only if the problem really covers two different shots). \
+Each fix says which note it is for. Times are seconds from the start of the movie."""
+        res = C.ask(prompt, redo_schema(), system=system, images=images, timeout=900)
+        with lock:
+            for f in res.get("fixes") or []:
+                try:
+                    got.setdefault(int(f.get("note")), []).append(f)
+                except (TypeError, ValueError):
+                    pass
+            done[0] += 1
+            say(0.42 + 0.55 * done[0] / len(groups), f"{C.ai_name()} is writing the prompts…")
+
+    say(0.42, f"{C.ai_name()} is writing the prompts…")
+    errors = []
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for fut in [ex.submit(one, g) for g in groups]:
+            try:
+                fut.result()
+            except Exception as e:
+                errors.append(e)
+                log_error("feedback redo prompts")
+    if errors and not got:
+        raise errors[0] if isinstance(errors[0], StoryError) else \
+            StoryError("The prompts couldn't be written this time. Try again in a minute.")
+    count = 0
+    for n in notes:
+        fixes = [_clean_fix(dict(f, type=f.get("type") or "redo_clip"), labels)
+                 for f in got.get(n["id"], [])][:2]
+        if fixes:
+            n["fixes"] = fixes
+            count += 1
+    fb["shot_list"] = path or ""
+    fb["redo_written"] = time.strftime("%Y-%m-%d %H:%M")
+    st["feedback"] = fb
+    E.save(st)
+    log("feedback: prompts for", count, "of", len(notes), "clips to make again | shot list:",
+        path or "none")
+    say(1.0, "Done.")
+    return {"written": count, "notes": len(notes)}
 
 
 # ---------------------------------------------------------------------------

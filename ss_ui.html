@@ -681,6 +681,8 @@ function renderFeedback() {
   PAGE = "feedback";
   if (CHAIN && CHAIN.steps[CHAIN.i] === "feedback" && F) { CHAIN = null; chainBar('<span>✓ Your plan is finished. The notes are below and on your timeline.</span>'); }
   const s = F.summary || {}, st = F.stats || {};
+  AFX = [];
+  const written = F.notes.some(n => (n.fixes || []).length);
   const groups = FBG.map(g => ({g, notes: F.notes.filter(n => fbGroup(n) === g[0])}));
   const count = id => groups.find(x => x.g[0] === id).notes.length;
   if (!fbFilter || (fbFilter !== "all" && !count(fbFilter))) fbFilter = fbFirst();
@@ -699,7 +701,8 @@ function renderFeedback() {
         ? `<b>Timing: ${plural(nDone, "change", "changes")}.</b> ✓ StoryStudio already made ${nDone === 1 ? "it" : "them"} for you in the “(retimed)” copy. Nothing to read here.`
         : `<b>Timing: ${plural(nDone, "change", "changes")} StoryStudio can make for you</b> (trims, speed-ups, longer holds). You don't need to read them all.`,
       (F.retimed ? openBtn(F.retimed, "Open the (retimed) copy", true) : `<button class="btn small primary" id="rtbtn" ${canDo ? "" : "disabled"} onclick="fbRetime()">Make them for me</button>`) + see("done")),
-    step("redo", `<b>${plural(count("redo"), "shot", "shots")} to make again.</b> Something looks wrong in the clip: a glitch, or a character or prop that changes. Make the clip again, or cut it.`, see("redo")),
+    step("redo", `<b>${plural(count("redo"), "shot", "shots")} to make again.</b> Something looks wrong in the clip: a glitch, or a character or prop that changes. ${written ? "The new prompts are under each note." : "StoryStudio can write the new prompts for you."}`,
+      (written ? "" : `<button class="btn small primary" onclick="fbPrompts()">Write the prompts</button>`) + see("redo")),
     step("story", `<b>${plural(count("story"), "story or pacing note", "story and pacing notes")}</b> to change by hand in Premiere.`, see("story")),
     step("look", `<b>${plural(count("look"), "colour or sound fix", "colour and sound fixes")}.</b> Small fixes in Premiere.`, see("look")),
     step("good", `<b>${plural(count("good"), "thing", "things")} that ${count("good") === 1 ? "works" : "work"} well.</b> Nothing to do.`, see("good"))].join("");
@@ -737,6 +740,10 @@ function renderFeedback() {
           <span class="chip ${fbFilter==="all"?"on":""}" onclick="fbSet('all')">All ${F.notes.length}</span>
         </div>
         <div class="sub" style="margin:0 0 12px">${fbFilter === "all" ? "Every note, in time order. Switch a note off if you don't agree: it then isn't a marker, and StoryStudio won't make that change." : esc(cur[3](F))}</div>
+        ${fbFilter === "redo" ? `<div class="card" style="margin:0 0 12px;padding:14px 16px"><b>${written ? "The new prompts are under each note" : "Want the new prompts?"}</b>
+          <div class="sub" style="margin:4px 0 10px">${written ? (F.shot_list ? "Press “Save it in my shot list” and that shot gets the new prompts, marked to make again. Then make the clip as usual." : "StoryStudio didn't find the shot list this video was made from, so copy the prompts.") : `${aiName()} looks closely at each of these clips and writes a full new image-to-video prompt, and a new picture prompt when the picture itself is wrong. You can save them straight into your shot list.`}</div>
+          ${written && F.looks ? `<details style="margin:0 0 10px"><summary class="sub" style="cursor:pointer;margin:0">How every prompt describes them, so the clips match</summary><div class="how" style="white-space:pre-line">${esc(F.looks)}</div></details>` : ""}
+          <button class="btn small ${written ? "" : "primary"}" onclick="fbPrompts()">${written ? "↻ Write them again" : "Write the prompts"}</button></div>` : ""}
         <div class="list">${shown.map(noteHtml).join("") || '<div class="sub">No notes here.</div>'}</div>
       </div>
     </div>`;
@@ -778,6 +785,7 @@ function noteHtml(n) {
       <div class="nh"><button class="tmb" title="Watch this moment" onclick="fbSeek(${n.t})">${ICON.play.replace('<svg','<svg width="11" height="11"')} ${n.time}</button><b>${esc(n.title)}</b>${n.ai ? `<span class="pill">${esc(F.by || "AI")}</span>` : ""}${n.can_do && F.can_retime ? `<span class="pill new" title="StoryStudio can make this change for you">Can do for you</span>` : ""}</div>
       <div>${esc(n.note)}</div>
       ${n.how ? `<div class="how">${esc(n.how)}</div>` : ""}
+      ${(n.fixes || []).map(fixHtml).join("")}
     </div>
     <button class="switch ${n.keep?"on":""}" title="${n.keep ? "On: shows as a marker" : "Off: no marker"}" onclick="fbToggle(${n.id})"></button>
   </div>`;
@@ -785,6 +793,8 @@ function noteHtml(n) {
 function fbSet(k) { fbFilter = k; renderFeedback(); }
 function fbSeek(t) { const v = $("#fbv"); if (!v) return; v.currentTime = Math.max(0, t - 1.5); v.play(); v.scrollIntoView({behavior:"smooth", block:"center"}); }
 async function fbToggle(id) { const n = F.notes.find(x => x.id === id); const j = await api("fb_toggle", {id, keep:!n.keep}); Object.assign(n, j.note); F.dirty = true; const t = $("#fbv") ? $("#fbv").currentTime : 0; renderFeedback(); if ($("#fbv")) $("#fbv").currentTime = t; }
+async function fbPrompts() { const j = await api("fb_prompts"); watchJob(j.job); }
+function fbKeep() { const y = $("main").scrollTop, v = $("#fbv"), t = v ? v.currentTime : 0; renderFeedback(); $("main").scrollTop = y; if ($("#fbv") && t) $("#fbv").currentTime = t; }
 async function fbSave() { toast("Updating the markers…"); const j = await api("fb_save"); F = j.feedback; renderFeedback(); toast("The (feedback) copy is up to date"); }
 async function openFbProject() { if (F.dirty) { const j = await api("fb_save"); F = j.feedback; renderFeedback(); } api("open", {path: F.project}); toast("Opening in Premiere…"); }
 
@@ -872,7 +882,8 @@ function fixHtml(f) {
   } else if (f.type === "redo_clip" || f.type === "new_shot") {
     if (f.picture) body += box("Text-to-image prompt", "ChatGPT / Nano Banana", f.picture);
     if (f.motion) body += box("Image-to-video prompt", "MiniMax", f.motion);
-    if (A.shot_list && (f.picture || f.motion)) acts = f.saved ? `<span class="ok">✓ In your shot list as shot ${esc(f.saved)}</span><button class="btn small" onclick='openShotList(${esc(JSON.stringify(A.shot_list))})'>Open my shot list</button>`
+    const list = PAGE === "feedback" ? (F && F.shot_list) : (A && A.shot_list);
+    if (list && (f.picture || f.motion)) acts = f.saved ? `<span class="ok">✓ In your shot list as shot ${esc(f.saved)}</span><button class="btn small" onclick='openShotList(${esc(JSON.stringify(list))})'>Open my shot list</button>`
       : `<button class="btn small primary" onclick="fxToList('${f.ref}',${f.k},this)">${f.type === "new_shot" ? "Add it to my shot list" : "Save it in my shot list"}</button>`;
   }
   return `<div class="fix"><div class="fh"><span class="pill" style="color:${FIXCOL[f.type]};border-color:${FIXCOL[f.type]}">${esc(f.name)}</span><b>${esc(f.title)}</b>${f.shot ? `<span class="pill">${f.type === "new_shot" ? "after shot" : "shot"} ${esc(f.shot)}</span>` : ""}</div>
@@ -901,7 +912,8 @@ async function fxAddSound(ref, k, b) {
 }
 async function fxToList(ref, k, b) {
   b.disabled = true;
-  try { const j = await api("audit_to_shotlist", {ref, k}); A = j.audit; auditKeep(); toast(j.new ? `Added to your shot list as shot ${j.label}.` : `Shot ${j.label} has the new prompt in your shot list, marked to make again.`); }
+  const fb = PAGE === "feedback";
+  try { const j = await api(fb ? "fb_to_shotlist" : "audit_to_shotlist", {ref, k}); if (fb) { F = j.feedback; fbKeep(); } else { A = j.audit; auditKeep(); } toast(j.new ? `Added to your shot list as shot ${j.label}.` : `Shot ${j.label} has the new prompt in your shot list, marked to make again.`); }
   catch (e) { b.disabled = false; }
 }
 async function openShotList(path) {
@@ -1491,7 +1503,8 @@ function watchJob(first) {
     draw(j);
     if (j.done) {
       clearInterval(polling); polling = null;
-      if (j.failed) { if (j.error === "Stopped.") toast(j.error, true); else setTimeout(() => showProblem(j.error), 50); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } if (j.then === "audit" && A && j.title === "Looking at what you said") { renderAudit(); return; } goHome(); return; }
+      if (j.failed) { if (j.error === "Stopped.") toast(j.error, true); else setTimeout(() => showProblem(j.error), 50); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } if (j.then === "audit" && A && j.title === "Looking at what you said") { renderAudit(); return; } if (j.then === "fb_prompts" && F) { fbKeep(); return; } goHome(); return; }
+      if (j.then === "fb_prompts") { F = (await api("feedback")).feedback; fbFilter = "redo"; fbKeep(); toast("The new prompts are under each note"); return; }
       if (j.then === "review") { R = (await api("review")).review; filter = ""; renderReview(); }
       else if (j.then === "done") renderDone();
       else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
