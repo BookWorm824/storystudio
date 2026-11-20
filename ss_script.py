@@ -1417,7 +1417,28 @@ def mmss(sec):
     return f"{sec // 60}:{sec % 60:02d}"
 
 
+def placed_text(r):
+    """The text file of a shot list made from clips that already existed."""
+    kind = {"story": "Story", "cartoon": "Silent cartoon"}.get(r["kind"], "Music video")
+    L = [f"{r['title']}  ({kind}, from your finished clips)", "=" * 60]
+    if r.get("summary"):
+        L.append(r["summary"])
+    L += ["", "Your clips in order" + (", timed to your recording" if r.get("timed") else "")
+          + ":", ""]
+    for s in r["shots"]:
+        L.append(f"Shot {s['n']}  {mmss(s['start'])}-{mmss(s['end'])}"
+                 + (f"  {s['title']}" if s.get("title") else ""))
+        if s.get("words"):
+            L.append("  Words: " + s["words"])
+        if s.get("picture"):
+            L.append("  On screen: " + s["picture"])
+        L.append("")
+    return chr(10).join(L)
+
+
 def as_text(r):
+    if r.get("placed"):
+        return placed_text(r)
     kind = {"story": "Story", "cartoon": "Silent cartoon"}.get(r["kind"], "Music video")
     L = [f"{r['title']}  ({kind})", "=" * 60, r["summary"], ""]
     sp = r["spec"]

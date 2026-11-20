@@ -373,6 +373,7 @@ function renderHome() {
       <h1>What would you like to do?</h1><p class="sub">Pick one to get started.</p>
       <div class="tasks" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:18px">
         ${task("film","#2b2414","#ffd27a","Plan a new video","Start from song lyrics, a story, or a silent cartoon idea. You get a shot list with a picture prompt and a video prompt for every shot.","openBuilder()")}
+        ${task("scissors","#3a1a22","#ff8fa3","Put my finished clips on a timeline","Already made your clips? Choose the folder and paste the script. StoryStudio puts every clip in its place on a Premiere timeline, timed to your narration.","openPlace()")}
         ${task("folder","#3a2a14","var(--accent)","Work on a video I'm editing","Open your Premiere project to add sound effects, fix the audio, add karaoke lyrics or get edit feedback. StoryStudio works on its own copy.","pickProject()")}
         ${task("mic","#2a2142","#c9a7ff","Put karaoke lyrics on a finished video","Choose a video file (MP4) and paste the lyrics. No Premiere project needed.","pickVideo()")}
         ${task("play","#13302a","var(--good)","Show me how, step by step","New to this? A guide to making a cartoon from the first idea to the finished video, and what makes a cute cartoon work.","openGuide()")}
@@ -994,7 +995,22 @@ function shotFiles(s) {
   if (failed >= 3 && c.verdict === "make again") line += `<br><b>${failed} tries haven't worked.</b> When a shot keeps going wrong it's usually the shot, not you: press “Different shot” on the picture prompt for a simpler idea, or show it as two shots with a cut between.`;
   return `<div class="purpose">${line}</div>` + (c.verdict === "make again" && c.new_prompt ? promptBox(c.redo === "picture" ? "Paste this to make the picture again" : "Paste this to make the clip again", c.redo === "picture" ? "ChatGPT / Nano Banana" : "MiniMax", c.redo === "picture" ? c.new_prompt : c.new_prompt + (/\[[^\]]+\]\s*$/.test(c.new_prompt) ? "" : ` [${s.camera}${s.camera2 ? "," + s.camera2 : ""}]`), null) : "");
 }
-function clipsCard(r) {
+// a shot list made from finished clips: the timeline comes first, checking is an extra
+function placedCards(r) {
+  const j = r.rough_cut;
+  const how = j ? `<div class="sub" style="margin:0 0 12px">${roughText(j)}</div>
+    <div class="sub" style="margin:0 0 14px"><b>To open it in Premiere:</b><br>1. Open Premiere, and make a new project (or open this video's project).<br>2. Click <b>File</b>, then <b>Import</b>, and choose <b>${esc(j.file_name)}</b>. It's in the folder with your clips.<br>3. Double-click the timeline called <b>${esc(j.name)}</b>, then save the project.</div>` : "";
+  const top = `<div class="card" style="margin-top:26px"><h2>Your timeline for Premiere</h2>${how}
+    <div class="row" style="flex-wrap:wrap;gap:10px">${j ? `<button class="btn primary" onclick='revealFile(${esc(JSON.stringify(j.file))}, this)'>${ICON.folder} Show me the file</button>` : ""}<button class="btn" onclick="roughCut(this)">${j ? "Build it again" : "Build the timeline"}</button></div>
+    <div class="pmsg" id="rcmsg"></div></div>`;
+  if (r.clip_checked) return top + clipsCard(Object.assign({}, r, {placed: false}), true);
+  return top + `<div class="card" style="margin-top:14px"><h2>Want your clips checked too?</h2>
+    <div class="sub" style="margin:0 0 12px">StoryStudio can look closely at every clip and tell you which seconds are the good ones, which clips float and should play faster, and where shots don't match each other. Afterwards, press “Build it again” and the timeline uses what it found. This takes a while and uses Claude or ChatGPT.</div>
+    <button class="btn" onclick="clipsCheck()">Check my clips</button></div>`;
+}
+function shotLabel(r, n) { const s = r.shots.find(x => x.n === n); return String(s && s.label ? s.label : n); }
+function clipsCard(r, noRough) {
+  if (r.placed) return placedCards(r);
   const n = {}; r.shots.forEach(s => { const k = s.status || "todo"; n[k] = (n[k] || 0) + 1; });
   const total = r.shots.length, done = n.done || 0;
   if (!r.clip_folder) return `<div class="card" style="margin-top:26px"><h2>Your pictures and clips</h2>
@@ -1006,11 +1022,57 @@ function clipsCard(r) {
     <div class="sub" style="margin:0 0 10px"><b>${done} of ${total}</b> shots ${done === 1 ? "has" : "have"} a clip that's ready for the edit. ${next}</div>
     <div class="chips" style="margin:0 0 12px">${chip("done", ["ready", "ready"], "good")}${chip("redo clip", ["clip to make again", "clips to make again"], "warn")}${chip("redo picture", ["picture to make again", "pictures to make again"], "warn")}${chip("unchecked", ["clip not checked yet", "clips not checked yet"])}${chip("picture", ["picture waiting for a clip", "pictures waiting for a clip"])}${chip("todo", ["not started", "not started"])}</div>
     ${(r.clip_notes || []).map(x => `<div class="sub" style="margin:0 0 8px">${esc(x)}</div>`).join("")}
-    ${(r.continuity || []).length ? `<div style="margin:0 0 12px"><b>Shots that don't match each other</b><ul class="notes">${r.continuity.map(x => `<li><b>Shot ${x.shot}</b> against shot ${x.against}: ${esc(x.problem)} <span style="color:var(--soft)">${esc(x.fix)}</span></li>`).join("")}</ul></div>` : ""}
+    ${(r.continuity || []).length ? `<div style="margin:0 0 12px"><b>Shots that don't match each other</b><ul class="notes">${r.continuity.map(x => `<li><b>Shot ${esc(shotLabel(r, x.shot))}</b> against shot ${esc(shotLabel(r, x.against))}: ${esc(x.problem)} <span style="color:var(--soft)">${esc(x.fix)}</span></li>`).join("")}</ul></div>` : ""}
     ${(r.clip_unknown || []).length ? `<div class="sub" style="margin:0 0 8px">${r.clip_unknown.length} file${r.clip_unknown.length === 1 ? "" : "s"} had no shot number in the name, so StoryStudio left ${r.clip_unknown.length === 1 ? "it" : "them"} out (${r.clip_unknown.slice(0, 3).map(esc).join(", ")}${r.clip_unknown.length > 3 ? "…" : ""}).</div>` : ""}
     <div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn primary" onclick="clipsCheck()">Check the new ones</button><button class="btn" onclick="clipsPick()">${ICON.folder} Choose another folder</button><button class="btn ghost" onclick="clipsCheck(true)">Check everything again</button>
     <span class="sub" style="margin:0">${esc(r.clip_folder)}${r.clip_checked ? " · checked " + esc(r.clip_checked) : ""}</span></div>
-    ${roughBlock(r)}</div>`;
+    ${noRough ? "" : roughBlock(r)}</div>`;
+}
+// ---------------------------------------------------------------- start from finished clips
+let PLC = {info: null, kind: "story", script: "", audio: "", audioName: "", title: ""};
+function openPlace() { renderPlace(); $("main").scrollTop = 0; }
+function renderPlace() {
+  const i = PLC.info, k = PLC.kind;
+  const seg = `<div class="seg">${[["story", "A story with narration"], ["music", "A music video"], ["cartoon", "A silent cartoon"]].map(([v, t]) => `<button class="${k === v ? "on" : ""}" onclick="PLC.kind='${v}';renderPlace()">${t}</button>`).join("")}</div>`;
+  const found = i ? (i.shots ? `<div class="sub" style="margin:10px 0 0"><span style="color:var(--good)">✓</span> Found <b>${i.shots} shot${i.shots === 1 ? "" : "s"}</b>, from shot ${esc(i.first)} to shot ${esc(i.last)}. Extra shots named like <b>Shot 20.1</b> or <b>Shot 48b</b> count as their own shots.${i.copies ? ` ${i.copies} file${i.copies === 1 ? " looks like a copy" : "s look like copies"} of another (like “(alt 2)”) and ${i.copies === 1 ? "is" : "are"} left out.` : ""}${i.no_clip.length ? ` ${listShots(i.no_clip)} ${i.no_clip.length === 1 ? "has" : "have"} a picture but no clip, so the picture will hold ${i.no_clip.length === 1 ? "its" : "their"} place.` : ""}${i.left_out ? ` ${i.left_out} file${i.left_out === 1 ? " has" : "s have"} no shot number in the name and ${i.left_out === 1 ? "is" : "are"} left out.` : ""}<br>${esc(i.folder)}</div>` : `<div class="sub" style="margin:10px 0 0;color:var(--bad)">No clips with a shot number in their name were found there. Name them like <b>Shot 5.mp4</b>, then choose the folder again.</div>`) : "";
+  const words = k === "music" ? "lyrics" : k === "cartoon" ? "outline" : "story";
+  const sound = k === "music" ? "song" : "narration";
+  const steps = [
+    sbStep(1, "Your clips", `<button class="btn ${i && i.shots ? "" : "primary"}" onclick="placeFolder()">${ICON.folder} ${i ? "Choose another folder" : "Choose the folder"}</button>${found}`, "The folder with the clips you've made. Each one needs its shot number in its name, like <b>Shot 5.mp4</b>. Folders inside it (like “Video Shots”) are looked in too."),
+    sbStep(2, "What kind of video is it?", seg),
+    sbStep(3, k === "cartoon" ? "Your outline, if you have one" : `Your ${words}`, `<textarea class="sbin" rows="9" placeholder="${k === "music" ? "Paste the song lyrics here…" : k === "cartoon" ? "Optional: paste what happens in the cartoon, in order…" : "Paste the story here, the way it's narrated…"}" oninput="PLC.script=this.value">${esc(PLC.script)}</textarea><div class="row" style="margin-top:8px"><button class="btn small" onclick="placeScript()">${ICON.folder} Or choose a file</button></div>`, k === "cartoon" ? "It helps StoryStudio name each shot. Leave it empty to simply put the clips in number order." : `StoryStudio looks at every clip and works out which words go with it. Shot notes, prompts and headings in the ${words === "story" ? "script" : words} are fine; it skips them.`),
+  ];
+  if (k !== "cartoon") steps.push(sbStep(4, `Your ${sound}, if it's recorded`, `<div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn" onclick="placeSound()">${ICON.folder} ${PLC.audio ? "Choose another" : "Choose the sound file"}</button>${PLC.audio ? `<span class="sub" style="margin:0"><span style="color:var(--good)">✓</span> ${esc(PLC.audioName)}</span><button class="btn small ghost" onclick="PLC.audio='';PLC.audioName='';renderPlace()">Don't use it</button>` : ""}</div>${!PLC.audio && i && i.sounds && i.sounds.length ? `<div class="sub" style="margin:10px 0 0">Found in your folder: ${i.sounds.map((x, n) => `<a href="#" onclick="PLC.audio=PLC.info.sounds[${n}].path;PLC.audioName=PLC.info.sounds[${n}].name;renderPlace();return false">${esc(x.name)}</a>`).join(", ")}. Click one to use it.</div>` : ""}`, k === "music" ? "Optional. The song goes on the timeline under your clips. StoryStudio also tries to start each clip where its words are sung; singing over music is hard to follow, so it may only be able to put them in order." : "Optional, but this is what makes it really useful: StoryStudio listens to the narration and starts every clip at the moment its words are spoken. Without it, the clips go back to back in order."));
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Put my finished clips on a timeline</h1><div class="sub" style="margin:0">Already made your clips? Give StoryStudio the folder and the script. It works out which clip goes with which words and builds a Premiere timeline with every clip in its place. Your clips aren't changed.</div></div></div>
+    <div class="sbsteps">${steps.join("")}</div>
+    <div class="pmsg" id="plmsg"></div>
+    <div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><button class="btn primary" onclick="placeStart(this)" ${i && i.shots ? "" : "disabled"}>Place my clips</button></div>`;
+}
+async function placeFolder() {
+  if (picking) return; picking = true; let j;
+  try { j = await api("place_folder"); } catch (e) { toast(e.message || "That folder couldn't be opened.", true); return; } finally { picking = false; }
+  if (!j.folder) return;
+  PLC.info = j; if (!PLC.title) PLC.title = j.title;
+  renderPlace();
+}
+async function placeScript() {
+  if (picking) return; picking = true;
+  try { const j = await api("sb_pick_text", {kind: PLC.kind === "music" ? "music" : "story"}); if (j.text) { PLC.script = j.text; renderPlace(); } }
+  catch (e) { toast(e.message || "That file couldn't be read.", true); }
+  finally { picking = false; }
+}
+async function placeSound() {
+  if (picking) return; picking = true;
+  try { const j = await api("place_sound", {folder: PLC.info ? PLC.info.folder : ""}); if (j.path) { PLC.audio = j.path; PLC.audioName = j.name; renderPlace(); } }
+  catch (e) { toast(e.message || "That file couldn't be opened.", true); }
+  finally { picking = false; }
+}
+async function placeStart(btn) {
+  if (!PLC.info || !PLC.info.shots) return;
+  btn.disabled = true;
+  try { const k = await api("place_start", {folder: PLC.info.folder, script: PLC.script, audio: PLC.kind === "cartoon" ? "" : PLC.audio, kind: PLC.kind, title: PLC.info.title}); watchJob(k.job); }
+  catch (e) { btn.disabled = false; $("#plmsg").innerHTML = `<span class="err">${esc(e.message || "That didn't work.")}</span>`; }
 }
 // ---- the rough cut: the checked clips on a Premiere timeline, in order
 function listShots(a) { return a.length === 1 ? `Shot ${a[0]}` : `Shots ${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`; }
@@ -1019,7 +1081,10 @@ function roughText(j) {
   const long = m ? `${m} min ${s} s` : `${s} seconds`;
   let t = `<span class="ok">✓ Your rough cut is made:</span> ${j.shots} shot${j.shots === 1 ? "" : "s"} in order, about ${long} long.`;
   const did = [];
-  if (j.trimmed) did.push(`${j.trimmed} clip${j.trimmed === 1 ? " is" : "s are"} cut to ${j.trimmed === 1 ? "its" : "their"} good seconds`);
+  if (j.timed) t += ` Every clip starts where its words are said in <b>${esc(j.recording || "")}</b>. A clip that runs longer than its words is trimmed at the end; one that nearly fits is sped up or slowed a little.` + (j.sound ? ` The recording is on the timeline under the clips.` : ` <b>One thing to do in Premiere:</b> drag ${esc(j.recording || "your recording")} onto the first sound track so it starts at the very beginning of the timeline (0:00). Then the words and the clips line up.`);
+  else if (j.sound) t += ` <b>${esc(j.sound)}</b> is on the timeline under them.`;
+  if (j.short && j.short.length) t += ` ${listShots(j.short.map(x => x[0]))} ${j.short.length === 1 ? "is" : "are"} still too short for ${j.short.length === 1 ? "its" : "their"} words, so there's a gap after ${j.short.length === 1 ? "it" : "each"} (a marker shows where and how long).`;
+  if (j.trimmed && !j.timed) did.push(`${j.trimmed} clip${j.trimmed === 1 ? " is" : "s are"} cut to ${j.trimmed === 1 ? "its" : "their"} good seconds`);
   if (j.sped) did.push(`${j.sped} play${j.sped === 1 ? "s" : ""} at a new speed`);
   if (did.length) t += ` ${did.join(" and ")[0].toUpperCase()}${did.join(" and ").slice(1)}.`;
   if (j.stand_ins.length) t += ` ${listShots(j.stand_ins)} ${j.stand_ins.length === 1 ? "isn't" : "aren't"} ready yet, so ${j.stand_ins.length === 1 ? "its picture holds its" : "their pictures hold their"} place (orange on the timeline, with a marker).`;
@@ -1082,27 +1147,28 @@ function renderScript() {
   let scene = 0;
   const shots = r.shots.map(s => {
     let head = "";
-    if (s.scene !== scene) {
+    if (!r.placed && s.scene !== scene) {
       scene = s.scene; const sc = r.scenes[scene - 1] || {};
       head = `<div class="scenehead"><h2 style="margin:0">Scene ${scene}: ${esc(sc.title || "")}</h2><div class="sub" style="margin:4px 0 0">${esc(sc.section || "")} · ${mmss(sc.start || 0)}–${mmss(sc.end || 0)} · ${sc.clips || 0} clips${sc.concept ? " · " + esc(sc.concept) : ""}</div></div>`;
     }
     const ty = s.shot_type ? SBT.find(t => t.code === s.shot_type) : null;
     return head + `<div class="card shot ${s.extra ? "extra" : ""}">
-      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${s.n}${s.title ? ": " + esc(s.title) : ""}</b>${ty ? `<select class="pill" title="${esc(ty.purpose)}" aria-label="Shot type" onchange="sbSetType(${s.n}, this.value, this)">${SBT.map(t => `<option value="${esc(t.code)}" ${t.code === ty.code ? "selected" : ""}>${esc(t.code)} · ${esc(t.name)}</option>`).join("")}</select>` : ""}<span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
-      <div class="row" style="gap:8px">${shotStatus(s)}<span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span></div></div>
+      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div class="row" style="gap:10px;flex-wrap:wrap"><b>${s.extra ? "Extra shot" : "Shot"} ${esc(s.label || s.n)}${s.title ? ": " + esc(s.title) : ""}</b>${ty ? `<select class="pill" title="${esc(ty.purpose)}" aria-label="Shot type" onchange="sbSetType(${s.n}, this.value, this)">${SBT.map(t => `<option value="${esc(t.code)}" ${t.code === ty.code ? "selected" : ""}>${esc(t.code)} · ${esc(t.name)}</option>`).join("")}</select>` : ""}<span class="pill">${mmss(s.start)}–${mmss(s.end)}</span>${s.say ? `<span class="pill" title="Roughly how long these words take to narrate">about ${Math.round(s.say)} s to say</span>` : ""}${(s.characters||[]).map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>
+      <div class="row" style="gap:8px">${r.placed && !r.clip_checked ? "" : shotStatus(s)}${s.camera ? `<span class="pill">[${esc(s.camera)}${s.camera2 ? "," + esc(s.camera2) : ""}]</span>` : ""}</div></div>
       ${s.words ? `<div class="words">${r.kind === "cartoon" ? "🔊" : "💬"} ${esc(s.words)}</div>` : ""}
-      ${s.purpose ? `<div class="purpose"><b>What this shot is for:</b> ${esc(s.purpose)}</div>` : ""}
+      ${s.purpose ? `<div class="purpose"><b>${r.placed ? "On screen:" : "What this shot is for:"}</b> ${esc(s.purpose)}</div>` : ""}
       ${ty && (s.warnings || []).length ? `<div class="sub" style="margin:2px 0 0">${s.warnings.map(esc).join(" ")}</div>` : ""}
       ${shotFiles(s)}
-      ${promptBox("Text-to-image prompt", "ChatGPT / Nano Banana", s.picture_prompt, {which:"picture", n:s.n})}
+      ${s.picture_prompt ? promptBox("Text-to-image prompt", "ChatGPT / Nano Banana", s.picture_prompt, {which:"picture", n:s.n}) : ""}
       ${s.edit_prompt ? `<details style="margin-top:8px"><summary class="sub" style="cursor:pointer;margin:0">Is the place changing from picture to picture? Edit shot ${s.edit_from}'s picture instead</summary>${promptBox("Same-place prompt", `attach shot ${s.edit_from}'s picture`, s.edit_prompt, null)}</details>` : ""}
-      ${promptBox("Image-to-video prompt", `MiniMax · ${r.clip}-second clip${ty && s.trim ? ` · keep about ${s.trim} s` : ""}`, s.minimax_prompt, {which:"motion", n:s.n})}</div>`;
+      ${s.minimax_prompt ? promptBox("Image-to-video prompt", `MiniMax · ${r.clip}-second clip${ty && s.trim ? ` · keep about ${s.trim} s` : ""}`, s.minimax_prompt, {which:"motion", n:s.n}) : ""}</div>`;
   }).join("");
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>${esc(r.title)}</h1><div class="sub" style="margin:0">${esc(r.summary)}</div></div>
       <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.text))}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.folder))}})'>${ICON.folder} Folder</button>` : ""}</div></div>
-    <div class="chips"><span class="chip">${kindLabel(r.kind)}</span><span class="chip">About ${mmss(r.seconds)} long</span><span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span><span class="chip">${esc(r.aspect)}</span>${types.gens ? `<span class="chip" title="A rough guide: some shot types take several tries to come out right">About ${Math.ceil(types.gens)} generations</span>` : ""}</div>
+    <div class="chips"><span class="chip">${kindLabel(r.kind)}</span><span class="chip">About ${mmss(r.seconds)} long</span>${r.placed ? `<span class="chip good">${r.main_shots} shots from your clips</span>${r.timed ? `<span class="chip good">Timed to your recording</span>` : `<span class="chip">In order, back to back</span>`}` : `<span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span>`}<span class="chip">${esc(r.aspect)}</span>${types.gens ? `<span class="chip" title="A rough guide: some shot types take several tries to come out right">About ${Math.ceil(types.gens)} generations</span>` : ""}</div>
     ${types.line ? `<div class="sub" style="margin:8px 0 0">Shot types: ${esc(types.line)}</div>` : ""}
+    ${(r.place_notes || []).map(x => `<div class="banner">${esc(x)}</div>`).join("")}
     ${r.approach ? `<div class="banner"><b>The plan:</b> ${esc(r.approach)}</div>` : ""}
     ${r.visual_rules ? `<div class="banner">${esc(r.visual_rules)}</div>` : ""}
     ${top ? `<div class="toplist">${top}</div>` : ""}
@@ -1110,7 +1176,7 @@ function renderScript() {
     ${clipsCard(r)}
     <h2 style="margin-top:26px">Shots</h2>
     ${shots}
-    <div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><button class="btn" onclick="openBuilder()">Make another</button></div>`;
+    <div class="footerbar"><button class="btn ghost" onclick="goHome()">Home</button><button class="btn" onclick="${r.placed ? "openPlace()" : "openBuilder()"}">${r.placed ? "Place another" : "Make another"}</button></div>`;
 }
 async function pbCopy(i) { await navigator.clipboard.writeText(PB[i].text); toast("Copied"); }
 function pbRedo(i) {

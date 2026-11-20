@@ -1,5 +1,5 @@
 {
-  "version": "1.18.0",
+  "version": "1.19.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -22,6 +22,7 @@
     "ss_script.py",
     "ss_clips.py",
     "ss_roughcut.py",
+    "ss_place.py",
     "ss_craft.py",
     "ss_shottypes.json",
     "ss_styles.json",
@@ -30,5 +31,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "StoryStudio can now build your rough cut. In a shot list, under Your pictures and clips, press Build the rough cut: it makes a Premiere timeline with every shot in order, each clip cut to its good seconds and set to its speed. Shots that are not ready use their picture as a stand-in."
+  "notes": "New on the start page: Put my finished clips on a timeline. Choose the folder with your clips, paste the script, and add the narration if it is recorded. StoryStudio works out which words go with each clip and builds a Premiere timeline with every clip where its words are spoken."
 }

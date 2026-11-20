@@ -33,6 +33,9 @@ def shot_number(name):
 
 def find_files(r, folder):
     """{shot number: [paths]}, {character name: picture path}, [files with no shot number]."""
+    if r.get("placed"):                 # made from finished clips: each shot has its files
+        return ({s["n"]: [p for p in s.get("paths") or [] if Path(p).exists()]
+                 for s in r["shots"]}, {}, list(r.get("clip_unknown") or []))
     folder = Path(folder)
     if not folder.is_dir():
         raise StoryError("That folder couldn't be opened.")

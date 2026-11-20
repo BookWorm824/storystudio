@@ -22,6 +22,7 @@ STILL_FRAMES = 1080000          # how long Premiere may stretch a picture (frame
 STILL_IN = 90000
 STAND_IN_COLOUR = "Mango"
 UNCHECKED_COLOUR = "Lavender"
+WITH_SOUND = True               # the narration or song goes on the first sound track
 
 
 def _rate(fps):
@@ -96,8 +97,8 @@ def plan(r, folder=None):
         fresh = sorted((f for f in clips if not f.get("check")), key=lambda f: -f["mtime"])
         want = float(s.get("end") or 0) - float(s.get("start") or 0)
         want = want if 1.0 <= want <= 20.0 else HOLD
-        it = {"n": s["n"], "title": s.get("title", ""), "speed": 100, "stand_in": False,
-              "checked": True, "extra": bool(s.get("extra"))}
+        it = {"n": s["n"], "label": s.get("label") or s["n"], "title": s.get("title", ""),
+              "speed": 100, "stand_in": False, "checked": True, "extra": bool(s.get("extra"))}
         if good:
             f, c = good[0], good[0]["check"]
             lo = float(c.get("best_from") or 0)
@@ -118,10 +119,36 @@ def plan(r, folder=None):
             f = max(clips, key=lambda f: f["mtime"])
             it.update(file=f, a=0.0, b=f["seconds"], stand_in=True)
         else:
-            missing.append(s["n"])
-            it = {"n": s["n"], "title": s.get("title", ""), "file": None}
+            missing.append(s.get("label") or s["n"])
+            it = {"n": s["n"], "label": s.get("label") or s["n"], "title": s.get("title", ""),
+                  "file": None}
+        if r.get("timed"):               # each shot has the time its words are said
+            it["at"] = float(s.get("start") or 0)
+            if it.get("file"):
+                _fit(it, max(0.2, float(s.get("end") or 0) - it["at"]))
         items.append(it)
     return items, missing
+
+
+FAST, SLOW = 1.15, 0.75         # how far a clip may be sped up or slowed to fit its words
+
+
+def _fit(it, slot):
+    """Make a shot fill the time its words take. A clip that nearly fits is sped up or
+    slowed a little so all of it plays; one that is much too long plays at its own speed with
+    its end trimmed; one that is much too short is slowed as far as looks natural (what is
+    still missing is kept as it["short"], and leaves a gap)."""
+    it["slot"] = slot
+    if it["file"]["kind"] != "clip":
+        it["b"] = it["a"] + slot
+        return
+    ratio = (it["b"] - it["a"]) / slot
+    pct = 100 if ratio > FAST else int(round(max(SLOW, ratio) * 100))
+    it["speed"] = 100 if abs(pct - 100) < 4 else pct
+    it["b"] = min(it["b"], it["a"] + slot * it["speed"] / 100.0)
+    short = slot - (it["b"] - it["a"]) * 100.0 / it["speed"]
+    if short > 0.25:
+        it["short"] = round(short, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +212,44 @@ def _frame_size(r, items):
         return 1920, 1080
 
 
-def xml(r, items, name):
+def _audio_xml(audio, fps, rate):
+    """The narration or song on the first sound track, from the start: (text, frames)."""
+    try:
+        info = probe(audio)
+    except Exception:
+        log_error("rough cut: measuring the recording")
+        return "", 0
+    frames = int((info.get("duration") or 0) * fps)
+    if not info.get("has_audio") or frames < 1:
+        return "", 0
+    stereo = (info.get("channels") or 1) >= 2
+    name = escape(Path(audio).name)
+    media = (f'<file id="file-a"><name>{name}</name><pathurl>{escape(_url(audio))}</pathurl>'
+             f"{rate}<duration>{frames}</duration><media><audio><samplecharacteristics>"
+             f"<depth>16</depth><samplerate>{info.get('sample_rate') or 48000}</samplerate>"
+             f"</samplecharacteristics><channelcount>{2 if stereo else 1}</channelcount>"
+             "</audio></media></file>")
+    links = "".join(f"<link><linkclipref>clipitem-a{k}</linkclipref><mediatype>audio"
+                    f"</mediatype><trackindex>{k}</trackindex><clipindex>1</clipindex>"
+                    "<groupindex>1</groupindex></link>" for k in (1, 2)) if stereo else ""
+    tracks = ""
+    for k in ((1, 2) if stereo else (1,)):
+        tracks += (
+            (f'<track currentExplodedTrackIndex="{k - 1}" totalExplodedTrackCount="2" '
+             'premiereTrackType="Stereo">' if stereo else "<track>")
+            + f'<clipitem id="clipitem-a{k}" premiereChannelType='
+            + ('"stereo">' if stereo else '"mono">')
+            + f"<masterclipid>masterclip-a</masterclipid><name>{name}</name>"
+            f"<enabled>TRUE</enabled><duration>{frames}</duration>{rate}"
+            f"<start>0</start><end>{frames}</end><in>0</in><out>{frames}</out>"
+            + (media if k == 1 else '<file id="file-a"/>')
+            + f"<sourcetrack><mediatype>audio</mediatype><trackindex>{k}</trackindex>"
+            "</sourcetrack>" + links + "</clipitem><enabled>TRUE</enabled>"
+            f"<locked>FALSE</locked><outputchannelindex>{k}</outputchannelindex></track>")
+    return tracks, frames
+
+
+def xml(r, items, name, audio=None):
     """The timeline as text, plus what was placed: (text, placed, seconds)."""
     rates = {}
     for it in items:
@@ -203,14 +267,19 @@ def xml(r, items, name):
                 "<anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio>"
                 "<fielddominance>none</fielddominance></samplecharacteristics>")
     clips, markers, placed, cursor = [], [], [], 0
+    some_checked = any(it.get("file") and it["file"].get("check") for it in items)
     for k, it in enumerate(items, 1):
         f = it.get("file")
+        if "at" in it:                   # placed where its words are said
+            cursor = max(cursor, int(round(it["at"] * fps)))
         if not f:
-            markers.append((cursor, f"Shot {it['n']} goes here",
+            markers.append((cursor, f"Shot {it['label']} goes here",
                             "Not made yet: " + it.get("title", "")))
             continue
         ratio = it["speed"] / 100.0
         length = max(1, int(round((it["b"] - it["a"]) / ratio * fps)))
+        if "slot" in it:
+            length = max(1, min(length, int(round((it["at"] + it["slot"]) * fps)) - cursor))
         if f["kind"] == "clip":
             w, h = f.get("w") or W, f.get("h") or H
             ftb, fntsc = _rate(f.get("fps") or fps)
@@ -232,7 +301,7 @@ def xml(r, items, name):
         if abs(scale - 100) > 1:
             filters += _scale_xml(scale)
         colour = STAND_IN_COLOUR if it["stand_in"] else \
-            (UNCHECKED_COLOUR if not it["checked"] else "")
+            (UNCHECKED_COLOUR if not it["checked"] and some_checked else "")
         clips.append(
             f'<clipitem id="clipitem-{k}"><masterclipid>masterclip-{k}</masterclipid>'
             f"<name>{escape(f['name'])}</name><enabled>TRUE</enabled>"
@@ -247,14 +316,20 @@ def xml(r, items, name):
             + (f"<labels><label2>{colour}</label2></labels>" if colour else "")
             + "</clipitem>")
         if it["stand_in"]:
-            markers.append((cursor, f"Shot {it['n']}: stand-in",
+            markers.append((cursor, f"Shot {it['label']}: stand-in",
                             "This shot's clip isn't ready yet, so "
                             + ("its picture" if f["kind"] == "picture" else "the last try")
                             + " is holding its place."))
         placed.append(dict(it, at=round(cursor / fps, 2), length=round(length / fps, 2)))
         cursor += length
+        if it.get("short"):
+            markers.append((cursor, f"Shot {it['label']} is short",
+                            f"This clip is about {it['short']} seconds too short for its "
+                            "words. Stretch it, or put another shot here."))
     if not clips:
         raise StoryError("There are no pictures or clips to put on a timeline yet.")
+    sound, sound_frames = _audio_xml(audio, fps, rate) if audio and WITH_SOUND else ("", 0)
+    cursor = max(cursor, sound_frames)
     marks = "".join(f"<marker><comment>{escape(c)}</comment><name>{escape(n)}</name>"
                     f"<in>{max(0, min(t, cursor - 1))}</in><out>-1</out></marker>"
                     for t, n, c in markers)
@@ -267,12 +342,12 @@ def xml(r, items, name):
             "<track>" + "".join(clips) + "<enabled>TRUE</enabled><locked>FALSE</locked></track>"
             "</video><audio><numOutputChannels>2</numOutputChannels><format>"
             "<samplecharacteristics><depth>16</depth><samplerate>48000</samplerate>"
-            "</samplecharacteristics></format></audio></media>"
+            "</samplecharacteristics></format>" + sound + "</audio></media>"
             + marks + "</sequence></xmeml>\n")
     return text, placed, cursor / fps
 
 
-def build(r, folder=None):
+def build(r, folder=None, out_dir=None):
     """Write the rough cut next to the pictures and clips, and say what went into it."""
     import ss_script as S
     folder = folder or r.get("clip_folder") or ""
@@ -281,8 +356,9 @@ def build(r, folder=None):
     items, missing = plan(r, folder)
     title = (r.get("title") or "My video").strip()
     name = f"{title} rough cut"
-    text, placed, seconds = xml(r, items, name)
-    out = Path(folder) / f"{safe_name(title)} - rough cut.xml"
+    audio = r.get("audio") if r.get("audio") and Path(r["audio"]).exists() else None
+    text, placed, seconds = xml(r, items, name, audio)
+    out = Path(out_dir or folder) / f"{safe_name(title)} - rough cut.xml"
     try:
         out.write_text(text, encoding="utf8")
     except OSError:
@@ -295,9 +371,13 @@ def build(r, folder=None):
         "trimmed": sum(1 for p in placed if p["file"]["kind"] == "clip" and not p["stand_in"]
                        and (p["a"] > 0.15 or p["b"] < p["file"]["seconds"] - 0.15)),
         "sped": sum(1 for p in placed if p["speed"] != 100),
-        "unchecked": [p["n"] for p in placed if not p["checked"]],
-        "stand_ins": [p["n"] for p in placed if p["stand_in"]],
+        "unchecked": [p["label"] for p in placed if not p["checked"]]
+        if any(p["file"].get("check") for p in placed) else [],
+        "stand_ins": [p["label"] for p in placed if p["stand_in"]],
         "missing": missing, "made": time.strftime("%Y-%m-%d %H:%M"),
+        "timed": bool(r.get("timed")), "recording": Path(audio).name if audio else "",
+        "sound": Path(audio).name if audio and WITH_SOUND else "",
+        "short": [[p["label"], p["short"]] for p in placed if p.get("short")],
     }
     r["clip_folder"] = str(folder)
     r["rough_cut"] = res

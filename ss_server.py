@@ -52,7 +52,7 @@ SLOW_ASKS = {"sb_redo", "sb_brainstorm", "sb_cast", "sb_talk"}
 PICK_LOCK = threading.Lock()            # one Windows file window at a time
 # never wait behind other actions: quick status calls, and file pickers (a Windows file window
 # left open must not freeze the rest of StoryStudio)
-NO_LOCK = {"job", "ping", "stop", "sb_clips_pick", "guide", "client_error", "update_check", "problem_report",
+NO_LOCK = {"job", "ping", "stop", "sb_clips_pick", "guide", "place_folder", "place_sound", "client_error", "update_check", "problem_report",
            "sb_pick_text", "sb_pick_song",
            "pick_lyrics", "sb_open", "sb_result", "sb_styles", "sb_style_pics"}
 
@@ -627,6 +627,40 @@ def api(name, a):
             K.check(r, folder, progress, cancel, again=bool(a.get("again")))
         return {"job": run_job("Looking at your pictures and clips", work, "script",
                                [20 + n * 1.2 + (n // 15 + 1) * 45])}
+    if name == "place_folder":
+        import ss_place as PL
+        f = native_folder("Choose the folder with your clips",
+                          S.settings.get("last_clip_folder"))
+        if not f:
+            return {"folder": ""}
+        S.settings["last_clip_folder"] = str(Path(f).parent)
+        core.save_settings(S.settings)
+        return PL.folder_view(f)
+    if name == "place_sound":
+        f = native_pick("Choose the narration or the song",
+                        [("Sound", "*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.wma *.aif *.aiff"),
+                         ("All", "*.*")], a.get("folder") or S.settings.get("last_folder"))
+        return {"path": f or "", "name": Path(f).name if f else ""}
+    if name == "place_start":
+        import ss_place as PL
+        spec = {k: a.get(k) or "" for k in ("folder", "script", "audio", "kind", "title")}
+        found = PL.look(spec["folder"])[0] if spec["folder"] else []
+        if not found:
+            raise StoryError("StoryStudio didn't find any clips with a shot number in their "
+                             "name in that folder. Name them like “Shot 5.mp4”.")
+        n = len(found)
+        sound = 0.0
+        if spec["audio"]:
+            try:
+                sound = float(core.probe(spec["audio"]).get("duration") or 0)
+            except Exception:
+                sound = 0.0
+
+        def work(progress, cancel, phase):
+            S.sb = PL.build(spec, progress, cancel)
+        return {"job": run_job("Placing your clips", work, "script",
+                               [15 + n * 0.6 + (90 + n * 2 if spec["script"] else 0)
+                                + sound * 0.12])}
     if name == "sb_roughcut":
         import ss_roughcut as RC
         if not S.sb:
