@@ -22,9 +22,10 @@ from pathlib import Path
 from ss_core import APP_DATA, StoryError, log, log_error, probe
 import ss_media as M
 import ss_clips as K
+import ss_voices as V
 
 SOUNDS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma", ".aif", ".aiff"}
-PER_REQUEST = 48                # shots shown to the AI at a time (four sheets of twelve)
+PER_REQUEST = 60                # shots shown to the AI at a time (five sheets of twelve)
 LEAD = 0.25                     # a cut lands this long before the first word of its shot
 WORD = 0.32                     # a spoken word, roughly, in seconds
 SAY = 0.4                       # a narrated word with its share of the pauses
@@ -96,15 +97,28 @@ def look(folder):
     return shots, unknown, copies, sorted(sounds, key=lambda p: -Path(p).stat().st_size)
 
 
+def voices_view(folder):
+    """What the setup page shows about a folder of voice files."""
+    import ss_voices as V
+    files = V.voice_files(folder)
+    return {"path": str(folder), "name": Path(folder).name, "count": len(files),
+            "some": [p.name for p in files[:3]]}
+
+
 def folder_view(folder):
     """What the setup page shows after a folder is chosen."""
     shots, unknown, copies, sounds = look(folder)
+    groups = {}
+    for p in sounds:
+        groups.setdefault(str(Path(p).parent), []).append(p)
+    voice_folders = [voices_view(d) for d, v in groups.items() if len(v) >= 3]
     return {"folder": str(folder), "title": Path(folder).name, "shots": len(shots),
             "first": shots[0]["label"] if shots else "",
             "last": shots[-1]["label"] if shots else "",
             "clips": sum(1 for s in shots if s["clip"]),
             "no_clip": [s["label"] for s in shots if not s["clip"]][:30],
             "left_out": len(unknown), "copies": copies,
+            "voice_folders": [v for v in voice_folders if v["count"] >= 3][:3],
             "sounds": [{"path": p, "name": Path(p).name} for p in sounds[:6]]}
 
 
@@ -125,9 +139,16 @@ MATCH = {
                          "screen in this clip"},
                 "words": {"type": "string", "description": "the exact words of the script "
                           "that are heard while this clip is on screen, word for word; empty "
-                          "when nothing is said over it"},
+                          "when nothing is said over it. For a silent cartoon: the shot's "
+                          "sound effects as the script lists them"},
+                "start": {"type": "number", "description": "when the script prints a time "
+                          "for this shot (like 00:05-00:10): where it starts, in seconds "
+                          "from the start of the film; 0 when the script gives no time"},
+                "end": {"type": "number", "description": "where the script says it ends, in "
+                        "seconds from the start of the film; 0 when the script gives no time"},
             },
-            "required": ["shot", "title", "sees", "words"], "additionalProperties": False}},
+            "required": ["shot", "title", "sees", "words", "start", "end"],
+            "additionalProperties": False}},
     },
     "required": ["summary", "shots"], "additionalProperties": False,
 }
@@ -151,14 +172,20 @@ while its neighbours have almost none.
 Don't force words onto it.
 - Leave out everything that isn't spoken: shot numbers and headings, picture and video \
 prompts, camera notes, speaker labels, stage directions, timings.
-- If the script is already divided into numbered shots or scenes, follow its division.
+- If the script is already divided into numbered shots, clips or scenes, follow its \
+division: clip 12 of the script is the still labelled shot 12. A still whose label isn't in \
+the script (an extra shot like 48b) gets no words and no time; just say what is on screen.
+- When the script prints a time for a shot, pass it on as start and end in seconds. Never \
+work a time out yourself: no printed time means 0 for both.
 - Answer for every shot label you are shown, once each."""
 KIND_TEXT = {
     "story": "a narrated story: the spoken words are the narration (and any dialogue that "
              "is read aloud)",
     "music": "a music video: the spoken words are the song's lyrics as they are sung",
-    "cartoon": "a silent cartoon with no narration: every shot's words are empty; just name "
-               "each shot and say what is on screen, using the outline to understand it",
+    "cartoon": "a silent cartoon with no narration or dialogue. Here \"words\" means the "
+               "shot's SOUND EFFECTS, copied as the script lists them for that shot (leave "
+               "the music out); empty when the script lists none. Name each shot and say "
+               "what is on screen",
 }
 
 
@@ -191,7 +218,8 @@ def match(kind, script, shots, work, say=None, cancel=None):
     by_n = {s["n"]: s for s in shots}
     by_label = {s["label"]: s for s in shots}
     summary, last_words = "", ""
-    groups = [frames[i:i + PER_REQUEST] for i in range(0, len(frames), PER_REQUEST)]
+    per = -(-len(frames) // -(-len(frames) // PER_REQUEST))      # even groups: 62 -> 31 + 31
+    groups = [frames[i:i + per] for i in range(0, len(frames), per)]
     for g, part in enumerate(groups):
         if cancel and cancel():
             raise StoryError("Stopped.")
@@ -224,7 +252,13 @@ def match(kind, script, shots, work, say=None, cancel=None):
                 continue
             s["title"] = (x.get("title") or "").strip()
             s["purpose"] = s["picture"] = (x.get("sees") or "").strip()
-            s["words"] = "" if kind == "cartoon" else " ".join((x.get("words") or "").split())
+            s["words"] = " ".join((x.get("words") or "").split())
+            try:
+                a_t, b_t = float(x.get("start") or 0), float(x.get("end") or 0)
+            except (TypeError, ValueError):
+                a_t = b_t = 0.0
+            if b_t - a_t >= 0.5:
+                s["_plan"] = (a_t, b_t)
             if s["words"]:
                 last_words = " ".join(s["words"].split()[-12:])
     return summary.strip()
@@ -241,8 +275,8 @@ def time_shots(shots, heard, total):
     """Give each shot the moment it starts, from when its words are heard in the recording.
     Returns the share of script words that were found (0-1); below GOOD_MATCH the times
     aren't trusted and nothing is changed."""
-    script = [(i, k) for i, s in enumerate(shots) for k in map(_norm, s["words"].split()) if k]
-    hw = [(k, w) for k, w in ((_norm(w["t"]), w) for w in heard) if k]
+    script = [(i, k) for i, s in enumerate(shots) for k in V.tokens(s["words"])]
+    hw = [(k, w) for w in heard for k in V.tokens(w["t"])]
     if not script or not hw:
         return 0.0
     sm = difflib.SequenceMatcher(None, [k for _, k in script], [k for k, _ in hw],
@@ -321,8 +355,11 @@ def build(spec, progress=None, cancel=None):
     kind = spec.get("kind") if spec.get("kind") in ("story", "music", "cartoon") else "story"
     script = (spec.get("script") or "").strip()
     audio = (spec.get("audio") or "").strip()
+    voices = (spec.get("voices") or "").strip()
     if audio and not Path(audio).exists():
         raise StoryError("That sound file isn't there any more. Choose it again.")
+    if voices and not Path(voices).is_dir():
+        raise StoryError("That folder of voice files isn't there any more. Choose it again.")
     say(0.02, "Looking for your clips…")
     found, unknown, _, _ = look(folder)
     if not found:
@@ -380,13 +417,57 @@ def build(spec, progress=None, cancel=None):
              s["_file"].get("seconds")]
     lengths = sorted(f["seconds"] for f in clips)
     typical = lengths[len(lengths) // 2] if lengths else 5.0
-    timed, total = False, 0.0
-    if audio:
+    timed, total, joined = False, 0.0, None
+    if voices and kind != "cartoon":                       # many voice files: join them first
+        audio = ""
+        if not any(s["words"] for s in shots):
+            notes.append("StoryStudio can only put separate voice files in order once it "
+                         "knows the script's words, so they were left out this time.")
+        else:
+            from ss_core import safe_name
+            try:
+                out = Path(spec.get("out_dir") or folder) / \
+                    f"{safe_name(title)} - narration {V.JOINED}.wav"
+                heard, total, joined = V.join(voices, shots, out,
+                                              lambda f, m: say(0.64 + 0.28 * f, m), cancel)
+                audio = str(out)
+                quality = time_shots(shots, heard, total)
+                timed = quality >= GOOD_MATCH
+                notes.append(f"Your {joined['files']} voice files are joined in script order "
+                             f"into one new file, {joined['name']}, in {joined['pieces']} "
+                             "pieces with a short pause between them. Your own files aren't "
+                             "changed."
+                             + (" Not used, because the same line is in another file: "
+                                + ", ".join(joined["doubles"][:8])
+                                + ("…" if len(joined["doubles"]) > 8 else "") + "."
+                                if joined["doubles"] else "")
+                             + (" Left out because their words weren't found in the script: "
+                                + ", ".join(joined["left_out"][:8])
+                                + ("…" if len(joined["left_out"]) > 8 else "") + "."
+                                if joined["left_out"] else ""))
+                if joined["found"] < 0.6:
+                    notes.append(f"Only about {int(joined['found'] * 100)}% of the script's "
+                                 "words were found in those voice files, so some lines are "
+                                 "probably missing from the narration.")
+                if not timed:
+                    notes.append("The clips are back to back in order, because too little of "
+                                 "the script was found in the voices to time them.")
+            except StoryError as e:
+                if "Stopped" in str(e):
+                    raise
+                notes.append(str(e) + " The clips are back to back in order.")
+            except Exception:
+                log_error("placing: joining the voices")
+                notes.append("StoryStudio couldn't join those voice files, so the clips are "
+                             "back to back in order.")
+    elif audio:
         try:
             total = probe(audio).get("duration") or 0.0
         except Exception:
             total = 0.0
-    if audio and total and kind != "cartoon" and any(s["words"] for s in shots):
+    if joined:
+        pass
+    elif audio and total and kind != "cartoon" and any(s["words"] for s in shots):
         say(0.64, "Listening to your recording to find when each line is said…")
         try:
             heard = M.transcribe_raw(M.wav_mono16k(audio),
@@ -405,6 +486,22 @@ def build(spec, progress=None, cancel=None):
             log_error("placing: listening")
             notes.append("StoryStudio couldn't listen to that recording, so the clips are "
                          "back to back in order.")
+    planned = [s["_plan"] for s in shots if s.get("_plan")]
+    timed_by = "recording" if timed else ""
+    if not timed and len(planned) >= 0.8 * len(shots) and \
+            all(b[0] >= a[0] for a, b in zip(planned, planned[1:])):
+        t, shift = 0.0, 0.0                                # a shot the script doesn't have
+        for s in shots:                                    # is fitted in, and moves the rest
+            if s.get("_plan"):
+                a_t, b_t = s["_plan"]
+                s["start"] = round(max(t, a_t + shift), 2)
+                s["end"] = round(max(s["start"] + 0.5, b_t + shift), 2)
+            else:
+                sec = s["_file"].get("seconds") or RC.HOLD
+                s["start"], s["end"] = round(t, 2), round(t + sec, 2)
+                shift += sec
+            t = s["end"]
+        timed, timed_by = True, "script"
     if not timed:
         t = 0.0
         for s in shots:
@@ -422,15 +519,18 @@ def build(spec, progress=None, cancel=None):
     for s in shots:
         s.pop("_file", None)
         s.pop("_still", None)
+        s.pop("_plan", None)
     a, b = next(((f["w"], f["h"]) for f in clips if f.get("w") and f.get("h")), (16, 9))
     aspect = "9:16" if b > a * 1.2 else "1:1" if abs(a - b) < a * 0.1 else "16:9"
     r = {"kind": kind, "title": title, "summary": summary, "placed": True, "timed": timed,
+         "timed_by": timed_by,
          "spec": {"kind": kind, "title": title, "placed": True},
          "aspect": aspect, "clip": int(round(typical)) or 5,
          "seconds": round(max(total, shots[-1]["end"]), 1),
          "style": {"name": ""}, "characters": [], "scenes": [], "shots": shots,
          "main_shots": len(shots), "extra_shots": 0, "made": time.strftime("%Y-%m-%d %H:%M"),
-         "clip_folder": str(folder), "audio": audio, "script": script,
+         "clip_folder": str(folder), "audio": audio, "script": script, "voices": voices,
+         "voice_order": (joined or {}).get("order") or [],
          "place_notes": notes, "clip_unknown": unknown[:40]}
     say(0.95, "Putting your clips on the timeline…")
     RC.build(r, folder, spec.get("out_dir"))               # also saves the shot list

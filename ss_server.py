@@ -52,7 +52,8 @@ SLOW_ASKS = {"sb_redo", "sb_brainstorm", "sb_cast", "sb_talk"}
 PICK_LOCK = threading.Lock()            # one Windows file window at a time
 # never wait behind other actions: quick status calls, and file pickers (a Windows file window
 # left open must not freeze the rest of StoryStudio)
-NO_LOCK = {"job", "ping", "stop", "sb_clips_pick", "guide", "place_folder", "place_sound", "client_error", "update_check", "problem_report",
+NO_LOCK = {"job", "ping", "stop", "sb_clips_pick", "guide", "place_folder", "place_sound",
+           "place_voices", "client_error", "update_check", "problem_report",
            "sb_pick_text", "sb_pick_song",
            "pick_lyrics", "sb_open", "sb_result", "sb_styles", "sb_style_pics"}
 
@@ -641,16 +642,29 @@ def api(name, a):
                         [("Sound", "*.mp3 *.wav *.m4a *.aac *.flac *.ogg *.wma *.aif *.aiff"),
                          ("All", "*.*")], a.get("folder") or S.settings.get("last_folder"))
         return {"path": f or "", "name": Path(f).name if f else ""}
+    if name == "place_voices":
+        import ss_place as PL
+        f = native_folder("Choose the folder with the voice files", a.get("folder") or
+                          S.settings.get("last_clip_folder"))
+        if not f:
+            return {"path": ""}
+        v = PL.voices_view(f)
+        if not v["count"]:
+            raise StoryError("There are no sound files in that folder.")
+        return v
     if name == "place_start":
         import ss_place as PL
-        spec = {k: a.get(k) or "" for k in ("folder", "script", "audio", "kind", "title")}
+        spec = {k: a.get(k) or "" for k in ("folder", "script", "audio", "voices", "kind",
+                                            "title")}
         found = PL.look(spec["folder"])[0] if spec["folder"] else []
         if not found:
             raise StoryError("StoryStudio didn't find any clips with a shot number in their "
                              "name in that folder. Name them like “Shot 5.mp4”.")
         n = len(found)
         sound = 0.0
-        if spec["audio"]:
+        if spec["voices"]:
+            sound = 60.0 * PL.voices_view(spec["voices"])["count"]      # a guess: long enough
+        elif spec["audio"]:
             try:
                 sound = float(core.probe(spec["audio"]).get("duration") or 0)
             except Exception:

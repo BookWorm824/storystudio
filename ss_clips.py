@@ -157,6 +157,11 @@ def _about(r, s):
             f"  The movement asked for: {s.get('motion', '')} [camera: {s.get('camera', '')}"
             f"{', ' + s['camera2'] if s.get('camera2') else ''}]\n"
             + (f"  Characters in it: {who}\n" if who else "")
+            + (f"  It has {float(s['end']) - float(s['start']):.1f} seconds in the film: "
+               "best_from and best_to should be the best stretch of about that length "
+               f"(up to {(float(s['end']) - float(s['start'])) * 1.25:.1f} seconds, since it "
+               "can play a little faster).\n" if r.get("timed") and
+               float(s.get("end") or 0) > float(s.get("start") or 0) else "")
             + (f"  Sounds: {s['words']}\n" if r["kind"] == "cartoon" and s.get("words") else ""))
 
 

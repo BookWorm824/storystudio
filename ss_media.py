@@ -440,14 +440,19 @@ def download_speech_model(progress=None):
     return MODELS / PARAKEET
 
 
-def transcribe_raw(mono16k, progress=None, chunk=30.0, overlap=2.0):
-    """Words with times from a 16 kHz mono float array."""
+def speech_recognizer():
+    """The speech model, loaded once (to listen to many files one after another)."""
     import sherpa_onnx
     d = speech_model_dir() or download_speech_model()
-    rec = sherpa_onnx.OfflineRecognizer.from_transducer(
+    return sherpa_onnx.OfflineRecognizer.from_transducer(
         encoder=str(d / "encoder.int8.onnx"), decoder=str(d / "decoder.int8.onnx"),
         joiner=str(d / "joiner.int8.onnx"), tokens=str(d / "tokens.txt"),
         num_threads=max(1, min(8, os.cpu_count() or 2)), model_type="nemo_transducer")
+
+
+def transcribe_raw(mono16k, progress=None, chunk=30.0, overlap=2.0, rec=None):
+    """Words with times from a 16 kHz mono float array."""
+    rec = rec or speech_recognizer()
     R = 16000
     C, O = int(chunk * R), int(overlap * R)
     words, off = [], 0

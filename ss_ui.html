@@ -999,7 +999,7 @@ function shotFiles(s) {
 function placedCards(r) {
   const j = r.rough_cut;
   const how = j ? `<div class="sub" style="margin:0 0 12px">${roughText(j)}</div>
-    <div class="sub" style="margin:0 0 14px"><b>To open it in Premiere:</b><br>1. Open Premiere, and make a new project (or open this video's project).<br>2. Click <b>File</b>, then <b>Import</b>, and choose <b>${esc(j.file_name)}</b>. It's in the folder with your clips.<br>3. Double-click the timeline called <b>${esc(j.name)}</b>, then save the project.</div>` : "";
+    <div class="sub" style="margin:0 0 14px"><b>To open it in Premiere:</b><br>1. Open Premiere, and make a new project (or open this video's project).<br>2. Click <b>File</b>, then <b>Import</b>, and choose <b>${esc(j.file_name)}</b>. It's in the folder with your clips.<br>3. Double-click the timeline called <b>${esc(j.name)}</b>, then save the project.${r.kind === "cartoon" ? `<br><b>After that:</b> open the saved project in StoryStudio, use <b>Timing and pacing</b>, then <b>Add sound effects</b> (choose “Cartoon: a sound for everything”).` : ""}</div>` : "";
   const top = `<div class="card" style="margin-top:26px"><h2>Your timeline for Premiere</h2>${how}
     <div class="row" style="flex-wrap:wrap;gap:10px">${j ? `<button class="btn primary" onclick='revealFile(${esc(JSON.stringify(j.file))}, this)'>${ICON.folder} Show me the file</button>` : ""}<button class="btn" onclick="roughCut(this)">${j ? "Build it again" : "Build the timeline"}</button></div>
     <div class="pmsg" id="rcmsg"></div></div>`;
@@ -1029,7 +1029,7 @@ function clipsCard(r, noRough) {
     ${noRough ? "" : roughBlock(r)}</div>`;
 }
 // ---------------------------------------------------------------- start from finished clips
-let PLC = {info: null, kind: "story", script: "", audio: "", audioName: "", title: ""};
+let PLC = {info: null, kind: "story", script: "", audio: "", audioName: "", title: "", voices: null};
 function openPlace() { renderPlace(); $("main").scrollTop = 0; }
 function renderPlace() {
   const i = PLC.info, k = PLC.kind;
@@ -1042,7 +1042,9 @@ function renderPlace() {
     sbStep(2, "What kind of video is it?", seg),
     sbStep(3, k === "cartoon" ? "Your outline, if you have one" : `Your ${words}`, `<textarea class="sbin" rows="9" placeholder="${k === "music" ? "Paste the song lyrics here…" : k === "cartoon" ? "Optional: paste what happens in the cartoon, in order…" : "Paste the story here, the way it's narrated…"}" oninput="PLC.script=this.value">${esc(PLC.script)}</textarea><div class="row" style="margin-top:8px"><button class="btn small" onclick="placeScript()">${ICON.folder} Or choose a file</button></div>`, k === "cartoon" ? "It helps StoryStudio name each shot. Leave it empty to simply put the clips in number order." : `StoryStudio looks at every clip and works out which words go with it. Shot notes, prompts and headings in the ${words === "story" ? "script" : words} are fine; it skips them.`),
   ];
-  if (k !== "cartoon") steps.push(sbStep(4, `Your ${sound}, if it's recorded`, `<div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn" onclick="placeSound()">${ICON.folder} ${PLC.audio ? "Choose another" : "Choose the sound file"}</button>${PLC.audio ? `<span class="sub" style="margin:0"><span style="color:var(--good)">✓</span> ${esc(PLC.audioName)}</span><button class="btn small ghost" onclick="PLC.audio='';PLC.audioName='';renderPlace()">Don't use it</button>` : ""}</div>${!PLC.audio && i && i.sounds && i.sounds.length ? `<div class="sub" style="margin:10px 0 0">Found in your folder: ${i.sounds.map((x, n) => `<a href="#" onclick="PLC.audio=PLC.info.sounds[${n}].path;PLC.audioName=PLC.info.sounds[${n}].name;renderPlace();return false">${esc(x.name)}</a>`).join(", ")}. Click one to use it.</div>` : ""}`, k === "music" ? "Optional. The song goes on the timeline under your clips. StoryStudio also tries to start each clip where its words are sung; singing over music is hard to follow, so it may only be able to put them in order." : "Optional, but this is what makes it really useful: StoryStudio listens to the narration and starts every clip at the moment its words are spoken. Without it, the clips go back to back in order."));
+  const vf = i && i.voice_folders ? i.voice_folders : [];
+  const picked = PLC.voices && k === "story" ? `<span class="sub" style="margin:0"><span style="color:var(--good)">✓</span> ${PLC.voices.count} voice files in “${esc(PLC.voices.name)}”</span><button class="btn small ghost" onclick="PLC.voices=null;renderPlace()">Don't use them</button>` : PLC.audio ? `<span class="sub" style="margin:0"><span style="color:var(--good)">✓</span> ${esc(PLC.audioName)}</span><button class="btn small ghost" onclick="PLC.audio='';PLC.audioName='';renderPlace()">Don't use it</button>` : "";
+  if (k !== "cartoon") steps.push(sbStep(4, `Your ${sound}, if it's recorded`, `<div class="row" style="flex-wrap:wrap;gap:10px"><button class="btn" onclick="placeSound()">${ICON.folder} ${k === "story" ? "It's one sound file" : PLC.audio ? "Choose another" : "Choose the sound file"}</button>${k === "story" ? `<button class="btn" onclick="placeVoices()">${ICON.folder} It's a folder of voice files</button>` : ""}${picked}</div>${k === "story" && !PLC.voices && !PLC.audio && vf.length ? `<div class="sub" style="margin:10px 0 0">Found in your folder: ${vf.map((x, n) => `<a href="#" onclick="PLC.voices=PLC.info.voice_folders[${n}];PLC.audio='';renderPlace();return false">${x.count} voice files in “${esc(x.name)}”</a>`).join(", ")}. Click to use them.</div>` : ""}${k === "story" ? `<div class="sub" style="margin:10px 0 0">A folder of voice files is for stories where each line, or each character, was recorded on its own. StoryStudio listens to every file, puts them in script order and joins them into one new narration file. Your own files aren't changed.</div>` : ""}${!PLC.voices && !PLC.audio && i && i.sounds && i.sounds.length && !(k === "story" && vf.length) ? `<div class="sub" style="margin:10px 0 0">Found in your folder: ${i.sounds.map((x, n) => `<a href="#" onclick="PLC.audio=PLC.info.sounds[${n}].path;PLC.audioName=PLC.info.sounds[${n}].name;renderPlace();return false">${esc(x.name)}</a>`).join(", ")}. Click one to use it.</div>` : ""}`, k === "music" ? "Optional. The song goes on the timeline under your clips. StoryStudio also tries to start each clip where its words are sung; singing over music is hard to follow, so it may only be able to put them in order." : "Optional, but this is what makes it really useful: StoryStudio listens to the narration and starts every clip at the moment its words are spoken. Without it, the clips go back to back in order."));
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>Put my finished clips on a timeline</h1><div class="sub" style="margin:0">Already made your clips? Give StoryStudio the folder and the script. It works out which clip goes with which words and builds a Premiere timeline with every clip in its place. Your clips aren't changed.</div></div></div>
     <div class="sbsteps">${steps.join("")}</div>
@@ -1064,14 +1066,20 @@ async function placeScript() {
 }
 async function placeSound() {
   if (picking) return; picking = true;
-  try { const j = await api("place_sound", {folder: PLC.info ? PLC.info.folder : ""}); if (j.path) { PLC.audio = j.path; PLC.audioName = j.name; renderPlace(); } }
+  try { const j = await api("place_sound", {folder: PLC.info ? PLC.info.folder : ""}); if (j.path) { PLC.audio = j.path; PLC.audioName = j.name; PLC.voices = null; renderPlace(); } }
   catch (e) { toast(e.message || "That file couldn't be opened.", true); }
+  finally { picking = false; }
+}
+async function placeVoices() {
+  if (picking) return; picking = true;
+  try { const j = await api("place_voices", {folder: PLC.info ? PLC.info.folder : ""}); if (j.path) { PLC.voices = j; PLC.audio = ""; PLC.audioName = ""; renderPlace(); } }
+  catch (e) { toast(e.message || "That folder couldn't be opened.", true); }
   finally { picking = false; }
 }
 async function placeStart(btn) {
   if (!PLC.info || !PLC.info.shots) return;
   btn.disabled = true;
-  try { const k = await api("place_start", {folder: PLC.info.folder, script: PLC.script, audio: PLC.kind === "cartoon" ? "" : PLC.audio, kind: PLC.kind, title: PLC.info.title}); watchJob(k.job); }
+  try { const k = await api("place_start", {folder: PLC.info.folder, script: PLC.script, audio: PLC.kind === "cartoon" || (PLC.voices && PLC.kind === "story") ? "" : PLC.audio, voices: PLC.voices && PLC.kind === "story" ? PLC.voices.path : "", kind: PLC.kind, title: PLC.info.title}); watchJob(k.job); }
   catch (e) { btn.disabled = false; $("#plmsg").innerHTML = `<span class="err">${esc(e.message || "That didn't work.")}</span>`; }
 }
 // ---- the rough cut: the checked clips on a Premiere timeline, in order
@@ -1081,9 +1089,10 @@ function roughText(j) {
   const long = m ? `${m} min ${s} s` : `${s} seconds`;
   let t = `<span class="ok">✓ Your rough cut is made:</span> ${j.shots} shot${j.shots === 1 ? "" : "s"} in order, about ${long} long.`;
   const did = [];
-  if (j.timed) t += ` Every clip starts where its words are said in <b>${esc(j.recording || "")}</b>. A clip that runs longer than its words is trimmed at the end; one that nearly fits is sped up or slowed a little.` + (j.sound ? ` The recording is on the timeline under the clips.` : ` <b>One thing to do in Premiere:</b> drag ${esc(j.recording || "your recording")} onto the first sound track so it starts at the very beginning of the timeline (0:00). Then the words and the clips line up.`);
+  if (j.timed && j.timed_by === "script") t += ` Every clip sits at the time your script gives it. A clip that runs longer than its time ${j.cartoon ? "plays a little faster (125%) and is trimmed at the end" : "is trimmed at the end"}; one that nearly fits is sped up or slowed a little to fit.`;
+  else if (j.timed) t += ` Every clip starts where its words are said in <b>${esc(j.recording || "")}</b>. A clip that runs longer than its words is trimmed at the end; one that nearly fits is sped up or slowed a little.` + (j.sound ? ` The recording is on the timeline under the clips.` : ` <b>One thing to do in Premiere:</b> drag ${esc(j.recording || "your recording")} onto the first sound track so it starts at the very beginning of the timeline (0:00). Then the words and the clips line up.`);
   else if (j.sound) t += ` <b>${esc(j.sound)}</b> is on the timeline under them.`;
-  if (j.short && j.short.length) t += ` ${listShots(j.short.map(x => x[0]))} ${j.short.length === 1 ? "is" : "are"} still too short for ${j.short.length === 1 ? "its" : "their"} words, so there's a gap after ${j.short.length === 1 ? "it" : "each"} (a marker shows where and how long).`;
+  if (j.short && j.short.length) t += ` ${listShots(j.short.map(x => x[0]))} ${j.short.length === 1 ? "is" : "are"} still too short for ${j.short.length === 1 ? "its" : "their"} ${j.timed_by === "script" ? "time" : "words"}, so there's a gap after ${j.short.length === 1 ? "it" : "each"} (a marker shows where and how long).`;
   if (j.trimmed && !j.timed) did.push(`${j.trimmed} clip${j.trimmed === 1 ? " is" : "s are"} cut to ${j.trimmed === 1 ? "its" : "their"} good seconds`);
   if (j.sped) did.push(`${j.sped} play${j.sped === 1 ? "s" : ""} at a new speed`);
   if (did.length) t += ` ${did.join(" and ")[0].toUpperCase()}${did.join(" and ").slice(1)}.`;
@@ -1166,7 +1175,7 @@ function renderScript() {
   $("#view").innerHTML = `
     <div class="rhead"><div><h1>${esc(r.title)}</h1><div class="sub" style="margin:0">${esc(r.summary)}</div></div>
       <div class="row">${r.files ? `<button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.text))}})'>Open the shot list</button><button class="btn" onclick='api("open",{path:${esc(JSON.stringify(r.files.folder))}})'>${ICON.folder} Folder</button>` : ""}</div></div>
-    <div class="chips"><span class="chip">${kindLabel(r.kind)}</span><span class="chip">About ${mmss(r.seconds)} long</span>${r.placed ? `<span class="chip good">${r.main_shots} shots from your clips</span>${r.timed ? `<span class="chip good">Timed to your recording</span>` : `<span class="chip">In order, back to back</span>`}` : `<span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span>`}<span class="chip">${esc(r.aspect)}</span>${types.gens ? `<span class="chip" title="A rough guide: some shot types take several tries to come out right">About ${Math.ceil(types.gens)} generations</span>` : ""}</div>
+    <div class="chips"><span class="chip">${kindLabel(r.kind)}</span><span class="chip">About ${mmss(r.seconds)} long</span>${r.placed ? `<span class="chip good">${r.main_shots} shots from your clips</span>${r.timed ? `<span class="chip good">${r.timed_by === "script" ? "Timed to your script" : "Timed to your recording"}</span>` : `<span class="chip">In order, back to back</span>`}` : `<span class="chip">${r.clip}-second clips</span><span class="chip good">${r.main_shots} shots + ${r.extra_shots} extra</span><span class="chip">${esc(r.style.name)}</span>`}<span class="chip">${esc(r.aspect)}</span>${types.gens ? `<span class="chip" title="A rough guide: some shot types take several tries to come out right">About ${Math.ceil(types.gens)} generations</span>` : ""}</div>
     ${types.line ? `<div class="sub" style="margin:8px 0 0">Shot types: ${esc(types.line)}</div>` : ""}
     ${(r.place_notes || []).map(x => `<div class="banner">${esc(x)}</div>`).join("")}
     ${r.approach ? `<div class="banner"><b>The plan:</b> ${esc(r.approach)}</div>` : ""}

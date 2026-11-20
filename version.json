@@ -1,5 +1,5 @@
 {
-  "version": "1.19.0",
+  "version": "1.20.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -23,6 +23,7 @@
     "ss_clips.py",
     "ss_roughcut.py",
     "ss_place.py",
+    "ss_voices.py",
     "ss_craft.py",
     "ss_shottypes.json",
     "ss_styles.json",
@@ -31,5 +32,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "New on the start page: Put my finished clips on a timeline. Choose the folder with your clips, paste the script, and add the narration if it is recorded. StoryStudio works out which words go with each clip and builds a Premiere timeline with every clip where its words are spoken."
+  "notes": "Put my finished clips on a timeline now follows the times printed in your script (for a cartoon planned clip by clip), keeps each clip's sound-effect notes, and can take a folder of separate voice files: it puts them in script order, joins them into one narration file and times your clips to it."
 }

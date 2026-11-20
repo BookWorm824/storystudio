@@ -125,7 +125,8 @@ def plan(r, folder=None):
         if r.get("timed"):               # each shot has the time its words are said
             it["at"] = float(s.get("start") or 0)
             if it.get("file"):
-                _fit(it, max(0.2, float(s.get("end") or 0) - it["at"]))
+                _fit(it, max(0.2, float(s.get("end") or 0) - it["at"]),
+                     r.get("kind") == "cartoon")
         items.append(it)
     return items, missing
 
@@ -133,17 +134,21 @@ def plan(r, folder=None):
 FAST, SLOW = 1.15, 0.75         # how far a clip may be sped up or slowed to fit its words
 
 
-def _fit(it, slot):
+CARTOON_FAST = 1.25             # cartoons are snappier: the user speeds shots up 110-125%
+
+
+def _fit(it, slot, cartoon=False):
     """Make a shot fill the time its words take. A clip that nearly fits is sped up or
-    slowed a little so all of it plays; one that is much too long plays at its own speed with
-    its end trimmed; one that is much too short is slowed as far as looks natural (what is
-    still missing is kept as it["short"], and leaves a gap)."""
+    slowed a little so all of it plays; one that is much too long plays at its own speed
+    (a cartoon's at 125%) with its end trimmed; one that is much too short is slowed as far
+    as looks natural (what is still missing is kept as it["short"], and leaves a gap)."""
     it["slot"] = slot
     if it["file"]["kind"] != "clip":
         it["b"] = it["a"] + slot
         return
     ratio = (it["b"] - it["a"]) / slot
-    pct = 100 if ratio > FAST else int(round(max(SLOW, ratio) * 100))
+    fast = CARTOON_FAST if cartoon else FAST
+    pct = (125 if cartoon else 100) if ratio > fast else int(round(max(SLOW, ratio) * 100))
     it["speed"] = 100 if abs(pct - 100) < 4 else pct
     it["b"] = min(it["b"], it["a"] + slot * it["speed"] / 100.0)
     short = slot - (it["b"] - it["a"]) * 100.0 / it["speed"]
@@ -376,6 +381,8 @@ def build(r, folder=None, out_dir=None):
         "stand_ins": [p["label"] for p in placed if p["stand_in"]],
         "missing": missing, "made": time.strftime("%Y-%m-%d %H:%M"),
         "timed": bool(r.get("timed")), "recording": Path(audio).name if audio else "",
+        "timed_by": r.get("timed_by") or ("recording" if r.get("timed") else ""),
+        "cartoon": r.get("kind") == "cartoon",
         "sound": Path(audio).name if audio and WITH_SOUND else "",
         "short": [[p["label"], p["short"]] for p in placed if p.get("short")],
     }
