@@ -1,5 +1,5 @@
 {
-  "version": "1.21.0",
+  "version": "1.21.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -30,7 +30,8 @@
     "ss_style_pics.json",
     "ss_fal.py",
     "ss_update.py",
-    "storysound.ico"
+    "storysound.ico",
+    "ss_audio_template.xml"
   ],
-  "notes": "Cartoons now get character voices: little wordless sounds (a gasp, excited chittering, straining grunts, a sigh) that let you hear what a character feels and means to do. New cartoon sound runs include them. For a cartoon whose sounds are already made, open its sounds and press Add the characters' voices."
+  "notes": "Two fixes for cartoons. A timeline with no sound on it (like a silent cartoon's rough cut) now gets its Premiere copy with the new sounds; before, only the preview video was made. And the characters' own sounds are strictly wordless: squeaks, chitters, gasps, grunts and sighs, never anything like speech."
 }

@@ -623,10 +623,11 @@ CAST_SCHEMA = {
         "properties": {
             "who": {"type": "string", "description": "the character's name, or a plain name "
                     "like 'the squirrel' when the story gives none"},
-            "voice": {"type": "string", "description": "how this character's wordless voice "
-                      "sounds, as the opening words of a sound-generator prompt, about 8-14 "
-                      "words, e.g. 'small cute cartoon squirrel voice, high-pitched and "
-                      "squeaky, childlike, wordless'"},
+            "voice": {"type": "string", "description": "the kind of wordless noises this "
+                      "character makes, as the opening words of a sound-generator prompt, "
+                      "about 8-14 words, e.g. 'small cute cartoon squirrel, high-pitched "
+                      "squeaky animal chitters and squeaks, never words'. An animal makes "
+                      "animal noises; it must never sound like a person talking"},
         },
         "required": ["who", "voice"], "additionalProperties": False}}},
     "required": ["voices"], "additionalProperties": False,
@@ -642,8 +643,9 @@ VOICE_SOUND = {
         "what": {"type": "string", "description": "short label for the storyteller: who makes "
                  "what sound and why, e.g. 'Chester gasps: he can't believe his luck'"},
         "sound_prompt": {"type": "string", "description": "for an AI sound generator: the "
-                         "character's voice words first, exactly as given, then precisely "
-                         "what is heard and the feeling in it"},
+                         "character's sound words first, exactly as given, then precisely "
+                         "what noise is heard and the feeling in it. Describe the noise; "
+                         "never a syllable or a word to be said, nothing in quotes"},
         "adobe_prompt": {"type": "string", "description": "the same as one full sentence"},
         "level": {"type": "string", "enum": LEVELS},
         "instead_of": {"type": "string", "description": "the id of an already planned sound "
@@ -664,10 +666,13 @@ def cast_voices(name, story, images):
     prompt = (f"Cartoon: \"{name}\". Nobody speaks in it. These stills come from shots across "
               "the film.\n\nTHE SCRIPT (for context):\n"
               f"{(story or '').strip()[:6000] or '(no script)'}\n\n"
-              "List each character who is on screen often enough to need a voice (usually one "
-              "or two), and describe how that character's wordless voice sounds. It must fit "
-              "the character's kind, size and nature, be cute and funny rather than real or "
-              "scary, and be something an AI sound generator can make the same way every time.")
+              "List each character who is on screen often enough to need his own sounds "
+              "(usually one or two), and describe the wordless noises that character makes. "
+              "Nobody in this cartoon ever speaks: an animal makes cute animal noises "
+              "(squeaks, chitters, sniffs, grunts), never words and never a person's voice. "
+              "They must fit the character's kind, size and nature, be cute and funny rather "
+              "than real or scary, and be something an AI sound generator can make the same "
+              "way every time.")
     res = ask(prompt, CAST_SCHEMA, system=SYSTEM, images=images, timeout=300)
     return [v for v in res.get("voices", []) if v.get("who") and v.get("voice")][:4]
 
@@ -692,12 +697,12 @@ def _voices_once(grp, name, story, cast):
         for a, b, p in s["sheets"]:
             images.append((f"Shot {k + 1}, stills {a:.2f}s to {b:.2f}s:", p))
     who = "\n".join(f"- {v['who']}: {v['voice']}" for v in cast) or \
-        "- (decide a fitting wordless cartoon voice and use the same words every time)"
-    prompt = f"""Cartoon: "{name}". Plan the CHARACTERS' VOICE SOUNDS for these {len(grp)} \
-shots. Each shot's stills are close together, and the exact time in seconds is printed in \
-yellow on every still.
+        "- (decide fitting wordless cartoon animal noises and use the same words every time)"
+    prompt = f"""Cartoon: "{name}". Nobody speaks in it. Plan the CHARACTERS' OWN WORDLESS \
+SOUNDS for these {len(grp)} shots. Each shot's stills are close together, and the exact time \
+in seconds is printed in yellow on every still.
 
-THE VOICES (begin every sound_prompt with the character's voice, word for word):
+EACH CHARACTER'S SOUND (begin every sound_prompt with these words, exactly):
 {who}
 
 THE SCRIPT (for context):
@@ -751,10 +756,10 @@ def plan_voices(shots, name, story, cast, progress=None, cancel=None, per_reques
                     out.append(dict(v, lo=lo, hi=hi))
             done[0] += 1
             if progress:
-                progress(done[0] / len(groups), f"{ai_name()} is giving the characters "
-                                                f"their voices ({done[0]} of {len(groups)})…")
+                progress(done[0] / len(groups), f"{ai_name()} is working out the characters' "
+                                                f"own sounds ({done[0]} of {len(groups)})…")
     if progress:
-        progress(0.0, f"{ai_name()} is giving the characters their voices…")
+        progress(0.0, f"{ai_name()} is working out the characters' own sounds…")
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(one, groups))
     return sorted(out, key=lambda v: float(v["start"]))

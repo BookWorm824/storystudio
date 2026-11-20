@@ -190,6 +190,47 @@ class Writer:
         best.sort(key=lambda b: b[:4])
         return best[0][4], best[0][5]
 
+    def spare_template(self):
+        """A plain stereo .wav clip to copy from, for a project with no sound clip of its own
+        (a picture-only timeline, such as a silent cartoon's rough cut). It is StoryStudio's
+        own, kept in ss_audio_template.xml: its objects join this project under fresh IDs,
+        and drop_spare() takes them out again before the project is saved. None when the
+        project was made by an older Premiere than the template (it might not read it)."""
+        from ss_core import APP_DIR
+        try:
+            t = ET.parse(APP_DIR / "ss_audio_template.xml").getroot()
+            mine = max([int(e.get("Version")) for e in self.root
+                        if e.tag == "Project" and (e.get("Version") or "").isdigit()] or [0])
+            if mine and mine < int(t.get("ProjectVersion") or 0):
+                return None
+        except (OSError, ET.ParseError, ValueError):
+            log_error("spare template")
+            return None
+        els = list(t)
+        remap = {}
+        for el in els:
+            remap[el.get("ObjectID") or el.get("ObjectUID")] = \
+                self.new_key(el.get("ObjectID") is not None)
+        for el in els:
+            old = el.get("ObjectID") or el.get("ObjectUID")
+            el.set("ObjectID" if el.get("ObjectID") is not None else "ObjectUID", remap[old])
+            for c in el.iter():
+                for a in ("ObjectRef", "ObjectURef"):
+                    if c.get(a) in remap:
+                        c.set(a, remap[c.get(a)])
+            self.root.append(el)
+            self.objs[remap[old]] = el
+        self._spare = [(remap[el_old], self.objs[remap[el_old]]) for el_old in remap]
+        return self.objs.get(remap.get(t.get("Item")))
+
+    def drop_spare(self):
+        """Take StoryStudio's own template clip out again (the copies made from it stay)."""
+        for key, el in getattr(self, "_spare", None) or []:
+            if el in list(self.root):
+                self.root.remove(el)
+            self.objs.pop(key, None)
+        self._spare = None
+
     # --- adding --------------------------------------------------------------
     def add_track(self, seq, name=None):
         grp = self.audio_group(seq)
@@ -993,9 +1034,13 @@ def write_project(project_path, seq_uid, tracks, out_path, sound_dir, repoint=No
         n = w.reset_items(reset)
         log("removed effects / set volume on", n, "clips")
     tmpl, ext = w.template_item(".wav")
+    if tmpl is None:                         # a picture-only timeline: StoryStudio's own clip
+        tmpl, ext = w.spare_template(), ".wav"
     if tmpl is None:
-        raise StoryError("This project has no music or voice clip StoryStudio can copy, so it "
-                         "can't add tracks to it directly. Use the import file instead.")
+        raise StoryError("This project has no sound clip on any timeline for StoryStudio to "
+                         "copy, so it couldn't add the sound tracks. In Premiere, put any "
+                         "sound file on the timeline (even a short one), save, and run this "
+                         "again. Your new sounds are in the StoryStudio folder meanwhile.")
     b = w.make_bin("StoryStudio sounds")
     for tname, clips in tracks:
         if not clips:
@@ -1004,6 +1049,7 @@ def write_project(project_path, seq_uid, tracks, out_path, sound_dir, repoint=No
         for c in clips:
             w.add_clip(tr, tmpl, c["file"], c["start"], c["duration"], c["name"], bin_el=b,
                        project_dir=str(Path(out_path).parent))
+    w.drop_spare()
     w.save(out_path)
     log("wrote project", out_path, "template ext", ext)
     return str(out_path), ext

@@ -1,0 +1,207 @@
+<?xml version='1.0' encoding='utf-8'?>
+<StoryStudioTemplate ProjectVersion="45" Item="3144"><AudioClipTrackItem ObjectID="3144" ClassID="064ec682-9ba6-11d5-af2d-9ca32c7d6164" Version="11">
+		<ClipTrackItem Version="8">
+			<ComponentOwner Version="1">
+				<Components ObjectRef="3546" />
+			</ComponentOwner>
+			<TrackItem Version="4">
+				<Node Version="1">
+					<Properties Version="1">
+						<ESP.Tag>dialog</ESP.Tag>
+						</Properties>
+				</Node>
+				<Start>3154032000000</Start>
+				<End>3884328000000</End>
+			</TrackItem>
+			<SubClip ObjectRef="3547" />
+		</ClipTrackItem>
+		<ID>01dff81c-7fff-444e-be68-7b98cccbbf38</ID>
+		<PreRenderComponentChainHashVersion>1</PreRenderComponentChainHashVersion>
+	</AudioClipTrackItem>
+	<SubClip ObjectID="3547" ClassID="e0c58dc9-dbdd-4166-aef7-5db7e3f22e84" Version="6">
+		<Clip ObjectRef="7878" />
+		<MasterClip ObjectURef="2d1a7794-4ec6-4d57-9c25-ba600659eae1" />
+		<Name>sound.wav</Name>
+		<OrigChGrp>0</OrigChGrp>
+	</SubClip>
+	<MasterClip ObjectUID="2d1a7794-4ec6-4d57-9c25-ba600659eae1" ClassID="fb11c33a-b0a9-4465-aa94-b6d5db2628cf" Version="12">
+		<LoggingInfo ObjectRef="678" />
+		<AudioComponentChains Version="1">
+			<AudioComponentChain Index="0" ObjectRef="679" />
+		</AudioComponentChains>
+		<Clips Version="1">
+			<Clip Index="0" ObjectRef="680" />
+		</Clips>
+		<AudioClipChannelGroups ObjectRef="681" />
+		<Name>sound.wav</Name>
+		<DefMappingID>0551e2a0-6da1-4691-800e-b3ded5ca94f7</DefMappingID>
+		<MasterClipChangeVersion>10</MasterClipChangeVersion>
+	</MasterClip>
+	<ClipChannelGroupVectorSerializer ObjectID="681" ClassID="a3127a8c-95d4-456e-a7f5-171b3f922426" Version="1">
+		<ClipChannelVectors Version="1">
+			<ClipChannelVectorItem Index="0" ObjectRef="1646" />
+		</ClipChannelVectors>
+	</ClipChannelGroupVectorSerializer>
+	<ClipChannelVectorSerializer ObjectID="1646" ClassID="333d203b-3a53-4195-8894-fc7523ff3dc7" Version="1">
+		<ClipChannels Version="1">
+			<ClipChannelItem Index="0" ObjectRef="2307" />
+			<ClipChannelItem Index="1" ObjectRef="2308" />
+		</ClipChannels>
+		<ChannelType>1</ChannelType>
+	</ClipChannelVectorSerializer>
+	<ClipChannelSerializer ObjectID="2308" ClassID="5c89aa7a-89a6-4483-becd-f2b1def42316" Version="1">
+		<SourceClipIndex>0</SourceClipIndex>
+		<mSourceChannelIndex>1</mSourceChannelIndex>
+	</ClipChannelSerializer>
+	<ClipChannelSerializer ObjectID="2307" ClassID="5c89aa7a-89a6-4483-becd-f2b1def42316" Version="1">
+		<SourceClipIndex>0</SourceClipIndex>
+		<mSourceChannelIndex>0</mSourceChannelIndex>
+	</ClipChannelSerializer>
+	<AudioClip ObjectID="680" ClassID="b8830d03-de02-41ee-84ec-fe566dc70cd9" Version="8">
+		<Clip Version="18">
+			<Node Version="1">
+				<Properties Version="1">
+					<asl.clip.label.color>480554</asl.clip.label.color>
+					<asl.clip.label.name>BE.Prefs.LabelColors.2</asl.clip.label.name>
+				</Properties>
+			</Node>
+			<MarkerOwner Version="1">
+				<Markers ObjectRef="1642" />
+			</MarkerOwner>
+			<Source ObjectRef="1643" />
+			<ClipID>93188a4d-0544-46ec-bdb0-fd098fe70bb7</ClipID>
+			<InUse>false</InUse>
+		</Clip>
+		<SecondaryContents Version="1">
+			<SecondaryContentItem Index="0" ObjectRef="1644" />
+			<SecondaryContentItem Index="1" ObjectRef="1645" />
+		</SecondaryContents>
+		<AudioChannelLayout>[{"channellabel":100},{"channellabel":101}]</AudioChannelLayout>
+	</AudioClip>
+	<SecondaryContent ObjectID="1645" ClassID="f9d004b5-cb04-4e2f-af6f-64fadc2c4be9" Version="1">
+		<Content ObjectRef="1643" />
+		<ChannelIndex>1</ChannelIndex>
+	</SecondaryContent>
+	<AudioMediaSource ObjectID="1643" ClassID="f588da05-fc2a-4fbc-9383-74d653b379e3" Version="2">
+		<MediaSource Version="4">
+			<Content Version="10">
+			</Content>
+			<Media ObjectURef="c2fa8e30-5c01-4a4b-8c1c-421f10f3dc9b" />
+		</MediaSource>
+		<OriginalDuration>1331539200000</OriginalDuration>
+	</AudioMediaSource>
+	<Media ObjectUID="c2fa8e30-5c01-4a4b-8c1c-421f10f3dc9b" ClassID="7a5c103e-f3ac-4391-b6b4-7cc3d2f9a7ff" Version="30">
+		<AudioStream ObjectRef="2732" />
+		<FilePath>C:\StoryStudio\sound.wav</FilePath>
+		<ImplementationID>1fa18bfa-255c-44b1-ad73-56bcd99fceaf</ImplementationID>
+		<Title>sound.wav</Title>
+		<FileKey>67c2a7fb-5f92-435e-a733-f5f9316addea</FileKey>
+		<ConformedAudioRate>5760000</ConformedAudioRate>
+		<ActualMediaFilePath>C:\StoryStudio\sound.wav</ActualMediaFilePath>
+		<CCFileModTime>1794359516130456</CCFileModTime>
+	</Media>
+	<AudioStream ObjectID="2732" ClassID="0b5cf52f-2b85-4863-890b-8844b64ecfe9" Version="8">
+		<FrameRate>5760000</FrameRate>
+		<AudioChannelLayout>[{"channellabel":100},{"channellabel":101}]</AudioChannelLayout>
+		<Duration>1331539200000</Duration>
+		<SampleType>3</SampleType>
+		</AudioStream>
+	<SecondaryContent ObjectID="1644" ClassID="f9d004b5-cb04-4e2f-af6f-64fadc2c4be9" Version="1">
+		<Content ObjectRef="1643" />
+		<ChannelIndex>0</ChannelIndex>
+	</SecondaryContent>
+	<Markers ObjectID="1642" ClassID="bee50706-b524-416c-9f03-b596ce5f6866" Version="4">
+		<ByGUID>byGUID</ByGUID>
+		<LastMetadataState>00000000-0000-0000-0000-000000000000</LastMetadataState>
+		<LastContentState>137950df-0ce6-f387-e43d-00db00000024</LastContentState>
+	</Markers>
+	<AudioComponentChain ObjectID="679" ClassID="3cb131d1-d3c0-47ae-a19a-bdf75ea11674" Version="4">
+		<DefaultVol>true</DefaultVol>
+		<DefaultVolumeComponentID>1</DefaultVolumeComponentID>
+		<DefaultChannelVolumeComponentID>2</DefaultChannelVolumeComponentID>
+		<ComponentChain Version="3">
+		</ComponentChain>
+		<FrameRate>5760000</FrameRate>
+		<AudioChannelLayout>[{"channellabel":100},{"channellabel":101}]</AudioChannelLayout>
+		<ChannelType>1</ChannelType>
+	</AudioComponentChain>
+	<ClipLoggingInfo ObjectID="678" ClassID="77ab7fdd-dcdf-465d-9906-7a330ca1e738" Version="10">
+		<CaptureMode>1</CaptureMode>
+		<ClipName>sound.wav</ClipName>
+		<TimecodeFormat>200</TimecodeFormat>
+		<MediaInPoint>0</MediaInPoint>
+		<MediaOutPoint>1331539200000</MediaOutPoint>
+		<MediaFrameRate>5760000</MediaFrameRate>
+	</ClipLoggingInfo>
+	<AudioClip ObjectID="7878" ClassID="b8830d03-de02-41ee-84ec-fe566dc70cd9" Version="8">
+		<Clip Version="18">
+			<Node Version="1">
+				<Properties Version="1">
+					<ESP.ClaritySection.Dynamics.UsedClipGainValue>1.95736598969</ESP.ClaritySection.Dynamics.UsedClipGainValue>
+					<ESP.ClaritySection.Analysis.ContentState>a2334a4f-d03c-6ad4-bdf7-0dc000000024</ESP.ClaritySection.Analysis.ContentState>
+					<ESP.LoudnessSection.Analysis.ContentState>a2334a4f-d03c-6ad4-bdf7-0dc000000024</ESP.LoudnessSection.Analysis.ContentState>
+					<ESP.LoudnessSection.Analysis.TimeOut>730296000000</ESP.LoudnessSection.Analysis.TimeOut>
+					<ESP.LoudnessSection.Analysis.TimeIn>0</ESP.LoudnessSection.Analysis.TimeIn>
+					<ESP.ClaritySection.Analysis.TimeIn>0</ESP.ClaritySection.Analysis.TimeIn>
+					<ESP.ClaritySection.Analysis.TimeOut>730296000000</ESP.ClaritySection.Analysis.TimeOut>
+					<ESP.ClaritySection.Analysis.RMSMinValue>-72.6086120605</ESP.ClaritySection.Analysis.RMSMinValue>
+					<ESP.ClaritySection.Analysis.RMSAvgValue>-51.9864082336</ESP.ClaritySection.Analysis.RMSAvgValue>
+					<ESP.LoudnessSection.Analysis.ITU1770LoudnessValue>-28.8334407806</ESP.LoudnessSection.Analysis.ITU1770LoudnessValue>
+					<asl.clip.label.color>480554</asl.clip.label.color>
+					<asl.clip.label.name>BE.Prefs.LabelColors.2</asl.clip.label.name>
+				</Properties>
+			</Node>
+			<MarkerOwner Version="1">
+				<Markers ObjectRef="1642" />
+			</MarkerOwner>
+			<Source ObjectRef="1643" />
+			<OutPoint>730296000000</OutPoint>
+			<InPoint>0</InPoint>
+			<ClipID>0749d0e4-71b6-4d22-bcdf-5616c9136025</ClipID>
+		</Clip>
+		<SecondaryContents Version="1">
+			<SecondaryContentItem Index="0" ObjectRef="9354" />
+			<SecondaryContentItem Index="1" ObjectRef="9355" />
+		</SecondaryContents>
+		<AudioChannelLayout>[{"channellabel":100},{"channellabel":101}]</AudioChannelLayout>
+		<Gain>1.0</Gain>
+	</AudioClip>
+	<SecondaryContent ObjectID="9355" ClassID="f9d004b5-cb04-4e2f-af6f-64fadc2c4be9" Version="1">
+		<Content ObjectRef="1643" />
+		<ChannelIndex>1</ChannelIndex>
+	</SecondaryContent>
+	<SecondaryContent ObjectID="9354" ClassID="f9d004b5-cb04-4e2f-af6f-64fadc2c4be9" Version="1">
+		<Content ObjectRef="1643" />
+		<ChannelIndex>0</ChannelIndex>
+	</SecondaryContent>
+	<AudioComponentChain ObjectID="3546" ClassID="3cb131d1-d3c0-47ae-a19a-bdf75ea11674" Version="4">
+		<DefaultVol>true</DefaultVol>
+		<DefaultVolumeComponentID>1</DefaultVolumeComponentID>
+		<DefaultChannelVolumeComponentID>2</DefaultChannelVolumeComponentID>
+		<ComponentChain Version="3">
+			<Node Version="1">
+				<Properties Version="1">
+					<MZ.ComponentChain.ActiveComponentID>1</MZ.ComponentChain.ActiveComponentID>
+					<MZ.ComponentChain.ActiveComponentParamIndex>4294967295</MZ.ComponentChain.ActiveComponentParamIndex>
+				</Properties>
+			</Node>
+			<Components Version="1">
+				</Components>
+		</ComponentChain>
+		<FrameRate>5760000</FrameRate>
+		<AudioChannelLayout>[{"channellabel":100},{"channellabel":101}]</AudioChannelLayout>
+		<ChannelType>1</ChannelType>
+	</AudioComponentChain>
+	<ClipProjectItem ObjectUID="5f70ff9f-2372-4eae-9e68-b7205c847159" ClassID="cb4e0ed7-aca1-4171-8525-e3658dec06dd" Version="1">
+		<ProjectItem Version="1">
+			<Node Version="1">
+				<Properties Version="1">
+					<project.icon.view.grid.order>83</project.icon.view.grid.order>
+					<Column.PropertyText.Label>BE.Prefs.LabelColors.2</Column.PropertyText.Label>
+				</Properties>
+			</Node>
+			<Name>sound.wav</Name>
+		</ProjectItem>
+		<MasterClip ObjectURef="2d1a7794-4ec6-4d57-9c25-ba600659eae1" />
+	</ClipProjectItem>
+	</StoryStudioTemplate>

@@ -29,7 +29,7 @@ KIND_NAMES = {"ambience": "Background", "footsteps": "Footsteps", "action": "Act
               "nature": "Nature", "weather": "Weather", "water": "Water",
               "vehicle": "Vehicle", "household": "Household", "magic": "Magic",
               "cartoon": "Cartoon", "crowd": "Crowd", "music": "Music", "other": "Other",
-              "shot": "Shot sounds", "voice": "Character voice"}
+              "shot": "Shot sounds", "voice": "Character sound"}
 
 
 # ---------------------------------------------------------------------------
@@ -855,7 +855,7 @@ def api(name, a):
     if name == "add_voices":
         st, s = S.st, choices()
         n = len(st.get("shots") or [])
-        return {"job": run_job("Giving the characters their voices",
+        return {"job": run_job("Adding the characters' own sounds",
                                lambda p, c, ph: E.add_voices(st, s, p, c), "review",
                                [150 + 9 * n])}
     if name == "make_missing":

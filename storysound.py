@@ -479,6 +479,18 @@ def script_notes(st):
         return {}, ""
 
 
+def _no_words(prompt):
+    """A character sound's description, with anything written as a thing to SAY taken out
+    (quoted syllables like 'whoa' or "ah-HA") and the no-speech rule on the end: the
+    characters never speak."""
+    p = re.sub(r"[\"“”‘][^\"“”‘’]{1,24}[\"“”’]", "", prompt)
+    p = re.sub(r"(?<![A-Za-z])'[^']{1,24}'(?![A-Za-z])", "", p)
+    p = re.sub(r"\s{2,}", " ", p).replace(" ,", ",").replace(" .", ".").strip(" ,;:")
+    if "no speech" not in p.lower():
+        p = p.rstrip(".") + ", no words, no speech"
+    return p
+
+
 def voice_pass(st, planned, story, cancel=None, progress=None):
     """A cartoon's character voices: the wordless sounds (gasps, chitters, grunts, sighs)
     that tell the viewer what a character feels, thinks and means to do. Looks at every shot
@@ -544,8 +556,8 @@ def voice_pass(st, planned, story, cancel=None, progress=None):
             continue
         last_end = b
         new.append({"start": round(a, 3), "end": round(b, 3), "kind": "voice",
-                    "what": (v.get("what") or v.get("feeling") or "A voice sound").strip(),
-                    "sound_prompt": v["sound_prompt"].strip(),
+                    "what": (v.get("what") or v.get("feeling") or "A little sound").strip(),
+                    "sound_prompt": _no_words(v["sound_prompt"]),
                     "search_words": "cartoon " + " ".join((v.get("feeling") or "").split()[:2]),
                     "adobe_prompt": (v.get("adobe_prompt") or v["sound_prompt"]).strip(),
                     "suno_prompt": "", "synced": True,
@@ -559,8 +571,9 @@ def voice_pass(st, planned, story, cancel=None, progress=None):
         "planned sounds replaced; cast", [c.get("who") for c in cast])
     if not new:
         return [], [], ""
-    return new, drop, (f"{C.ai_name()} gave the characters {len(new)} voice sounds (gasps, "
-                       "grunts, giggles, sighs) so you can hear what they feel and mean to do.")
+    return new, drop, (f"{C.ai_name()} gave the characters {len(new)} little sounds of "
+                       "their own (gasps, squeaks, grunts, sighs, never words) so you can "
+                       "hear what they feel and mean to do.")
 
 
 def add_voices(st, settings, progress=None, cancel=None):
@@ -579,8 +592,8 @@ def add_voices(st, settings, progress=None, cancel=None):
     if cancel and cancel():
         raise StoryError("Stopped.")
     if not new:
-        raise StoryError("StoryStudio didn't find moments that need a character's voice, or "
-                         "the AI couldn't be reached. Try again in a moment.")
+        raise StoryError("StoryStudio didn't find moments that need a character's own "
+                         "sound, or the AI couldn't be reached. Try again in a moment.")
     st["cues"] = [c for c in st["cues"] if c["kind"] != "voice"]      # the earlier ones go
     top = max([int(c["id"][1:]) for c in st["cues"] if c["id"][1:].isdigit()] or [0])
     for i, c in enumerate(new):
