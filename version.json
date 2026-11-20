@@ -1,5 +1,5 @@
 {
-  "version": "1.20.1",
+  "version": "1.21.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -32,5 +32,5 @@
     "ss_update.py",
     "storysound.ico"
   ],
-  "notes": "Placing finished clips now remembers what the script says happens in each shot, so the clip check can pick each clip's best seconds. Placing the same folder again updates the same shot list instead of making a second one."
+  "notes": "Cartoons now get character voices: little wordless sounds (a gasp, excited chittering, straining grunts, a sigh) that let you hear what a character feels and means to do. New cartoon sound runs include them. For a cartoon whose sounds are already made, open its sounds and press Add the characters' voices."
 }

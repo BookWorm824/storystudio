@@ -29,7 +29,7 @@ KIND_NAMES = {"ambience": "Background", "footsteps": "Footsteps", "action": "Act
               "nature": "Nature", "weather": "Weather", "water": "Water",
               "vehicle": "Vehicle", "household": "Household", "magic": "Magic",
               "cartoon": "Cartoon", "crowd": "Crowd", "music": "Music", "other": "Other",
-              "shot": "Shot sounds"}
+              "shot": "Shot sounds", "voice": "Character voice"}
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +192,8 @@ def review_view():
         return None
     return {"title": st["seq_name"], "notes": st.get("plan_notes", ""),
             "notice": st.get("notice", ""), "levels": st.get("levels", []),
+            "can_voice": bool(st.get("cartoon") or st.get("movie_type") == "cartoon"),
+            "voices": sum(1 for c in st.get("cues", []) if c["kind"] == "voice"),
             "cues": [cue_view(c) for c in st.get("cues", [])]}
 
 
@@ -850,6 +852,12 @@ def api(name, a):
                                    "review", [sec])}
         E.save(st)
         return {"cue": cue_view(c)}
+    if name == "add_voices":
+        st, s = S.st, choices()
+        n = len(st.get("shots") or [])
+        return {"job": run_job("Giving the characters their voices",
+                               lambda p, c, ph: E.add_voices(st, s, p, c), "review",
+                               [150 + 9 * n])}
     if name == "make_missing":
         st, s = S.st, choices()
         ids = [c["id"] for c in st["cues"] if not c.get("file")]

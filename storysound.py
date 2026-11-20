@@ -290,6 +290,20 @@ def analyze(st, settings, progress=None, cancel=None):
         log_error("close look")
     if cancel and cancel():
         raise StoryError("Stopped.")
+    if st.get("cartoon"):                    # fourth: the characters' own wordless voices
+        try:
+            new, drop, note = voice_pass(
+                st, [c for c in plan["cues"] if c["kind"] not in BEDS], story, cancel,
+                lambda f, m: _say(progress, 0.995 + 0.004 * f, m))
+            plan["cues"] = [c for c in plan["cues"] if not any(c is d for d in drop)] + new
+            if note:
+                st["plan_notes"] = (st["plan_notes"] + " " + note).strip()
+        except StoryError as e:
+            log("character voices skipped:", e)
+        except Exception:
+            log_error("character voices")
+        if cancel and cancel():
+            raise StoryError("Stopped.")
     st["movie_type"] = "cartoon" if st.get("cartoon") else plan.get("movie_type", "")
     st["look"] = plan.get("look", "")
     st["cues"] = tidy_cues(plan["cues"], dur, st["cuts"])
@@ -432,6 +446,153 @@ def level_clips(clips):
             report.append("The music is nearly as loud as the narration; consider lowering it "
                           f"about {m - (S.DIALOGUE_REF - 10):.0f} dB under the voice.")
     return report
+
+
+def script_notes(st):
+    """What the storyteller's own script says about each clip on this timeline, when the
+    clips were placed from a script: ({clip file name: {"title", "action", "sounds"}}, the
+    script). Empty when no shot list made from these clips is found."""
+    try:
+        import ss_script as SB
+        names = {(s.get("name") or "").lower() for s in st.get("shots") or []}
+        best, text = {}, ""
+        lists = sorted(SB.out_dir().glob("* - shot list.json"),
+                       key=lambda p: -p.stat().st_mtime)[:40]
+        for f in lists:
+            r = json.loads(f.read_text(encoding="utf8"))
+            if not r.get("placed"):
+                continue
+            got = {}
+            for s in r.get("shots") or []:
+                for p in s.get("paths") or []:
+                    if Path(p).name.lower() in names:
+                        got[Path(p).name.lower()] = {"title": s.get("title", ""),
+                                                     "action": s.get("motion", ""),
+                                                     "sounds": s.get("words", "")}
+            if len(got) > len(best):
+                best, text = got, r.get("script") or ""
+        if len(best) < max(2, len(names) // 3):
+            return {}, ""
+        return best, text
+    except Exception:
+        log_error("script notes")
+        return {}, ""
+
+
+def voice_pass(st, planned, story, cancel=None, progress=None):
+    """A cartoon's character voices: the wordless sounds (gasps, chitters, grunts, sighs)
+    that tell the viewer what a character feels, thinks and means to do. Looks at every shot
+    and returns (new cues of kind "voice", planned cues they replace, a short note)."""
+    import ss_claude as C
+    from concurrent.futures import ThreadPoolExecutor
+    work = Path(st["work"])
+    shots = [s for s in st.get("shots") or [] if s.get("name") != "black" and
+             s["end"] - s["start"] >= LOOK_MIN]
+    if not shots or not st.get("picture"):
+        return [], [], ""
+    notes, script = script_notes(st)
+    story = (story or "").strip() or script
+    for k, c in enumerate(planned):
+        c["look_id"] = f"s{k + 1}"
+
+    def stills(i):
+        s = shots[i]
+        a, b = float(s["start"]), float(s["end"])
+        n = int(max(6, min(16, round((b - a) / 0.3))))
+        try:
+            frames = M.burst(st["picture"], a, b, n, work, f"voice{i:03d}")
+        except Exception:
+            log_error("voice stills")
+            return None
+        if not frames:
+            return None
+        sheets = M.contact_sheets(frames, work / "close", per_sheet=16, cols=4,
+                                  label=f"voice{i:03d}_", fmt=lambda t: f"{t:.2f}s")
+        mine = [dict(id=c["look_id"], start=c["start"], end=c["end"], kind=c["kind"],
+                     what=c["what"]) for c in planned if a <= c["start"] < b]
+        return {"start": a, "end": b, "name": s.get("name") or "", "n": len(frames),
+                "sheets": sheets, "sounds": mine,
+                "script": notes.get((s.get("name") or "").lower())}
+    _say(progress, 0.0, "Looking at every shot for what the characters feel…")
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        jobs = [j for j in ex.map(stills, range(len(shots))) if j]
+    try:
+        if not jobs or (cancel and cancel()):
+            return [], [], ""
+        step = max(1, len(jobs) // 6)
+        sample = [(f"A shot at {j['start']:.0f}s:", j["sheets"][0][2]) for j in jobs[::step][:6]]
+        try:
+            cast = C.cast_voices(st["seq_name"], story, sample)
+        except StoryError as e:
+            log("voice casting skipped:", e)
+            cast = []
+        got = C.plan_voices(jobs, st["seq_name"], story, cast,
+                            lambda f, m: _say(progress, 0.08 + 0.92 * f, m), cancel)
+    finally:
+        by_id = {c.pop("look_id", None): c for c in planned}
+    new, drop, last_end = [], [], -1.0
+    for v in got:
+        try:
+            a = float(v["start"])
+            b = min(float(v["end"]), a + 4.0, float(st["duration"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        a = max(a, last_end + 0.05)                      # never two voices at once
+        if b - a < 0.3:
+            b = a + 0.6
+        if a >= float(st["duration"]) - 0.2:
+            continue
+        last_end = b
+        new.append({"start": round(a, 3), "end": round(b, 3), "kind": "voice",
+                    "what": (v.get("what") or v.get("feeling") or "A voice sound").strip(),
+                    "sound_prompt": v["sound_prompt"].strip(),
+                    "search_words": "cartoon " + " ".join((v.get("feeling") or "").split()[:2]),
+                    "adobe_prompt": (v.get("adobe_prompt") or v["sound_prompt"]).strip(),
+                    "suno_prompt": "", "synced": True,
+                    "level": v.get("level") if v.get("level") in ("soft", "medium", "loud")
+                    else "medium", "voice_of": (v.get("who") or "").strip(),
+                    "feeling": (v.get("feeling") or "").strip()})
+        old = by_id.get((v.get("instead_of") or "").strip())
+        if old is not None and old not in drop:
+            drop.append(old)
+    log("character voices:", len(new), "planned for", len(jobs), "shots;", len(drop),
+        "planned sounds replaced; cast", [c.get("who") for c in cast])
+    if not new:
+        return [], [], ""
+    return new, drop, (f"{C.ai_name()} gave the characters {len(new)} voice sounds (gasps, "
+                       "grunts, giggles, sighs) so you can hear what they feel and mean to do.")
+
+
+def add_voices(st, settings, progress=None, cancel=None):
+    """For a cartoon whose sounds are already made: plan the characters' voice sounds, make
+    just those, and add them to the list. Nothing else is made again."""
+    story = ""
+    if st.get("story"):
+        try:
+            story = read_story(st["story"])
+        except StoryError:
+            story = ""
+    planned = st.get("planned_effects") or [c for c in st["cues"]
+                                            if c["kind"] not in BEDS and c["kind"] != "shot"]
+    new, _, note = voice_pass(st, planned, story, cancel,
+                              lambda f, m: _say(progress, 0.45 * f, m))
+    if cancel and cancel():
+        raise StoryError("Stopped.")
+    if not new:
+        raise StoryError("StoryStudio didn't find moments that need a character's voice, or "
+                         "the AI couldn't be reached. Try again in a moment.")
+    st["cues"] = [c for c in st["cues"] if c["kind"] != "voice"]      # the earlier ones go
+    top = max([int(c["id"][1:]) for c in st["cues"] if c["id"][1:].isdigit()] or [0])
+    for i, c in enumerate(new):
+        c.update(id=f"c{top + i + 1:03d}", keep=True, source="", file="",
+                 place_at=c["start"], note="")
+    st["cues"] = sorted(st["cues"] + new, key=lambda c: (c["start"], c["end"]))
+    save(st)
+    make_sounds(st, settings, lambda f, m: _say(progress, 0.45 + 0.55 * f, m), cancel,
+                ids={c["id"] for c in new})
+    st["plan_notes"] = (st.get("plan_notes", "") + " " + note).strip()
+    save(st)
+    return st
 
 
 def tidy_cues(cues, dur, cuts):
@@ -673,6 +834,10 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             j = _job(c, gen, str(clip), 0, L, c["start"], takes=shot_takes)
             j["shot"] = True
             pc_cues.append((c, [j]))
+        elif c["kind"] == "voice" and use_fal:             # a character's voice: made from
+            c["source"] = "fal"                            # its description, not the picture
+            pc_cues.append((c, [_job(c, gen, None, 0, max(0.6, min(6.0, length + 0.3)),
+                                     takes=takes)]))
         elif c["kind"] in BEDS:
             if use_fal:                                    # one smooth loop, from its words
                 c["source"] = "fal"
@@ -850,8 +1015,9 @@ def shot_cues(st):
     The plan's own effects are kept in st["planned_effects"]."""
     if any(c["kind"] == "shot" for c in st["cues"]):
         return st["cues"]
-    effects = [c for c in st["cues"] if c["kind"] not in BEDS and c.get("keep", True)]
-    beds = [c for c in st["cues"] if c["kind"] in BEDS]
+    effects = [c for c in st["cues"] if c["kind"] not in BEDS and c["kind"] != "voice"
+               and c.get("keep", True)]
+    beds = [c for c in st["cues"] if c["kind"] in BEDS or c["kind"] == "voice"]
     st["planned_effects"] = effects
     spans = []                                   # shots, tiny ones joined to the one before
     for s in st.get("shots") or []:
@@ -1013,6 +1179,8 @@ def _shape(st, c, sounds, motion, mfps):
             a, place = _bed(st, c, a)
         else:
             place = c["_jobs"][0]["at"]               # made against the picture: in sync
+            if c["kind"] == "voice":                  # made from words: begin on its first
+                a = a[S.onset(a):]                    # sound, right on the planned moment
             a = S.fades(S.trim_tail(a), 0.005, 0.12)
     elif c["source"] == "freesound" and c.get("_fs"):
         a = S.load48(c["_fs"])

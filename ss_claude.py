@@ -234,7 +234,8 @@ def ask_claude(prompt, schema, system=None, images=None, timeout=1200):
 # the sound plan
 # ---------------------------------------------------------------------------
 KINDS = ["ambience", "footsteps", "action", "impact", "whoosh", "animal", "nature", "weather",
-         "water", "vehicle", "household", "magic", "cartoon", "crowd", "music", "other"]
+         "water", "vehicle", "household", "magic", "cartoon", "crowd", "music", "other",
+         "voice"]            # voice = a character's own wordless sound (gasp, grunt, giggle)
 LEVELS = ["background", "soft", "medium", "loud"]
 
 CUE = {
@@ -610,6 +611,153 @@ def close_look(shots, name, story, look, busy="normal", progress=None, cancel=No
     with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(one, groups))
     return out
+
+
+# ---------------------------------------------------------------------------
+# a cartoon's character voices: wordless sounds that show feeling, thought and intention
+# ---------------------------------------------------------------------------
+CAST_SCHEMA = {
+    "type": "object",
+    "properties": {"voices": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "who": {"type": "string", "description": "the character's name, or a plain name "
+                    "like 'the squirrel' when the story gives none"},
+            "voice": {"type": "string", "description": "how this character's wordless voice "
+                      "sounds, as the opening words of a sound-generator prompt, about 8-14 "
+                      "words, e.g. 'small cute cartoon squirrel voice, high-pitched and "
+                      "squeaky, childlike, wordless'"},
+        },
+        "required": ["who", "voice"], "additionalProperties": False}}},
+    "required": ["voices"], "additionalProperties": False,
+}
+VOICE_SOUND = {
+    "type": "object",
+    "properties": {
+        "start": {"type": "number", "description": "exact second the voice sound begins"},
+        "end": {"type": "number", "description": "second it stops"},
+        "who": {"type": "string", "description": "which character makes it"},
+        "feeling": {"type": "string", "description": "what the character feels, thinks or "
+                    "means to do at this moment, in a few plain words"},
+        "what": {"type": "string", "description": "short label for the storyteller: who makes "
+                 "what sound and why, e.g. 'Chester gasps: he can't believe his luck'"},
+        "sound_prompt": {"type": "string", "description": "for an AI sound generator: the "
+                         "character's voice words first, exactly as given, then precisely "
+                         "what is heard and the feeling in it"},
+        "adobe_prompt": {"type": "string", "description": "the same as one full sentence"},
+        "level": {"type": "string", "enum": LEVELS},
+        "instead_of": {"type": "string", "description": "the id of an already planned sound "
+                       "that is nothing but this same voice sound (so it isn't made twice); "
+                       "otherwise an empty string"},
+    },
+    "required": ["start", "end", "who", "feeling", "what", "sound_prompt", "adobe_prompt",
+                 "level", "instead_of"],
+    "additionalProperties": False,
+}
+VOICES_SCHEMA = {"type": "object", "properties": {"sounds": {"type": "array",
+                                                               "items": VOICE_SOUND}},
+                 "required": ["sounds"], "additionalProperties": False}
+
+
+def cast_voices(name, story, images):
+    """Who is in the cartoon and how each one's wordless voice sounds: [{"who", "voice"}]."""
+    prompt = (f"Cartoon: \"{name}\". Nobody speaks in it. These stills come from shots across "
+              "the film.\n\nTHE SCRIPT (for context):\n"
+              f"{(story or '').strip()[:6000] or '(no script)'}\n\n"
+              "List each character who is on screen often enough to need a voice (usually one "
+              "or two), and describe how that character's wordless voice sounds. It must fit "
+              "the character's kind, size and nature, be cute and funny rather than real or "
+              "scary, and be something an AI sound generator can make the same way every time.")
+    res = ask(prompt, CAST_SCHEMA, system=SYSTEM, images=images, timeout=300)
+    return [v for v in res.get("voices", []) if v.get("who") and v.get("voice")][:4]
+
+
+def _voices_once(grp, name, story, cast):
+    import ss_craft as craft
+    parts, images = [], []
+    for k, s in enumerate(grp):
+        step = (s["end"] - s["start"]) / max(1, s["n"])
+        planned = "\n".join(
+            f"  id {c['id']}: {c['start']:.2f}-{c['end']:.2f}s {c['kind']}: {c['what']}"
+            for c in s["sounds"]) or "  (none)"
+        script = s.get("script") or {}
+        said = ""
+        if script.get("action") or script.get("title"):
+            said = (f"What the storyteller's script says about this shot: "
+                    f"{script.get('title', '')}. {script.get('action', '')}\n")
+        fname = f" (file: {s['name']})" if s.get("name") else ""
+        parts.append(f"SHOT {k + 1}: {s['start']:.2f}s to {s['end']:.2f}s, a still every "
+                     f"{step:.2f}s{fname}\n{said}"
+                     f"Sounds already planned in this shot:\n{planned}")
+        for a, b, p in s["sheets"]:
+            images.append((f"Shot {k + 1}, stills {a:.2f}s to {b:.2f}s:", p))
+    who = "\n".join(f"- {v['who']}: {v['voice']}" for v in cast) or \
+        "- (decide a fitting wordless cartoon voice and use the same words every time)"
+    prompt = f"""Cartoon: "{name}". Plan the CHARACTERS' VOICE SOUNDS for these {len(grp)} \
+shots. Each shot's stills are close together, and the exact time in seconds is printed in \
+yellow on every still.
+
+THE VOICES (begin every sound_prompt with the character's voice, word for word):
+{who}
+
+THE SCRIPT (for context):
+{(story or '').strip()[:6000] or '(no script)'}
+
+{chr(10).join(parts)}
+
+{craft.VOICES}
+
+The sounds already planned are made by a sound maker that watches the picture: it is good at \
+objects, footsteps and bumps and poor at voices. So plan every voice sound here yourself, \
+even where a planned sound mentions a gasp or a grunt. When a planned sound is nothing but \
+that same voice sound, put its id in "instead_of" so it isn't made twice; a planned sound \
+that also has an object in it (a squeak of stretching rubber with a grunt) stays as it is: \
+leave "instead_of" empty.
+Read every time from the stills. "what" is a short label for the storyteller with no notes \
+in brackets. Level: "medium" for most, "loud" for a yelp or a triumphant squeal, "soft" for \
+a sigh or a hum."""
+    return ask(prompt, VOICES_SCHEMA, system=SYSTEM, images=images, timeout=900)
+
+
+def plan_voices(shots, name, story, cast, progress=None, cancel=None, per_request=6,
+                workers=3):
+    """The characters' wordless voice sounds for every shot. shots: [{"start", "end", "name",
+    "n", "sheets", "sounds": [planned, with "id"], "script": {...}}]. Returns the sounds, each
+    with the times the request could see as "lo" and "hi"."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    groups = [shots[i:i + per_request] for i in range(0, len(shots), per_request)]
+    out, lock, done = [], threading.Lock(), [0]
+
+    def one(grp):
+        if cancel and cancel():
+            return
+        try:
+            res = _voices_once(grp, name, story, cast)
+        except StoryError as e:
+            log("voices skipped for", len(grp), "shots:", e)
+            res = {}
+        except Exception:
+            log_error("character voices")
+            res = {}
+        lo, hi = grp[0]["start"], grp[-1]["end"]
+        with lock:
+            for v in res.get("sounds", []):
+                try:
+                    t = float(v["start"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+                if lo <= t < hi and (v.get("sound_prompt") or "").strip():
+                    out.append(dict(v, lo=lo, hi=hi))
+            done[0] += 1
+            if progress:
+                progress(done[0] / len(groups), f"{ai_name()} is giving the characters "
+                                                f"their voices ({done[0]} of {len(groups)})…")
+    if progress:
+        progress(0.0, f"{ai_name()} is giving the characters their voices…")
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        list(ex.map(one, groups))
+    return sorted(out, key=lambda v: float(v["start"]))
 
 
 REDO_SCHEMA = {

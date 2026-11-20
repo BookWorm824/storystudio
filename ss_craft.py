@@ -151,12 +151,42 @@ SOUND_PLAN = (
     "pans; a sudden stop = tyre screech; a dash = whizz or ricochet zip; a bounce or poke = "
     "boing, pitched differently each time; tiptoeing = plucked strings or xylophone steps; a "
     "blink or idea = one xylophone note or ding; stuck = hollow thunk then a pop; dizzy = "
-    "whirr and tweeting birds; stretching = rising squeak. Add wordless voice sounds for the "
-    "characters (gasp, gulp, sniff, yelp, giggle, sigh, snore). Sounds are bigger and sillier "
+    "whirr and tweeting birds; stretching = rising squeak. Sounds are bigger and sillier "
     "than life, dry and close, and loud enough to sit on top of the music. Mark them synced "
     "and time each to the exact moment of the action, never after it. Leave a short gap of "
     "silence just before the biggest hit of each gag: plan nothing in the half second before "
-    "it. Keep ambience light.")
+    "it. Keep ambience light. The characters' own voice sounds (gasps, grunts, giggles, sighs) "
+    "are planned separately, each as its own sound of kind \"voice\": never fold one into "
+    "another sound's description.")
+
+# the characters' own wordless sounds: what they feel, think and mean to do
+VOICES = (
+    "CHARACTER VOICES. Nobody speaks in this cartoon, so each character's own little voice "
+    "sounds are how the viewer knows what he FEELS, what he is THINKING and what he MEANS TO "
+    "DO. The classic shorts did this all the time: the sniff, the gasp, the worried gulp, the "
+    "pleased chuckle. Plan one for every change of feeling you can see on the face or body, "
+    "at the moment it changes:\n"
+    "- finding something wonderful: a sharp little gasp, then a breathless, delighted "
+    "\"ooooh\" that rises, or fast excited chittering, as if he can't believe his luck\n"
+    "- wanting it, claiming it: a greedy little giggle, a happy \"mine!\" squeal with no words\n"
+    "- an idea: a bright, short \"ah-HA\" squeak\n"
+    "- thinking, puzzled: a low curious \"hmmm?\" that rises at the end\n"
+    "- making up his mind: one firm little huff or \"hmph!\" just BEFORE he acts, so the "
+    "viewer knows what is coming\n"
+    "- effort: straining grunts in time with each push or pull, each higher and tighter than "
+    "the last, ending in a gasp for air\n"
+    "- it didn't work: a grumbling mutter, a huffy snort, a long sagging \"awww\"\n"
+    "- alarm: a high yelp or squeak; worry: a small whimper or a gulp\n"
+    "- tired or relieved: panting, then one long sigh\n"
+    "- proud of himself: a smug little \"heh-heh\" chuckle\n"
+    "- content: a happy hum, a pleased munching \"mmm\"\n"
+    "Rules: never words, never talking. One feeling per sound, short (about half a second to "
+    "two and a half seconds). The sound starts on the still where the face or body changes, "
+    "which is just AFTER the thing that causes it; effort sounds go with the movement itself. "
+    "Usually one to three in a shot; a shot where nothing is felt needs none, and a held look "
+    "can stay quiet. Never two voice sounds at once. Every sound_prompt begins with that "
+    "character's voice, in the same words every time, so he always sounds like himself, and "
+    "then says exactly what is heard and the feeling in it.")
 
 # for checking the pictures and clips made for a cartoon
 CLIPS = (

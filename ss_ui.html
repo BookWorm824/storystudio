@@ -1271,6 +1271,7 @@ function renderReview() {
     <div class="rhead"><div><h1>Sounds for “${esc(R.title)}”</h1><div class="sub" style="margin:0">${on} switched on · ${made} of ${R.cues.length} made</div></div>
       <div class="row">${missing ? `<button class="btn" onclick="makeMissing()">Make the ${missing} missing</button>` : ""}<button class="btn primary big" onclick="finish()">Put them in my movie ${arrow()}</button></div></div>
     ${(R.notice || R.notes) ? `<div class="banner">${esc(R.notice ? R.notice + " " : "")}${esc(R.notes)}</div>` : ""}
+    ${R.can_voice ? `<div class="banner" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:260px"><b style="color:var(--text)">The characters' own voices.</b> ${R.voices ? `This cartoon has ${R.voices} voice sounds (the “Character voice” ones below).` : `Little wordless sounds (a gasp, excited chittering, straining grunts, a sigh) that let the viewer hear what a character feels, thinks and means to do.`} They are made with Fal from a description, usually for less than a dollar. Nothing else is made again.</div><button class="btn" onclick="addVoices(this)">${R.voices ? "Do the voices again" : "Add the characters' voices"}</button></div>` : ""}
     <div class="filters">
       <span class="chip ${!filter?"on":""}" onclick="setFilter('')">All ${R.cues.length}</span>
       ${kinds.map(k => `<span class="chip ${filter===k?"on":""}" onclick='setFilter(${esc(JSON.stringify(k))})'>${esc(k)} ${R.cues.filter(c=>c.kind===k).length}</span>`).join("")}
@@ -1331,6 +1332,7 @@ function changeIt(id) {
 }
 async function doChange(id) { const words = $("#words").value.trim(); if (!words) return; closeModal(); toast("Asking " + aiName() + "…"); const j = await api("change", {id, words}); watchJob(j.job); }
 async function copyWording(id) { const c = cueById(id); await navigator.clipboard.writeText(c.suno || c.adobe); toast(c.suno ? "Copied: paste it into Suno as the style" : "Copied: paste it into Adobe's sound effect generator"); }
+async function addVoices(btn) { btn.disabled = true; try { const j = await api("add_voices"); watchJob(j.job); } catch (e) { btn.disabled = false; toast(e.message || "That didn't work.", true); } }
 async function makeMissing() { const j = await api("make_missing"); watchJob(j.job); }
 async function finish() { const j = await api("finish"); watchJob(j.job); }
 
