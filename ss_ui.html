@@ -580,7 +580,8 @@ function seg(key, items) {
   return `<div class="seg">${items.map(([v,t]) => `<button class="${opts[key]==v?"on":""}" onclick="setOpt('${key}',${esc(JSON.stringify(v))})">${t}</button>`).join("")}</div>`;
 }
 function sw(key) { return `<button class="switch ${opts[key]?"on":""}" onclick="setOpt('${key}',${!opts[key]})" aria-label="${key}"></button>`; }
-function setOpt(k, v) { opts[k] = v; if (MULTI && PICK.length && $("#setup .planstep")) renderPlan(); else setupSounds(true); }
+let SETUP = "";
+function setOpt(k, v) { opts[k] = v; if (MULTI && PICK.length && $("#setup .planstep")) renderPlan(); else if (SETUP === "fix") setupFix(true); else setupSounds(true); }
 // ---------------------------------------------------------------- my sound prompts
 let PR = null, prKind = "", prFind = "", PFX = [];
 async function openPrompts() {
@@ -669,6 +670,7 @@ async function setupNewShots() {
 function nsOnly() { return NS ? NS.filter(x => x.on).map(x => [x.start, x.end]) : null; }
 function nsToggle(i) { NS[i].on = !NS[i].on; setupSounds(true); }
 async function setupSounds(keepScroll) {
+  SETUP = "sounds";
   $("#setup").innerHTML = `
     <div class="card panel">
       <h2>${NS ? "Sounds for my new shots" : "Add sound effects"}</h2>
@@ -696,15 +698,19 @@ function arrow() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentC
 async function startSounds() { const j = await api("start_sounds", Object.assign({}, opts, NS ? {only_shots: nsOnly()} : {only_shots: null})); watchJob(j.job); }
 
 // ---------------------------------------------------------------- setup: fix audio
-function setupFix() {
+function setupFix(keep) {
+  if (!keep) { opts.fix_clean = false; opts.fix_recheck = false; }   // extras always start off
+  SETUP = "fix";
   $("#setup").innerHTML = `
     <div class="card panel">
       <h2>Fix the audio</h2>
-      <p class="sub">StoryStudio will clean up and even out the narration, take steady hum out of the voices (lip-sync clips too), balance the music under the voice, set the sound effects already in your movie below the narration, and take off Premiere effects that would double up. No new sound effects; it double-checks ones it made before and remakes any that came out wrong.</p>
+      <p class="sub" style="margin-bottom:10px">StoryStudio evens out the <b>volume</b> of your clips: the narration all at the same level, the music and your own sound effects under it. It only turns each clip up or down with Premiere's <b>Audio Gain</b>. Your effects, your files and StoryStudio's sound effects stay exactly as they are. Afterwards it lists every clip it changed, with the time.</p>
+      <div class="opt"><div><label class="t">Also clean up voices and dip the music</label><div class="hint">Takes out hum and background noise from voices and makes the music dip while someone talks. This makes new copies of your audio files for the copy to use, and takes off the Premiere effects on those clips.</div></div><div class="swrow">${sw("fix_clean")}<span class="sub" style="margin:0">${opts.fix_clean ? "On" : "Off"}</span></div></div>
+      <div class="opt"><div><label class="t">Also check StoryStudio's sound effects</label><div class="hint">Listens to the sounds StoryStudio made before and makes new ones for any that came out clipped, silent or wrong${H.has_fal_key ? ", with Fal (uses credit)" : ""}. Each new one is a new file, so your other projects keep the old one.</div></div><div class="swrow">${sw("fix_recheck")}<span class="sub" style="margin:0">${opts.fix_recheck ? "On" : "Off"}</span></div></div>
       <div class="footerbar"><span class="sub" style="margin:0">You'll get a copy ending in “(audio fixed)”. Your project isn't changed.</span>
       <button class="btn primary big" onclick="startFix()">Fix the audio ${arrow()}</button></div>
     </div>`;
-  $("#setup").scrollIntoView({behavior:"smooth"});
+  if (!keep) $("#setup").scrollIntoView({behavior:"smooth"});
 }
 async function startFix() { const j = await api("start_fix_audio", opts); watchJob(j.job); }
 

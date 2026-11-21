@@ -628,7 +628,7 @@ def api(name, a):
         return {"job": run_job("Finding sounds for your movie", work, "review",
                                [est["prepare"] + est["plan"], est["sounds"]])}
     if name == "start_fix_audio":
-        api("save_settings", a)
+        api("save_settings", {k: v for k, v in a.items() if not k.startswith("fix_")})
         st, s = S.st, choices(a)
         e = E.estimate(st, s, n_cues=0)
         return {"job": run_job("Fixing the audio",

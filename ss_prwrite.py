@@ -545,6 +545,29 @@ class Writer:
     # --- removing a clip's effects ---------------------------------------------
     ESP_KEEP = {"ESP.Tag"}
 
+    def nudge_gain(self, changes):
+        """changes: {AudioClipTrackItem id: dB to add}. Only the clip's Audio Gain changes
+        (Premiere: right-click > Audio Gain); her effects, volume and keyframes stay."""
+        done = 0
+        for item_id, db in changes.items():
+            el = self.objs.get(str(item_id))
+            if el is None or el.tag != "AudioClipTrackItem" or abs(db) < 0.05:
+                continue
+            sub = self.get(el.find("ClipTrackItem"), "SubClip")
+            clip = self.get(sub, "Clip") if sub is not None else None
+            if clip is None:
+                continue
+            g = clip.find("Gain")
+            try:
+                old = float(g.text) if g is not None and g.text else 1.0
+            except ValueError:
+                old = 1.0
+            if g is None:
+                g = ET.SubElement(clip, "Gain")
+            g.text = repr(float(old * 10 ** (db / 20)))
+            done += 1
+        return done
+
     def reset_items(self, levels):
         """levels: {AudioClipTrackItem id: clip volume in dB}. In StoryStudio's copy each of
         these clips loses its audio effects (Essential Sound noise reduction, limiter,

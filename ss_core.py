@@ -71,6 +71,8 @@ DEFAULTS = {
     "karaoke_highlight": "",   # the colour of words being sung ("" = the look's own)
     "style": "auto",           # auto / cartoon / realistic
     "loudness_target": -14.0,  # YouTube
+    "fix_clean": False,        # fix the audio: also clean voices and dip music (new files)
+    "fix_recheck": False,      # fix the audio: also remake bad StoryStudio sounds (may use Fal)
     "last_folder": "",
 }
 

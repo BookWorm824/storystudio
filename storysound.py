@@ -484,6 +484,54 @@ def balance_audio(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
     return st
 
 
+def volume_only(st, seq, progress=None, cancel=None, lo=0.2, hi=0.45):
+    """"Fix the audio" as most people mean it: every clip of hers gets a sensible volume
+    (narration even, music and effects under it), by changing only its Audio Gain. No files are
+    made or swapped, her effects stay, and StoryStudio's own sounds are left as they are.
+    Fills st["clips"], st["levels"], st["gain_changes"]."""
+    import ss_mix
+    dur = seq["duration"]
+    _say(progress, lo, "Reading every sound on your timeline…")
+    clips = M.build_stems(seq, Path(st["work"]), lambda f: _say(
+        progress, lo + (hi - lo) * 0.8 * f, "Reading every sound on your timeline…"))
+    ss_mix.guess_tags(clips, dur)
+    talk = any(ss_mix.role_of([c]) == "dialog" or c["tag"].startswith("dialog") for c in clips)
+    music_to = ss_mix.CARTOON_MUSIC if st.get("cartoon") or not talk else ss_mix.MUSIC_ALONE
+    changes, rows = {}, []
+    for c in clips:
+        c["level_db"] = 0.0
+        if not c.get("id") or ss_mix.is_storysound_sound(c["file"]):
+            continue
+        role = "dialog" if c["tag"].startswith("dialog") else ss_mix.role_of([c])
+        target = {"dialog": ss_mix.DIALOGUE_TARGET, "music": music_to}.get(role)
+        if target is None:
+            bg = any(w in (c.get("name") or "").lower() for w in ss_mix.BG_WORDS)
+            target = ss_mix.BG_TARGET if bg else ss_mix.SFX_TARGET
+        if (c["end"] - c["start"]) < 0.4:
+            continue
+        loud = M.raw_loudness(c["raw"]) + c["gain_db"]
+        if loud < -60:
+            continue
+        d = max(-12.0, min(12.0, target - loud))
+        if abs(d) < 1.5:                       # close enough: leave it alone
+            continue
+        d = round(d, 1)
+        changes[c["id"]] = d
+        c["level_db"] = d
+        what = {"dialog": "voice", "music": "music"}.get(role, "sound")
+        rows.append(f"{fmt_time(c['start'])} {c.get('name') or Path(c['file']).name} ({what}): "
+                    f"{'louder' if d > 0 else 'quieter'} by {abs(d):.0f} dB")
+    st["clips"] = clips
+    st["gain_changes"] = changes
+    st["audio_map"], st["reset_items"], st["clip_files"] = {}, {}, {}
+    st["levels"] = (["Only volumes were changed, with each clip's Audio Gain (in Premiere: "
+                     "right-click the clip > Audio Gain). Your effects and files are as they were."]
+                    + (rows or ["Everything was already at a good volume: nothing needed changing."]))
+    if cancel and cancel():
+        raise StoryError("Stopped.")
+    return st
+
+
 def level_clips(clips):
     """Even out the narration: every dialogue clip to the same loudness. Other clips move
     with the narration's average change so your music balance stays as you set it."""
@@ -1066,7 +1114,8 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
     work = Path(st["work"])
     gen = work / "generated"
     gen.mkdir(exist_ok=True)
-    sounds = sounds_dir(st, fresh=ids is None or not any(c.get("file") for c in st["cues"]))
+    sounds = sounds_dir(st, fresh=True)      # a remake gets its own new file, always: other
+                                             # projects keep playing the sound they had
     sounds.mkdir(parents=True, exist_ok=True)
     cues = [c for c in st["cues"] if ids is None or c["id"] in ids]
     use_pc = settings.get("use_local", True) and S.local_ready()
@@ -1573,12 +1622,22 @@ def fix_audio(st, settings, progress=None, cancel=None):
             progress, 0.01 + 0.14 * f, "Getting the picture ready for the preview…"))
     if cancel and cancel():
         raise StoryError("Stopped.")
-    redone = double_check(st, seq, settings, lambda f, m: _say(progress, 0.15 + 0.2 * f, m),
-                          cancel)
-    balance_audio(st, seq, progress, cancel, lo=0.35, hi=0.75)
+    redone, remap = [], {}
+    if settings.get("fix_recheck"):          # only when she ticks it (it may spend Fal credit)
+        redone, remap = double_check(st, seq, settings,
+                                     lambda f, m: _say(progress, 0.15 + 0.2 * f, m), cancel)
+    if settings.get("fix_clean"):            # cleaned copies of her audio, music dipped
+        st.pop("volume_only", None)
+        balance_audio(st, seq, progress, cancel, lo=0.35, hi=0.75)
+    else:                                    # just the volumes, with Audio Gain
+        st["volume_only"] = True
+        volume_only(st, seq, progress, cancel, lo=0.35, hi=0.75)
+    if remap:                                # the copy plays the remade sounds (new files)
+        st["audio_map"] = dict(st.get("audio_map") or {}, **remap)
     if redone:
-        st["levels"] = [f"Remade {len(redone)} sound effect(s) that didn't come out right: "
-                        + ", ".join(redone[:6]) + ("…" if len(redone) > 6 else "")] + \
+        st["levels"] = [f"Remade {len(redone)} sound effect(s) that didn't come out right "
+                        "(each is a new file; your other projects keep the old one): "
+                        + "; ".join(redone[:8]) + ("…" if len(redone) > 8 else "")] + \
             st["levels"]
     st["stage"] = "balanced"
     save(st)
@@ -1595,8 +1654,9 @@ def double_check(st, seq, settings, progress=None, cancel=None):
     _, audio = P.flatten(seq)
     ours = {os.path.normcase(a["file"]) for a in audio
             if a.get("file") and ss_mix.is_storysound_sound(a["file"])}
+    remap = {}
     if not ours or not settings.get("use_local", True) or not S.local_ready():
-        return []
+        return [], remap
     # which earlier run made each file?
     owners = {}
     for sf in WORK.glob("*/state.json"):
@@ -1609,7 +1669,7 @@ def double_check(st, seq, settings, progress=None, cancel=None):
             if f in ours:
                 owners.setdefault(sf.parent, (prev, []))[1].append(c)
     if not owners:
-        return []
+        return [], remap
     if progress:
         progress(0.05, "Double-checking the sound effects StoryStudio made before…")
     work = Path(st["work"]) / "check"
@@ -1634,10 +1694,17 @@ def double_check(st, seq, settings, progress=None, cancel=None):
         for c in prev["cues"]:
             if c["id"] in ids:
                 c["seed_salt"] = str(int(c.get("seed_salt") or 0) + 7)
+        old = {c["id"]: c.get("file") for c in prev["cues"] if c["id"] in ids}
         make_sounds(prev, settings, lambda f, m: progress(0.3 + 0.7 * f, m) if progress
                     else None, cancel, ids=ids)
-        names += [c["what"] for c in prev["cues"] if c["id"] in ids]
-    return names
+        for c in prev["cues"]:
+            if c["id"] in ids:
+                at = next((a["start"] for a in audio if os.path.normcase(a.get("file") or "")
+                           == os.path.normcase(old.get(c["id"]) or "")), None)
+                names.append((f"at {fmt_time(at)}: " if at is not None else "") + c["what"])
+                if c.get("file") and old.get(c["id"]) and c["file"] != old[c["id"]]:
+                    remap[old[c["id"]]] = c["file"]
+    return names, remap
 
 
 def finish(st, settings, progress=None, cancel=None, label="with sound"):
@@ -1767,6 +1834,14 @@ def write_premiere(st, kept, label="with sound"):
     out = copy_path(real, label)
     w = W.Writer(src)
     _, ext = w.template_item(".wav")
+    if st.get("volume_only") and not kept:   # "fix the audio", volumes only
+        w = W.Writer(src)
+        n = w.nudge_gain(st.get("gain_changes") or {})
+        if st.get("audio_map"):                 # remade sounds (new files)
+            w.repoint(st["audio_map"])
+        w.save(out)
+        log("wrote volume-only project", out, n, "clips")
+        return str(out)
     only = bool(st.get("only_shots"))
     tracks = []
     for tname, items in assign_tracks(kept):
