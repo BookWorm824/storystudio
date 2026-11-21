@@ -1,5 +1,5 @@
 {
-  "version": "1.27.0",
+  "version": "1.27.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -36,5 +36,5 @@
     "ss_audit.py",
     "ss_change.py"
   ],
-  "notes": "New: \"My sound prompts\" on the project page shows every sound effect, character sound, background and music StoryStudio made for the video, with its prompts to copy (Fal, Adobe, Suno), where it is on your timeline now, a search box, and Save as a text file."
+  "notes": "Fix: opening StoryStudio again while it was already open could install an update without starting it, so new buttons said \"Unknown request\". Now the window always matches, and \"Update now\" starts the new version."
 }

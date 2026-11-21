@@ -22,6 +22,19 @@ import ss_core as core
 from ss_core import APP_DATA, APP_DIR, StoryError, fmt_time, log, log_error
 
 UI_FILE = APP_DIR / "ss_ui.html"
+UI_HTML = UI_FILE.read_text(encoding="utf8")    # read once: an update installed by a second
+                                                # launch mustn't show buttons this copy lacks
+
+
+def _version_here():
+    try:
+        import ss_update
+        return ss_update.local_version()
+    except Exception:
+        return "0"
+
+
+RUN_VERSION = _version_here()                    # the version this copy is running
 TOKEN = secrets.token_hex(16)            # the window must send this (blocks other web pages)
 
 KIND_NAMES = {"ambience": "Background", "footsteps": "Footsteps", "action": "Action",
@@ -847,16 +860,23 @@ def api(name, a):
     if name == "update_check":
         import ss_update
         info = ss_update.check(timeout=8)
+        here = ss_update.local_version()
+        if not info and here != RUN_VERSION:     # installed by another launch: just restart
+            info = {"version": here, "notes": "It's already downloaded: StoryStudio just needs "
+                    "to start again."}
         return {"update": {"version": info["version"], "notes": info.get("notes", "")}
-                if info else None, "current": ss_update.local_version()}
+                if info else None, "current": RUN_VERSION}
     if name == "update_now":
         import ss_update
         if (S.job and not S.job.done) or S.asking > 0:
             raise StoryError("StoryStudio is busy. Update when it has finished.")
         info = ss_update.check(timeout=10)
-        if not info:
+        installed = ss_update.local_version()
+        if not info and installed == RUN_VERSION:
             return {"ok": False, "message": "You already have the newest version."}
-        if not ss_update.apply(info):
+        if not info:                             # a newer version is installed, not running
+            info = {"version": installed}
+        elif not ss_update.apply(info):
             raise StoryError("The update couldn't be downloaded. Check the internet and try "
                              "again; your StoryStudio still works as it is.")
         log("updated to", info["version"], "- restarting")
@@ -1246,7 +1266,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path in ("/", "/index.html"):
-            html = UI_FILE.read_text(encoding="utf8").replace("__TOKEN__", TOKEN)
+            html = UI_HTML.replace("__TOKEN__", TOKEN)
             return self._send(200, html, "text/html; charset=utf-8")
         if u.path == "/media":
             if q.get("t", [""])[0] != TOKEN:

@@ -1888,6 +1888,10 @@ async function updateNow() {
 }
 setTimeout(checkUpdate, 4000);
 setInterval(checkUpdate, 30 * 60 * 1000);
+let UPD_AT = Date.now();                 // brought to the front (a second launch does that,
+window.addEventListener("focus", () => { // perhaps after installing an update): check again
+  if (Date.now() - UPD_AT > 60 * 1000) { UPD_AT = Date.now(); checkUpdate(); }
+});
 
 startUp();
 </script>
