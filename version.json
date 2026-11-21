@@ -1,5 +1,5 @@
 {
-  "version": "1.28.0",
+  "version": "1.28.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -36,5 +36,5 @@
     "ss_audit.py",
     "ss_change.py"
   ],
-  "notes": "Fix the audio now only evens out volumes (with Audio Gain; your effects and files stay) and lists every clip it changed with the time. Cleaning voices, dipping music and remaking sounds are options you tick. A remade sound is always a new file, so your other projects never change underneath you."
+  "notes": "Line up my sounds again now moves background sounds and music with their scenes too, and every tool that works on your edits reads your project as you last saved it."
 }

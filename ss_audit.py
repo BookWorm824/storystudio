@@ -828,9 +828,9 @@ def sound_source(st):
 def _ref_sounds(data):
     import storysound as E
     return [{"name": c["what"], "start": float(c["place_at"]),
-             "end": float(c["place_at"]) + float(c.get("length") or (c["end"] - c["start"]))}
-            for c in data["cues"] if c.get("file") and c.get("keep", True) and
-            c.get("kind") not in E.BEDS]
+             "end": float(c["place_at"]) + float(c.get("length") or (c["end"] - c["start"])),
+             "bed": c.get("kind") in E.BEDS}
+            for c in data["cues"] if c.get("file") and c.get("keep", True)]
 
 
 def line_up(st, out=None):

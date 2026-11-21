@@ -623,7 +623,7 @@ let CHG = {time: "", note: "", list: null, t: null, done: null};
 function setupChange(keep) {
   const kc = {music: "#c9a7ff", background: "var(--good)", effect: "var(--accent)", character: "#7cc4ff"};
   $("#setup").innerHTML = `<div class="card panel"><h2>Change a sound I don't like</h2>
-    <p class="sub" style="margin-bottom:10px">Type the time from Premiere's timeline (like <b>00:01:47:23</b>, or just 1:47). StoryStudio shows every sound it added that plays there. Your project isn't changed: the change goes into a copy ending in “(sounds changed)”, and the next change builds on that copy.</p>
+    <p class="sub" style="margin-bottom:10px">Type the time from Premiere's timeline (like <b>00:01:47:23</b>, or just 1:47). StoryStudio shows every sound it added that plays there. Your project isn't changed: the change goes into a copy ending in “(sounds changed)”, and the next change builds on that copy. <b>Save in Premiere first</b> (Ctrl+S): StoryStudio reads your project as you last saved it.</p>
     <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><input id="chgtime" style="width:170px;margin:0" placeholder="00:01:47:23" value="${esc(CHG.time)}" onkeydown="if(event.key==='Enter')chgLook()">
       <button class="btn primary" onclick="chgLook()">Show the sounds there</button></div>
     ${CHG.list ? (CHG.list.length ? `<div class="sub" style="margin:14px 0 8px">Sounds StoryStudio added that play at <b>${esc(CHG.at)}</b>:</div>
@@ -674,7 +674,7 @@ async function setupSounds(keepScroll) {
   $("#setup").innerHTML = `
     <div class="card panel">
       <h2>${NS ? "Sounds for my new shots" : "Add sound effects"}</h2>
-      ${NS ? `<p class="sub" style="margin-bottom:8px">These shots weren't there when your sounds were made. Untick any that already have their own sound (like a channel intro). Only the ticked shots get sounds. Your other sounds aren't changed, and they follow any shots you've moved.</p>
+      ${NS ? `<p class="sub" style="margin-bottom:8px">These shots weren't there when your sounds were made. Untick any that already have their own sound (like a channel intro). Only the ticked shots get sounds. <b>Save in Premiere first</b> (Ctrl+S): StoryStudio reads your project as you last saved it. Your other sounds aren't changed, and they follow any shots you've moved.</p>
         <div class="list" style="margin-bottom:14px">${NS.map((x, i) => `<label class="note" style="grid-template-columns:auto 1fr auto;cursor:pointer;align-items:center"><input type="checkbox" ${x.on ? "checked" : ""} onchange="nsToggle(${i})" style="width:auto;margin:0"><div><b>${esc(x.name)}</b></div><span class="sub" style="margin:0">at ${x.time}, ${x.length} s</span></label>`).join("")}</div>` : ""}
       ${!NS && P && P.previous ? `<div class="banner" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:240px"><b style="color:var(--text)">This project already has sounds.</b> Finding sounds again starts a new set${H.has_fal_key && opts.sound_source !== "pc" ? " and uses Fal credit" : ""}. To keep the ones you have and add to them, open them instead.</div><button class="btn" onclick="openPrevious()">See last time's sounds</button></div>` : ""}
       <div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"],["cartoon","Cartoon: a sound for everything"]])}</div>
@@ -704,7 +704,7 @@ function setupFix(keep) {
   $("#setup").innerHTML = `
     <div class="card panel">
       <h2>Fix the audio</h2>
-      <p class="sub" style="margin-bottom:10px">StoryStudio evens out the <b>volume</b> of your clips: the narration all at the same level, the music and your own sound effects under it. It only turns each clip up or down with Premiere's <b>Audio Gain</b>. Your effects, your files and StoryStudio's sound effects stay exactly as they are. Afterwards it lists every clip it changed, with the time.</p>
+      <p class="sub" style="margin-bottom:10px">StoryStudio evens out the <b>volume</b> of your clips: the narration all at the same level, the music and your own sound effects under it. It only turns each clip up or down with Premiere's <b>Audio Gain</b>. Your effects, your files and StoryStudio's sound effects stay exactly as they are. Afterwards it lists every clip it changed, with the time. <b>Save in Premiere first</b> (Ctrl+S): StoryStudio reads your project as you last saved it.</p>
       <div class="opt"><div><label class="t">Also clean up voices and dip the music</label><div class="hint">Takes out hum and background noise from voices and makes the music dip while someone talks. This makes new copies of your audio files for the copy to use, and takes off the Premiere effects on those clips.</div></div><div class="swrow">${sw("fix_clean")}<span class="sub" style="margin:0">${opts.fix_clean ? "On" : "Off"}</span></div></div>
       <div class="opt"><div><label class="t">Also check StoryStudio's sound effects</label><div class="hint">Listens to the sounds StoryStudio made before and makes new ones for any that came out clipped, silent or wrong${H.has_fal_key ? ", with Fal (uses credit)" : ""}. Each new one is a new file, so your other projects keep the old one.</div></div><div class="swrow">${sw("fix_recheck")}<span class="sub" style="margin:0">${opts.fix_recheck ? "On" : "Off"}</span></div></div>
       <div class="footerbar"><span class="sub" style="margin:0">You'll get a copy ending in “(audio fixed)”. Your project isn't changed.</span>
@@ -914,7 +914,7 @@ function setupAudit() {
 ICON.link = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
 async function lineUpSounds() {
   const head = `<h2>Line up my sounds again</h2>`;
-  $("#setup").innerHTML = `<div class="card panel">${head}<div class="pmsg"><span class="spin"></span> Finding where every shot went and moving its sounds, in a copy of your project…</div></div>`;
+  $("#setup").innerHTML = `<div class="card panel">${head}<div class="sub" style="margin:0 0 8px"><b>Save in Premiere first</b> (Ctrl+S): StoryStudio reads your project as you last saved it.</div><div class="pmsg"><span class="spin"></span> Finding where every shot went and moving its sounds, in a copy of your project…</div></div>`;
   $("#setup").scrollIntoView({behavior:"smooth"});
   let j;
   try { j = await api("line_up_sounds"); }

@@ -141,6 +141,28 @@ def premiere_exe():
     return max(found)[1] if found else None
 
 
+def fresh_copy(st):
+    """Tools that work on her edits (line up, new shots, fix the audio) must see the project
+    as she last SAVED it, not as it was when she opened it in StoryStudio: take a new copy
+    when the project has been saved since."""
+    import storysound as E
+    try:
+        p, snap = Path(st["project"]), Path(st.get("snapshot") or "")
+        if snap.exists() and p.stat().st_mtime <= snap.stat().st_mtime + 0.5:
+            return False
+        st["snapshot"] = E.snapshot(str(p), Path(st["work"]))
+        st["snapshot_time"] = time.strftime("%I:%M %p").lstrip("0")
+        seq = E._sequence(st)
+        st["duration"] = seq["duration"]
+        log("took a new copy of the project as last saved:", p.name)
+        return True
+    except StoryError:
+        raise
+    except Exception:
+        log_error("fresh copy")
+        return False
+
+
 _SOUNDS_SEEN = {}
 
 
@@ -618,6 +640,8 @@ def api(name, a):
     if name == "start_sounds":
         api("save_settings", a)
         st, s = S.st, choices(a)
+        if s.get("only_shots"):
+            fresh_copy(st)
         est = E.estimate(st, s)
 
         def work(progress, cancel, phase):
@@ -630,6 +654,7 @@ def api(name, a):
     if name == "start_fix_audio":
         api("save_settings", {k: v for k, v in a.items() if not k.startswith("fix_")})
         st, s = S.st, choices(a)
+        fresh_copy(st)
         e = E.estimate(st, s, n_cues=0)
         return {"job": run_job("Fixing the audio",
                                lambda p, c, ph: E.fix_audio(st, s, p, c), "done",
@@ -995,6 +1020,7 @@ def api(name, a):
         st = S.st
         if not st or st.get("video"):
             raise StoryError("Open your Premiere project first.")
+        fresh_copy(st)
         shots = A.new_shots(st, E._sequence(st))
         if shots is None:
             return {"none_yet": True, "shots": []}
@@ -1043,6 +1069,7 @@ def api(name, a):
         st = S.st
         if not st or st.get("video"):
             raise StoryError("Open your Premiere project first.")
+        fresh_copy(st)
         return A.line_up(st)
     if name == "link_sounds":                  # sounds that move with their shot
         import storysound as E
