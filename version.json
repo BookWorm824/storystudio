@@ -1,5 +1,5 @@
 {
-  "version": "1.25.1",
+  "version": "1.25.2",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -35,5 +35,5 @@
     "ss_audio_template.xml",
     "ss_audit.py"
   ],
-  "notes": "Moved, trimmed or deleted shots in Premiere? \"Line up my sounds again\" on the project page puts every sound effect back on its shot, in a copy of your project."
+  "notes": "The timing changes (\"Make these changes for me\") now include the very first shot, which was skipped before."
 }

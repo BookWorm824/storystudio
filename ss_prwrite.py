@@ -724,7 +724,7 @@ def _seq_tracks(w, seq):
             items = []
             for el in w.refs(ct, "ClipItems/TrackItems/TrackItem"):
                 cti = el.find("ClipTrackItem")
-                if cti is None or cti.find("TrackItem/Start") is None:
+                if cti is None or cti.find("TrackItem/End") is None:   # Start 0 is left out
                     continue
                 sub = w.get(cti, "SubClip")
                 clip = w.get(sub, "Clip") if sub is not None else None
@@ -1242,8 +1242,7 @@ def retime(project_path, seq_uid, edits, out_path):
             if it.get("gone"):
                 continue
             cti, c = it["cti"], it["c"]
-            w.setx(cti, "TrackItem/Start", it["new_start"])
-            w.setx(cti, "TrackItem/End", it["new_end"])
+            _set_times(cti, it["new_start"], it["new_end"])
             new_len = it["new_end"] - it["new_start"]
             if "new_in" in it:
                 sp = it["new_speed"]
@@ -1302,14 +1301,13 @@ def retime(project_path, seq_uid, edits, out_path):
                 if ti is None or key not in cuts:
                     continue
                 try:
-                    s0 = int(float(ti.findtext("TrackItem/Start")))
+                    s0 = int(float(ti.findtext("TrackItem/Start") or 0))
                     e0 = int(float(ti.findtext("TrackItem/End")))
                     al = int(float(ti.findtext("Alignment") or 0))
                 except (TypeError, ValueError):
                     continue
                 start = max(0, cuts[key] - al)
-                w.setx(ti, "TrackItem/Start", start)
-                w.setx(ti, "TrackItem/End", start + (e0 - s0))
+                _set_times(ti, start, start + (e0 - s0))
             for i, ref in enumerate(list(tlst)):
                 if ref.get("Index") is not None:
                     ref.set("Index", str(i))
