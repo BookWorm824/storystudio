@@ -787,51 +787,94 @@ def sound_home(st):
     return None, None
 
 
-def sound_source(st):
-    """The StoryStudio sounds this timeline was given and the timeline they were placed on:
-    (state with "cues", project the sounds were made for). Found by name first, then by the
-    sequence itself (a project saved under a new name keeps its sequence)."""
+def sound_sources(st):
+    """Every run that made StoryStudio sounds for this timeline, oldest first: [(state with
+    "cues", project, the timeline the sounds were placed on)]. Found by the project's name
+    first, then by the sequence itself (a project saved under a new name keeps its sequence).
+    A later run is "sounds for my new shots"."""
     import storysound as E
+    seen, out = set(), []
+
+    def add(data, f):
+        made = [c for c in data.get("cues") or [] if c.get("file") and c.get("keep", True)]
+        ref = data.get("snapshot") if Path(data.get("snapshot") or "").exists() else             data.get("project")
+        key = os.path.normcase(str(Path(f).parent))
+        if made and ref and Path(ref).exists() and key not in seen:
+            seen.add(key)
+            out.append((f.stat().st_mtime, data, data.get("project"), ref))
     proj, f = sound_home(st)
     if proj:
-        return json.loads(Path(f).read_text(encoding="utf-8-sig")), proj
-    best = None
-    for f in list(E.WORK.glob("*/state.json")) + list(E.WORK.glob("*/state_sounds.json")):
+        add(json.loads(Path(f).read_text(encoding="utf-8-sig")), Path(f))
+    for f in list(E.WORK.glob("*/state.json")) + list(E.WORK.glob("*/state_sounds.json")) + \
+            list(E.WORK.glob("*/changes/*/state.json")):         # sounds she had remade
+        if os.path.normcase(str(f.parent)) in seen:
+            continue
         try:
             data = json.loads(f.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             continue
-        if data.get("seq_uid") != st["seq_uid"] or not data.get("cues"):
-            continue
-        made = [c for c in data["cues"] if c.get("file") and c.get("keep", True)]
-        if made and (best is None or f.stat().st_mtime > best[0]):
-            best = (f.stat().st_mtime, data)
-    return (best[1], best[1]["project"]) if best else (None, None)
+        if data.get("seq_uid") == st["seq_uid"]:
+            add(data, f)
+    out.sort(key=lambda x: x[0])
+    return [(d, p, r) for _, d, p, r in out]
 
 
-def line_up(st):
+def sound_source(st):
+    """The first run's sounds: (state, project they were made for), or (None, None)."""
+    src = sound_sources(st)
+    return (src[0][0], src[0][1]) if src else (None, None)
+
+
+def _ref_sounds(data):
+    import storysound as E
+    return [{"name": c["what"], "start": float(c["place_at"]),
+             "end": float(c["place_at"]) + float(c.get("length") or (c["end"] - c["start"]))}
+            for c in data["cues"] if c.get("file") and c.get("keep", True) and
+            c.get("kind") not in E.BEDS]
+
+
+def line_up(st, out=None):
     """After shots were moved, trimmed or deleted in Premiere: a copy of this project with
     every sound effect back on its shot."""
     import storysound as E
     import ss_prwrite as W
-    data, proj = sound_source(st)
-    if not data:
+    src = sound_sources(st)
+    if not src:
         raise StoryError("StoryStudio couldn't find the sound effects it made for this video. "
                          "Open the project you added sound effects to (or a copy of it).")
-    ref = data.get("snapshot") if Path(data.get("snapshot") or "").exists() else proj
-    if not Path(ref or "").exists():
-        raise StoryError("StoryStudio's copy of the timeline the sounds were made for is gone, "
-                         "so it can't tell where the shots were.")
-    sounds = [{"name": c["what"], "start": float(c["place_at"]),
-               "end": float(c["place_at"]) + float(c.get("length") or (c["end"] - c["start"]))}
-              for c in data["cues"] if c.get("file") and c.get("keep", True) and
-              c.get("kind") not in E.BEDS]
     real = Path(st["project"])
-    out = E.copy_path(real, "sounds lined up")
-    res = W.line_up_sounds(st.get("snapshot") or real, st["seq_uid"], ref, out,
-                           ref_sounds=sounds)
-    log("lined up sounds from", Path(proj).name, res)
+    out = out or E.copy_path(real, "sounds lined up")
+    res = W.line_up_sounds(st.get("snapshot") or real, st["seq_uid"], None, out,
+                           groups=[(ref, _ref_sounds(data)) for data, _, ref in src])
+    log("lined up sounds from", [Path(p or "").name for _, p, _ in src], res)
     return res
+
+
+def new_shots(st, seq, min_len=0.3):
+    """The shots on this timeline that no sound run has seen: their clip wasn't on the
+    timeline when any of the sounds were made. [{"start", "end", "name"}]."""
+    import ss_prwrite as W
+    known = set()
+    for data, _, ref in sound_sources(st):
+        try:
+            rw = W.Writer(ref)
+            known |= {i["file"] for i in W._all_items(rw, rw.sequence(st["seq_uid"]))
+                      if i["kind"] == "video" and i["file"]}
+        except Exception:
+            log_error("new shots: reading " + str(ref))
+    if not known:
+        return None                                # no sounds yet: everything is new
+    out = []
+    for a, b, it in P.picture_segments(seq):
+        f = os.path.normcase(str((it or {}).get("file") or ""))
+        if not f or f in known or b - a < 0.05:
+            continue
+        if out and out[-1]["file"] == f and abs(out[-1]["end"] - a) < 0.05:
+            out[-1]["end"] = b
+            continue
+        out.append({"start": a, "end": b, "file": f,
+                    "name": (it or {}).get("name") or Path(f).stem})
+    return [x for x in out if x["end"] - x["start"] >= min_len]
 
 
 def add_sound(st, ref, k):

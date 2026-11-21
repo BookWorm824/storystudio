@@ -393,6 +393,7 @@ async function openGuide() {
 async function guidePlan() { await openBuilder(); sbSet("kind", "cartoon", true); }
 function kindLabel(k) { return k === "story" ? "Story" : k === "cartoon" ? "Silent cartoon" : "Music video"; }
 function renderHome() {
+  NS = null;
   PAGE = P ? "project" : "home";
   if (!P) {
     const lists = H.shotlists || [], recent = H.recent || [];
@@ -437,13 +438,15 @@ function renderHome() {
       <div class="swrow"><button class="switch ${MULTI?"on":""}" onclick="toggleMulti()" aria-label="Do several at once"></button><span class="sub" style="margin:0">Do several at once</span></div></div>
     ${MULTI ? `<div class="sub" style="margin:8px 0 0">Tick what you'd like. StoryStudio does them in this order, each on the copy the step before made: sound effects, then the audio, then karaoke, then feedback.</div>` : ""}
     <div class="tasks">
-      ${pickTask("sounds","sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","setupSounds()")}
+      ${pickTask("sounds","sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","NS=null;setupSounds()")}
       ${pickTask("fix","wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
       ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
       ${MULTI ? "" : task("book","#2b2414","#ffd27a","Story check","Does the story make sense to someone seeing it for the first time? Shows where it gets lost, with fixes: sounds, new prompts, new shots.","setupAudit()")}
       ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Picture problems (glitches, characters that change), timing and colour. A big check: notes sorted into groups.","setupFeedback('all')")}
       ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Only the timing: what to trim, hold longer or speed up. On cartoons StoryStudio makes the changes for you.","setupFeedback('timing')")}
       ${MULTI ? "" : task("chat","#22262f","#e6e9ef","Tell StoryStudio what to fix","Pause where you see something you'd like better, say it in your own words, and get the fix.","openNotes()")}
+      ${!MULTI && P.with_sound ? task("sound","#3a2a14","var(--accent)","Sounds for my new shots","Added shots since the sounds were made? StoryStudio makes sounds for just those, and keeps all the others.","setupNewShots()") : ""}
+      ${!MULTI && P.with_sound ? task("wave","#3a1a22","#ff8fa3","Change a sound I don't like","Type the time from Premiere, pick the sound, and take it out, stop it there, or have a better one made.","setupChange()") : ""}
       ${!MULTI && P.with_sound ? task("link","#3a2a14","var(--accent)","Line up my sounds again","Moved, trimmed or deleted shots in Premiere? StoryStudio puts every sound effect back on its shot.","lineUpSounds()") : ""}
       ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","See last time's sounds","The sounds StoryStudio made for this project before.","openPrevious()") : ""}
       ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","See last time's feedback","The notes from the last time it watched this project.","openPreviousFeedback()") : ""}
@@ -577,30 +580,83 @@ function seg(key, items) {
 }
 function sw(key) { return `<button class="switch ${opts[key]?"on":""}" onclick="setOpt('${key}',${!opts[key]})" aria-label="${key}"></button>`; }
 function setOpt(k, v) { opts[k] = v; if (MULTI && PICK.length && $("#setup .planstep")) renderPlan(); else setupSounds(true); }
+// ---------------------------------------------------------------- change a sound
+let CHG = {time: "", note: "", list: null, t: null, done: null};
+function setupChange(keep) {
+  const kc = {music: "#c9a7ff", background: "var(--good)", effect: "var(--accent)", character: "#7cc4ff"};
+  $("#setup").innerHTML = `<div class="card panel"><h2>Change a sound I don't like</h2>
+    <p class="sub" style="margin-bottom:10px">Type the time from Premiere's timeline (like <b>00:01:47:23</b>, or just 1:47). StoryStudio shows every sound it added that plays there. Your project isn't changed: the change goes into a copy ending in “(sounds changed)”, and the next change builds on that copy.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap;align-items:center"><input id="chgtime" style="width:170px;margin:0" placeholder="00:01:47:23" value="${esc(CHG.time)}" onkeydown="if(event.key==='Enter')chgLook()">
+      <button class="btn primary" onclick="chgLook()">Show the sounds there</button></div>
+    ${CHG.list ? (CHG.list.length ? `<div class="sub" style="margin:14px 0 8px">Sounds StoryStudio added that play at <b>${esc(CHG.at)}</b>:</div>
+      <textarea id="chgnote" rows="2" class="sbin" style="width:100%;margin:0 0 10px" placeholder="Optional, for “Make a better one”: what would fit better? For example: something tense and quiet here, not happy music.">${esc(CHG.note)}</textarea>
+      <div class="list">${CHG.list.map(x => `<div class="note" style="grid-template-columns:1fr"><div class="nb">
+        <div class="nh"><span class="pill" style="color:${kc[x.kind]};border-color:${kc[x.kind]}">${esc(x.kind_name)}</span><b>${esc(x.name)}</b><span class="sub" style="margin:0">${x.time} to ${x.until}</span></div>
+        <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">
+          <button class="btn small" onclick="chgDo('${x.id}','remove',this)">Remove it</button>
+          ${x.long ? `<button class="btn small" onclick="chgDo('${x.id}','stop',this)">Stop it at ${esc(CHG.at)}</button>` : ""}
+          <button class="btn small primary" onclick="chgDo('${x.id}','remake',this)">Make a better one${x.long ? ` from ${esc(CHG.at)}` : ""}</button></div></div></div>`).join("")}</div>
+      <div class="sub" style="margin:8px 0 0">“Make a better one” looks at the picture there, listens to what you wrote, and makes a new sound${H.has_fal_key ? " with Fal (a few cents)" : ""}. StoryStudio remembers what you turned down, so it won't plan sounds like it again for this movie.</div>`
+      : `<div class="sub" style="margin:14px 0 0">No StoryStudio sounds play at ${esc(CHG.at)}. The sound you hear there may be one of your own clips.</div>`) : ""}
+    ${CHG.done ? `<div class="how" style="margin:14px 0 0"><span class="ok">✓ ${esc(CHG.done.message)}</span>${CHG.done.reply ? `<br>${esc(CHG.done.reply)}` : ""}</div>
+      <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px"><button class="btn primary" onclick='openFile(${esc(JSON.stringify(CHG.done.project))}, this, "Opening in Premiere…")'>Open the (sounds changed) copy ${arrow()}</button></div>` : ""}
+  </div>`;
+  if (!keep) $("#setup").scrollIntoView({behavior:"smooth"});
+}
+async function chgLook() {
+  CHG.time = $("#chgtime").value.trim(); CHG.note = $("#chgnote") ? $("#chgnote").value : CHG.note; CHG.done = null;
+  try { const j = await api("sounds_at", {time: CHG.time}); CHG.list = j.sounds; CHG.t = j.t; CHG.at = j.time; } catch (e) { return; }
+  setupChange(true);
+}
+async function chgDo(id, action, b) {
+  CHG.note = $("#chgnote") ? $("#chgnote").value.trim() : "";
+  b.disabled = true;
+  let j;
+  try { j = await api("change_sound", {id, action, t: CHG.t, note: CHG.note}); }
+  catch (e) { b.disabled = false; return; }
+  if (j.job) { CHG.waiting = true; watchJob(j.job); return; }
+  CHG.done = j; CHG.list = null; setupChange(true);
+}
+let NS = null;                        // "sounds for my new shots": [{start, end, name, time, length, on}]
+async function setupNewShots() {
+  $("#setup").innerHTML = `<div class="card panel"><h2>Sounds for my new shots</h2><div class="pmsg"><span class="spin"></span> Looking for shots that don't have sounds yet…</div></div>`;
+  $("#setup").scrollIntoView({behavior:"smooth"});
+  let j;
+  try { j = await api("new_shots"); }
+  catch (e) { $("#setup").innerHTML = `<div class="card panel"><h2>Sounds for my new shots</h2><div class="err">${esc(e.message)}</div></div>`; return; }
+  if (j.none_yet) { NS = null; return setupSounds(); }
+  if (!j.shots.length) { NS = null; $("#setup").innerHTML = `<div class="card panel"><h2>Sounds for my new shots</h2><p class="sub" style="margin:0">Every shot on this timeline already has its sounds. If you've moved shots around, use <b>Line up my sounds again</b>.</p></div>`; return; }
+  NS = j.shots.map(x => Object.assign(x, {on: true}));
+  setupSounds();
+}
+function nsOnly() { return NS ? NS.filter(x => x.on).map(x => [x.start, x.end]) : null; }
+function nsToggle(i) { NS[i].on = !NS[i].on; setupSounds(true); }
 async function setupSounds(keepScroll) {
   $("#setup").innerHTML = `
     <div class="card panel">
-      <h2>Add sound effects</h2>
-      ${P && P.previous ? `<div class="banner" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:240px"><b style="color:var(--text)">This project already has sounds.</b> Finding sounds again starts a new set${H.has_fal_key && opts.sound_source !== "pc" ? " and uses Fal credit" : ""}. To keep the ones you have and add to them, open them instead.</div><button class="btn" onclick="openPrevious()">See last time's sounds</button></div>` : ""}
+      <h2>${NS ? "Sounds for my new shots" : "Add sound effects"}</h2>
+      ${NS ? `<p class="sub" style="margin-bottom:8px">These shots weren't there when your sounds were made. Untick any that already have their own sound (like a channel intro). Only the ticked shots get sounds. Your other sounds aren't changed, and they follow any shots you've moved.</p>
+        <div class="list" style="margin-bottom:14px">${NS.map((x, i) => `<label class="note" style="grid-template-columns:auto 1fr auto;cursor:pointer;align-items:center"><input type="checkbox" ${x.on ? "checked" : ""} onchange="nsToggle(${i})" style="width:auto;margin:0"><div><b>${esc(x.name)}</b></div><span class="sub" style="margin:0">at ${x.time}, ${x.length} s</span></label>`).join("")}</div>` : ""}
+      ${!NS && P && P.previous ? `<div class="banner" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:240px"><b style="color:var(--text)">This project already has sounds.</b> Finding sounds again starts a new set${H.has_fal_key && opts.sound_source !== "pc" ? " and uses Fal credit" : ""}. To keep the ones you have and add to them, open them instead.</div><button class="btn" onclick="openPrevious()">See last time's sounds</button></div>` : ""}
       <div class="opt"><div><label class="t">How many sounds</label></div>${seg("busy",[["light","A few"],["normal","Normal"],["lots","Lots, like a big movie"],["cartoon","Cartoon: a sound for everything"]])}</div>
       ${H.has_fal_key ? `<div class="opt"><div><label class="t">Who makes the sounds</label><div class="hint">${opts.sound_source === "pc" ? "The sound AI on this PC. Free, but the sounds are rougher." : "Fal watches each whole shot and makes its sounds while watching, so every sound lands in step with the picture. Uses the credit on your Fal account."}</div></div>${seg("sound_source",[["auto","Fal"],["pc","This PC (free)"]])}</div>` : `<div class="opt"><div><label class="t">Better sounds with Fal</label><div class="hint">Add your Fal key and the sounds are made by Fal instead of this PC: clearer, and in step with the picture.</div></div><div class="swrow"><span class="chip">No key yet</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
       ${H.has_fal_key && opts.sound_source !== "pc" ? `<div class="opt"><div><label class="t">Spending limit</label><div class="hint">The most this story may cost on Fal. The most important shots (doors, footsteps, things picked up or dropped) get their sounds first; the rest keep their backgrounds. Leave empty for no limit.</div></div><div class="swrow"><span class="sub" style="margin:0">$</span><input type="number" min="0" step="0.5" style="width:90px;margin:0" placeholder="No limit" value="${opts.fal_limit ? opts.fal_limit : ""}" onchange="setOpt('fal_limit', Math.max(0, parseFloat(this.value) || 0))"></div></div>` : ""}
       ${H.has_fal_key && opts.sound_source !== "pc" ? `<div class="opt"><div><label class="t">Versions</label><div class="hint">Best makes 2 versions of each shot's sound and keeps the one that fits. Quick makes 1 and costs half.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>` : `<div class="opt"><div><label class="t">Quality</label><div class="hint">Best makes 3 versions of each sound and keeps the one that fits.</div></div>${seg("best_of",[[3,"Best"],[1,"Quick"]])}</div>`}
-      <div class="opt"><div><label class="t">Background music</label><div class="hint">For parts with no music. Gives you Suno wording plus a rough version.</div></div><div class="swrow">${sw("add_music")}<span class="sub" style="margin:0">${opts.add_music?"On":"Off: you make music in Suno"}</span></div></div>
+      ${NS ? "" : `<div class="opt"><div><label class="t">Background music</label><div class="hint">For parts with no music. Gives you Suno wording plus a rough version.</div></div><div class="swrow">${sw("add_music")}<span class="sub" style="margin:0">${opts.add_music?"On":"Off: you make music in Suno"}</span></div></div>`}
       ${H.has_fal_key && opts.sound_source !== "pc" ? "" : `<div class="opt"><div><label class="t">Make sounds on this PC</label><div class="hint">Free. Watches each moment so sounds line up.</div></div><div class="swrow">${sw("use_local")}</div></div>
       <div class="opt"><div><label class="t">Long natural backgrounds</label><div class="hint">Stable Audio Open: needs a free Hugging Face key (in Settings).</div></div><div class="swrow"><span class="chip ${H.has_hf_key?"good":""}">${H.has_hf_key?"Key added: on":"No key yet"}</span><button class="btn ghost" onclick="openSettings()">Settings…</button></div></div>`}
       <div class="footerbar">
         <div class="est" id="est">Working out the time…</div>
-        <button class="btn primary big" onclick="startSounds()">Find sounds ${arrow()}</button>
+        <button class="btn primary big" ${NS && !nsOnly().length ? "disabled" : ""} onclick="startSounds()">${NS ? "Make sounds for these shots" : "Find sounds"} ${arrow()}</button>
       </div>
     </div>`;
   if (!keepScroll) $("#setup").scrollIntoView({behavior:"smooth"});
   if (H.gpu === undefined) { try { H.gpu = (await api("gpu")).gpu; } catch(e) { H.gpu = 0; } }
-  const e = await api("estimate", Object.assign({gpu:H.gpu}, opts));
-  $("#est").innerHTML = `About <b>&nbsp;${e.text.replace("about ","")}&nbsp;</b> ${e.shots ? `for about ${e.shots} shots with sound, plus backgrounds.` : `for about ${e.sounds} sounds.`}${e.cost != null ? (e.limit && e.full_cost > e.limit ? ` Your limit keeps it to at most <b>&nbsp;$${e.limit.toFixed(2)}</b>: about ${Math.round(e.share * 100)}% of the shots get sounds (without a limit: about $${e.full_cost < 1 ? e.full_cost.toFixed(2) : Math.round(e.full_cost)}).` : ` Fal will charge your account about <b>&nbsp;$${e.cost < 1 ? e.cost.toFixed(2) : Math.round(e.cost)}</b>.`) : ""}${e.busy_gpu ? ' <span class="chip warn">Graphics card busy: closing Premiere makes it faster</span>' : ""}`;
+  const e = await api("estimate", Object.assign({gpu:H.gpu}, opts, NS ? {only_shots: nsOnly()} : {}));
+  $("#est").innerHTML = `About <b>&nbsp;${e.text.replace("about ","")}&nbsp;</b> ${NS ? `for ${e.shots || nsOnly().length} new shot${(e.shots || nsOnly().length) === 1 ? "" : "s"}.` : e.shots ? `for about ${e.shots} shots with sound, plus backgrounds.` : `for about ${e.sounds} sounds.`}${e.cost != null ? (e.limit && e.full_cost > e.limit ? ` Your limit keeps it to at most <b>&nbsp;$${e.limit.toFixed(2)}</b>: about ${Math.round(e.share * 100)}% of the shots get sounds (without a limit: about $${e.full_cost < 1 ? e.full_cost.toFixed(2) : Math.round(e.full_cost)}).` : ` Fal will charge your account about <b>&nbsp;$${e.cost < 1 ? e.cost.toFixed(2) : Math.round(e.cost)}</b>.`) : ""}${e.busy_gpu ? ' <span class="chip warn">Graphics card busy: closing Premiere makes it faster</span>' : ""}`;
 }
 function arrow() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'; }
-async function startSounds() { const j = await api("start_sounds", opts); watchJob(j.job); }
+async function startSounds() { const j = await api("start_sounds", Object.assign({}, opts, NS ? {only_shots: nsOnly()} : {only_shots: null})); watchJob(j.job); }
 
 // ---------------------------------------------------------------- setup: fix audio
 function setupFix() {
@@ -1533,13 +1589,14 @@ function watchJob(first) {
     draw(j);
     if (j.done) {
       clearInterval(polling); polling = null;
-      if (j.failed) { if (j.error === "Stopped.") toast(j.error, true); else setTimeout(() => showProblem(j.error), 50); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } if (j.then === "audit" && A && j.title === "Looking at what you said") { renderAudit(); return; } if (j.then === "fb_prompts" && F) { fbKeep(); return; } goHome(); return; }
+      if (j.failed) { if (j.error === "Stopped.") toast(j.error, true); else setTimeout(() => showProblem(j.error), 50); if (CHAIN) { CHAIN = null; chainBar("<span>The plan stopped because a step didn't finish. Everything done before it is saved.</span>"); } if (j.then === "audit" && A && j.title === "Looking at what you said") { renderAudit(); return; } if (j.then === "fb_prompts" && F) { fbKeep(); return; } if (j.then === "change_sound" && P) { renderHome(); setupChange(); return; } goHome(); return; }
       if (j.then === "fb_prompts") { F = (await api("feedback")).feedback; fbFilter = "redo"; fbKeep(); toast("The new prompts are under each note"); return; }
       if (j.then === "review") { R = (await api("review")).review; filter = ""; renderReview(); }
       else if (j.then === "done") renderDone();
       else if (j.then === "home") { const tools = j.title.startsWith("Getting"); await goHome(); if (!tools) openSettings(); else toast("StoryStudio is ready"); }
       else if (j.then === "script") { const k = await api("sb_result"); SBR = k.result; SBT = k.shot_types || SBT; renderScript(); $("main").scrollTop = 0; }
       else if (j.then === "feedback") { F = (await api("feedback")).feedback; fbFilter = ""; renderFeedback(); }
+      else if (j.then === "change_sound") { const r = await api("last_change"); renderHome(); CHG.done = r.project ? r : null; CHG.list = null; setupChange(); }
       else if (j.then === "audit") { const was = PAGE; A = (await api("audit")).audit; ASKDRAFT = ""; if (!A) { goHome(); return; } renderAudit(); if (was !== "audit" || j.title === "Checking your story") $("main").scrollTop = 0; }
     }
   }, 700);

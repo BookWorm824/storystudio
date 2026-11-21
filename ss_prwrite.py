@@ -979,7 +979,7 @@ def _anchor(sound, videos):
 
 
 def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=LINKED_TRACKS,
-                   ref_sounds=None):
+                   ref_sounds=None, groups=None):
     """After shots were moved, trimmed or deleted in Premiere: put every StoryStudio sound
     effect and character sound back on its own shot. ref_path is the project as it was when
     the sounds were placed (the "(with sound)" copy). Each sound keeps its exact moment in its
@@ -987,54 +987,59 @@ def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=LINKED_TR
     sounds go with it. Background sounds and music are left where they are.
     ref_sounds: [{"name", "start", "end"}] in seconds, where StoryStudio placed each sound on
     ref_path's timeline (when ref_path is the project they were made for, without them).
+    groups: [(ref_path, ref_sounds)] when the sounds were made in several runs (sounds for new
+    shots made later), each placed on the timeline as it was then.
     Returns {"project", "moved", "removed", "shots_moved", "kept"}."""
-    rw = Writer(ref_path)
-    rseq = rw.sequence(seq_uid)
-    ref = _all_items(rw, rseq)
+    if groups is None:
+        groups = [(ref_path, ref_sounds)]
     w = Writer(project_path)
     seq = w.sequence(seq_uid)
     now = _all_items(w, seq)
     T = TICKS
-    rvid = [i for i in ref if i["kind"] == "video"]
     nvid = [i for i in now if i["kind"] == "video"]
-    if ref_sounds is not None:
-        rsnd = [{"name": x["name"], "start": int(round(x["start"] * TICKS)),
-                 "end": int(round(x["end"] * TICKS))} for x in ref_sounds]
-    else:
-        rsnd = [i for i in ref if i["kind"] == "audio" and
-                i["tname"].startswith(tuple(prefixes))]
     nsnd = [i for i in now if i["kind"] == "audio" and i["tname"].startswith(tuple(prefixes))]
-    if not rsnd:
-        raise StoryError("The “(with sound)” copy has no StoryStudio sound effects to line up.")
-    # each old shot -> the same shot now (same clip file; the nearest in point if it's used twice)
     by_file = {}
     for v in nvid:
         by_file.setdefault(v["file"], []).append(v)
-    used, shot_now = set(), {}
-    for v in sorted(rvid, key=lambda v: v["start"]):
-        cands = [x for x in by_file.get(v["file"], []) if x["id"] not in used]
-        if not cands:
-            continue
-        x = min(cands, key=lambda x: (abs(x["in"] - v["in"]), abs(x["start"] - v["start"])))
-        used.add(x["id"])
-        shot_now[v["id"]] = x
-    moved_shots = sum(1 for v in rvid if v["id"] in shot_now and
-                      abs(shot_now[v["id"]]["start"] - v["start"]) > T // 50)
-    # each sound now <- the same sound in the reference (same name, nearest old time)
-    pool = {}
-    for s in rsnd:
-        pool.setdefault(s["name"], []).append(s)
+    pool, moved_shots = {}, 0
+    for g_path, g_sounds in groups:
+        rw = Writer(g_path)
+        ref = _all_items(rw, rw.sequence(seq_uid))
+        rvid = [i for i in ref if i["kind"] == "video"]
+        if g_sounds is not None:
+            rsnd = [{"name": x["name"], "start": int(round(x["start"] * TICKS)),
+                     "end": int(round(x["end"] * TICKS))} for x in g_sounds]
+        else:
+            rsnd = [i for i in ref if i["kind"] == "audio" and
+                    i["tname"].startswith(tuple(prefixes))]
+        # each shot then -> the same shot now (same clip file; nearest in point if used twice)
+        used, shot_now = set(), {}
+        for v in sorted(rvid, key=lambda v: v["start"]):
+            cands = [x for x in by_file.get(v["file"], []) if x["id"] not in used]
+            if not cands:
+                continue
+            x = min(cands, key=lambda x: (abs(x["in"] - v["in"]), abs(x["start"] - v["start"])))
+            used.add(x["id"])
+            shot_now[v["id"]] = x
+        moved_shots = max(moved_shots, sum(1 for v in rvid if v["id"] in shot_now and
+                                           abs(shot_now[v["id"]]["start"] - v["start"]) > T // 50))
+        for r in rsnd:
+            pool.setdefault(r["name"], []).append((r, rvid, shot_now))
+    if not pool:
+        raise StoryError("The “(with sound)” copy has no StoryStudio sound effects to line up.")
+    # each sound now <- the same sound where it was placed (same name, nearest time)
     plan, gone = [], []
     for s in nsnd:
         cands = pool.get(s["name"]) or []
         if not cands:
             continue                               # a sound she added herself: leave it
-        r = min(cands, key=lambda r: abs(r["start"] - s["start"]))
-        cands.remove(r)
+        pick = min(cands, key=lambda c: abs(c[0]["start"] - s["start"]))
+        cands.remove(pick)
+        r, rvid, shot_now = pick
         v = _anchor(r, rvid)
-        x = shot_now.get(v["id"]) if v else None
         if v is None:
             continue
+        x = shot_now.get(v["id"])
         if x is None:                              # the shot was deleted
             gone.append(s)
             continue

@@ -1,5 +1,5 @@
 {
-  "version": "1.25.2",
+  "version": "1.26.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -33,7 +33,8 @@
     "ss_update.py",
     "storysound.ico",
     "ss_audio_template.xml",
-    "ss_audit.py"
+    "ss_audit.py",
+    "ss_change.py"
   ],
-  "notes": "The timing changes (\"Make these changes for me\") now include the very first shot, which was skipped before."
+  "notes": "New on the project page: \"Sounds for my new shots\" makes sounds only for shots you've added, and keeps all the others. \"Change a sound I don't like\": type the time from Premiere, then remove the sound, stop it there, or have a better one made in your words."
 }

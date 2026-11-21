@@ -366,7 +366,7 @@ def run_job(title, work, then, phases):
 def choices(opts=None):
     s = dict(S.settings)
     s.update({k: v for k, v in (opts or {}).items() if k in core.DEFAULTS or k in (
-        "best_of", "hf_key", "add_music")})
+        "best_of", "hf_key", "add_music", "only_shots")})
     return s
 
 
@@ -924,6 +924,41 @@ def api(name, a):
             return {"project": ""}
         proj, _ = A.sound_home(dict(st, project=a.get("path") or st["project"]))
         return {"project": proj or ""}
+    if name == "new_shots":                    # shots added since the sounds were made
+        import storysound as E
+        import ss_audit as A
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        shots = A.new_shots(st, E._sequence(st))
+        if shots is None:
+            return {"none_yet": True, "shots": []}
+        return {"shots": [{"start": round(x["start"], 3), "end": round(x["end"], 3),
+                           "name": x["name"], "time": fmt_time(x["start"]),
+                           "length": round(x["end"] - x["start"], 1)} for x in shots]}
+    if name == "sounds_at":                    # "change a sound I don't like"
+        import ss_change as CH
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        t = CH.parse_time(a.get("time"), st.get("fps") or 24)
+        return {"t": t, "time": fmt_time(t), "sounds": CH.sounds_at(st, t)}
+    if name == "change_sound":
+        import ss_change as CH
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        act, t = a.get("action"), a.get("t")
+        args = (a.get("id"), act, t, str(a.get("note") or "").strip())
+        if act != "remake":
+            return CH.change(st, *args)
+        s = choices()
+        def work(p, c, ph):
+            st["last_change"] = CH.change(st, *args, settings=s, progress=p, cancel=c)
+        st.pop("last_change", None)
+        return {"job": run_job("Making a better sound", work, "change_sound", [150])}
+    if name == "last_change":
+        return (S.st or {}).get("last_change") or {}
     if name == "line_up_sounds":               # after moving shots in Premiere
         import ss_audit as A
         st = S.st

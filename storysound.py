@@ -45,6 +45,9 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
     """Rough seconds for each step: {"prepare", "plan", "sounds", "finish"} plus a flag for
     a busy graphics card. Shown before starting and used for the time-left display."""
     d = st["duration"]
+    only = _only_shots(settings)
+    if only:
+        return _estimate_new(st, settings, only, gpu_gb)
     shots = st.get("info", {}).get("shots", 30)
     prepare = (0 if st.get("export") else 8 + shots * 0.5) + 15 + d * 0.15
     sheets = math.ceil(d / (1.0 if d <= 420 else 2.0) / 20)
@@ -92,6 +95,30 @@ def estimate(st, settings, n_cues=None, gpu_gb=None):
         sounds = n * 3.0
     return {"prepare": prepare, "plan": plan, "sounds": sounds, "finish": finish,
             "busy_gpu": slow > 1.0, "n": n}
+
+
+def _estimate_new(st, settings, only, gpu_gb=None):
+    """The estimate for sounds for a few new shots."""
+    d, dn, k = st["duration"], sum(b - a for a, b in only), len(only)
+    prepare = (0 if st.get("export") else 8 + st.get("info", {}).get("shots", 30) * 0.5) + \
+        15 + d * 0.15
+    plan = 90 + 30 + k * 0.6 + 40 + (60 if settings.get("busy") == "cartoon" else 0)
+    per_min = {"light": 7, "normal": 13, "lots": 24, "cartoon": 34}.get(
+        settings.get("busy", "normal"), 13)
+    n = max(2, round(dn / 60 * per_min))
+    finish = 30 + d * 0.25
+    if uses_fal(settings):
+        import ss_fal
+        versions = 2 if int(settings.get("best_of", 3)) > 1 else 1
+        cost = ss_fal.estimate(dn, 0, samples=versions, shots=True)
+        return {"prepare": prepare, "plan": plan, "sounds": 60 + k * 9.0, "finish": finish,
+                "busy_gpu": False, "n": k, "shots": k, "cost": cost, "full_cost": cost,
+                "limit": 0.0, "share": 1.0}
+    gpu = gpu_free_gb() if gpu_gb is None else gpu_gb
+    slow = 1.0 if gpu >= 7.0 else (2.0 if gpu >= 3.8 else 6.0)
+    takes = max(1, int(settings.get("best_of", 3)))
+    return {"prepare": prepare, "plan": plan, "sounds": 45 + n * 8.0 * takes * slow,
+            "finish": finish, "busy_gpu": slow > 1.0, "n": n}
 
 
 def nice_minutes(sec):
@@ -228,6 +255,26 @@ def _sequence(st):
 # ---------------------------------------------------------------------------
 # 2. analyse
 # ---------------------------------------------------------------------------
+def _only_shots(settings):
+    """[[start, end], ...] when only some shots get sounds (her new shots), else None."""
+    try:
+        spans = [[float(a), float(b)] for a, b in settings.get("only_shots") or [] if b > a]
+    except (TypeError, ValueError):
+        spans = []
+    return spans or None
+
+
+def _in_spans(t, spans, pad=0.0):
+    return any(a - pad <= t < b + pad for a, b in spans)
+
+
+def _keep_in_spans(cues, spans):
+    """Effects that start inside the chosen shots; no backgrounds or music (those run across
+    the whole movie and are already there)."""
+    return [c for c in cues if c.get("kind") not in BEDS and
+            _in_spans(float(c.get("start", 0)), spans, 0.2)]
+
+
 def analyze(st, settings, progress=None, cancel=None):
     work = Path(st["work"])
     _keep_made_run(st)
@@ -247,17 +294,25 @@ def analyze(st, settings, progress=None, cancel=None):
         raise StoryError("Stopped.")
 
     st["cartoon"] = settings.get("busy") == "cartoon"   # wordless cartoon: effects up front
+    only = _only_shots(settings)              # "sounds for my new shots": just these spans
+    st["only_shots"] = only
     balance_audio(st, seq, progress, cancel)
     clips = st["clips"]
 
     # stills for Claude
     _say(progress, 0.46, "Taking pictures of every moment…")
     every = 1.0 if dur <= 900 else 2.0
-    frames = M.stills(st["picture"], work, every=every)
+    frames = M.stills(st["picture"], work, every=0.5 if only else every)
+    if only:
+        frames = [f for f in frames if _in_spans(f[0], only, 0.25)]
     sheets = M.contact_sheets(frames, work)
     st["shots"] = [{"start": a, "end": b, "name": (it or {}).get("name", "black")}
                    for a, b, it in P.picture_segments(seq)]
     st["cuts"] = P.shot_changes(seq)
+    all_shots = st["shots"]
+    if only:
+        st["shots"] = [x for x in all_shots if any(min(x["end"], b) - max(x["start"], a) > 0.05
+                                                   for a, b in only)]
 
     # Claude plans the sounds
     story = ""
@@ -266,17 +321,27 @@ def analyze(st, settings, progress=None, cancel=None):
             story = read_story(st["story"])
         except StoryError:
             story = ""
+    try:                                     # what she turned down in this movie before
+        import ss_change
+        no = ss_change.dislikes_text(st["seq_uid"])
+        if no:
+            story = (story + "\n\n" + no).strip()
+    except Exception:
+        log_error("sound dislikes")
     import ss_claude as C
     seq_info = {"name": st["seq_name"], "duration": dur, "shots": st["shots"],
                 "audio": [{"start": c["start"], "end": c["end"], "tag": c["tag"],
                            "name": c["name"]} for c in clips]}
     plan = C.plan_sounds(story, seq_info, st["lines"], sheets, settings.get("busy", "normal"),
                          progress=lambda f, m: _say(progress, 0.5 + 0.43 * f, m),
-                         music=bool(settings.get("add_music")))
+                         music=bool(settings.get("add_music")) and not only)
+    if only:
+        plan["cues"] = _keep_in_spans(plan["cues"], only)
     try:                                     # second read: sounds the story still needs
-        plan["cues"] += C.check_missing(story, seq_info, st["lines"], plan["cues"],
-                                        bool(settings.get("add_music")),
-                                        lambda f, m: _say(progress, 0.93 + 0.03 * f, m))
+        more = C.check_missing(story, seq_info, st["lines"], plan["cues"],
+                               bool(settings.get("add_music")) and not only,
+                               lambda f, m: _say(progress, 0.93 + 0.03 * f, m))
+        plan["cues"] += _keep_in_spans(more, only) if only else more
     except StoryError:
         log("missing-sounds check skipped")
     st["plan_notes"] = plan.get("notes", "")
@@ -308,6 +373,10 @@ def analyze(st, settings, progress=None, cancel=None):
             log_error("character voices")
         if cancel and cancel():
             raise StoryError("Stopped.")
+    if only:                                 # the passes may add sounds; keep them in the spans
+        plan["cues"] = _keep_in_spans(plan["cues"], only)
+        st["shots"] = all_shots
+        st["mode"] = "new shots"
     st["movie_type"] = "cartoon" if st.get("cartoon") else plan.get("movie_type", "")
     st["look"] = plan.get("look", "")
     st["cues"] = tidy_cues(plan["cues"], dur, st["cuts"])
@@ -1698,8 +1767,11 @@ def write_premiere(st, kept, label="with sound"):
     out = copy_path(real, label)
     w = W.Writer(src)
     _, ext = w.template_item(".wav")
+    only = bool(st.get("only_shots"))
     tracks = []
     for tname, items in assign_tracks(kept):
+        if only:
+            tname = tname.replace("StoryStudio effects", "StoryStudio effects, new shots")
         clips = []
         for c in items:
             f = c["file"]
@@ -1711,6 +1783,17 @@ def write_premiere(st, kept, label="with sound"):
                           "duration": probe(f)["duration"] or c["length"],
                           "name": f"{c['what']}"})
         tracks.append((tname, clips))
+    if only:                                 # her sounds stay exactly as they are
+        path, _ = W.write_project(src, st["seq_uid"], tracks, out, out_dir(st))
+        try:                                 # and the earlier sounds follow moved shots
+            import ss_audit as A
+            A.line_up({"project": path, "seq_uid": st["seq_uid"], "seq_name": st["seq_name"]},
+                      out=path)
+        except StoryError as e:
+            log("line up after new shots skipped:", e)
+        except Exception:
+            log_error("line up after new shots")
+        return path
     path, _ = W.write_project(src, st["seq_uid"], tracks, out, out_dir(st),
                               repoint=st.get("audio_map") or None,
                               reset=st.get("reset_items") or None,
