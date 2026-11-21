@@ -300,8 +300,9 @@ class Writer:
         return list(lst) if lst is not None else []
 
     def add_clip(self, track, template, file_path, start_sec, dur_sec, name, rate=48000,
-                 bin_el=None, project_dir=None):
-        """Put file_path on track at start_sec (whole file, dur_sec long)."""
+                 bin_el=None, project_dir=None, src_in_sec=0.0, media_sec=None):
+        """Put file_path on track at start_sec, dur_sec long, playing from src_in_sec into the
+        file (media_sec: the file's whole length, when it is longer than what is used)."""
         keys = self.closure(template.get("ObjectID") or template.get("ObjectUID"), CLIP_TAGS)
         # the clip's project item (in a bin) points at its MasterClip
         sub = self.get(template, "ClipTrackItem/SubClip")
@@ -318,6 +319,8 @@ class Writer:
             keys.append(cpi_key)
         remap, new = self.clone(keys)
         D = int(round(dur_sec * TICKS))
+        IN = int(round(src_in_sec * TICKS))
+        MD = max(IN + D, int(round((media_sec or 0) * TICKS)))
         fr = str(int(round(TICKS / rate)))
         file_path = str(Path(file_path).resolve())
         fname = Path(file_path).name
@@ -347,13 +350,13 @@ class Writer:
                 self.setx(c, "ClipID", _guid())
                 _plain_speed(c)
                 if c.find("OutPoint") is not None:
-                    self.setx(c, "OutPoint", D)
-                    self.setx(c, "InPoint", 0)
+                    self.setx(c, "OutPoint", IN + D)
+                    self.setx(c, "InPoint", IN)
                 props = c.find("Node/Properties")
                 if props is not None:
                     self.drop(props, "asl.clip.label.color", "asl.clip.label.name")
             elif t == "AudioMediaSource":
-                self.setx(el, "OriginalDuration", D)
+                self.setx(el, "OriginalDuration", MD)
             elif t == "Media":
                 self.drop(el, "ModificationState", "ContentAndMetadataState",
                           r"MediaFileHistory\d+", "RelativePath")
@@ -371,13 +374,13 @@ class Writer:
                     except ValueError:
                         pass
             elif t == "AudioStream":
-                self.setx(el, "Duration", D)
+                self.setx(el, "Duration", MD)
                 self.setx(el, "FrameRate", fr)
                 self.drop(el, "ConformedAudioPath", "PeakFilePath")
             elif t == "ClipLoggingInfo":
                 self.setx(el, "ClipName", name)
                 self.setx(el, "MediaInPoint", 0)
-                self.setx(el, "MediaOutPoint", D)
+                self.setx(el, "MediaOutPoint", MD)
                 self.setx(el, "MediaFrameRate", fr)
                 self.drop(el, "ClipName_Logging")
             elif t == "ClipProjectItem":
@@ -1024,7 +1027,7 @@ def _shot_at(t, videos):
 
 
 def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
-                   ref_sounds=None, groups=None):
+                   ref_sounds=None, groups=None, skip=()):
     """After shots were moved, trimmed or deleted in Premiere: put every StoryStudio sound back
     with its shot. Effects and character sounds keep their exact moment in their shot (a sound
     whose moment was trimmed away is shortened or goes; a deleted shot's sounds go with it).
@@ -1052,8 +1055,8 @@ def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
         rvid = [i for i in ref if i["kind"] == "video"]
         if g_sounds is not None:
             rsnd = [{"name": x["name"], "start": int(round(x["start"] * TICKS)),
-                     "end": int(round(x["end"] * TICKS)), "bed": bool(x.get("bed"))}
-                    for x in g_sounds]
+                     "end": int(round(x["end"] * TICKS)), "bed": bool(x.get("bed")),
+                     "file": x.get("file", "")} for x in g_sounds]
         else:
             rsnd = [dict(i, bed=SOUND_GROUPS[_group_of(i["tname"])][1]) for i in ref
                     if i["kind"] == "audio" and _group_of(i["tname"]) is not None]
@@ -1083,14 +1086,31 @@ def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
         return x["start"] + (src - x["in"]) / x["speed"], x
 
     plan, gone, beds_moved = [], [], 0
+    claimed, restored, extra = set(), 0, 0
+    cur = {}
     for s in nsnd:
-        cands = pool.get(s["name"]) or []
-        if not cands:
-            continue                               # a sound she added herself: leave it
-        pick = min(cands, key=lambda c: abs(c[0]["start"] - s["start"]))
-        cands.remove(pick)
-        r, rvid, shot_now = pick
+        cur.setdefault(s["name"], []).append(s)
+    tmpl = None
+    group_track = {}
+    for s in nsnd:
+        group_track.setdefault(_group_of(s["tname"]), s["track"])
+
+    def take(name, near):
+        """Her clip of this sound nearest to a time (each one used once)."""
+        cs = [c for c in cur.get(name, []) if c["id"] not in claimed]
+        if not cs:
+            return None
+        c = min(cs, key=lambda c: abs(c["start"] - near))
+        claimed.add(c["id"])
+        return c
+
+    order = sorted(((r, rvid, sn) for lst in pool.values() for r, rvid, sn in lst),
+                   key=lambda e: e[0]["start"])
+    for r, rvid, shot_now in order:
         if r.get("bed"):
+            s = take(r["name"], r["start"])
+            if s is None:
+                continue
             # a long layer: its start follows the shot it started on, its end the shot it
             # ended on; it keeps playing from the same place in its own sound
             a = moment(r["start"] + T // 25, rvid, shot_now)
@@ -1105,36 +1125,78 @@ def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
             new_start = max(0, new_start)
             if abs(new_start - s["start"]) > T // 10 or abs(new_end - s["end"]) > T // 10:
                 beds_moved += 1
-            plan.append((s, int(round(new_start)), int(round(new_end)), 0))
+            plan.append((s, int(round(new_start)), int(round(new_end)), s["in"]))
             continue
         v = _anchor(r, rvid)
         if v is None:
+            s = take(r["name"], r["start"])        # can't tell its shot: leave it be
             continue
-        x = shot_now.get(v["id"])
-        if x is None:                              # the shot was deleted
-            gone.append(s)
-            continue
-        src = v["in"] + (r["start"] - v["start"]) * v["speed"]      # its moment in the clip
-        new_start = x["start"] + (src - x["in"]) / x["speed"]
+        # the sound's stretch of its shot's clip, and every piece of that clip on the timeline
+        sa = v["in"] + (r["start"] - v["start"]) * v["speed"]
         length = r["end"] - r["start"]
-        cut_head = max(0, x["start"] - new_start)                   # trimmed off the front
-        tail_over = max(0, r["end"] - v["end"])                     # it ran past its cut before
-        new_end = min(new_start + length, x["end"] + tail_over)
-        new_start = max(new_start, x["start"])
-        if new_end - new_start < T * 0.15:
-            gone.append(s)
+        sb = sa + length * v["speed"]
+        v_end = v["in"] + (v["end"] - v["start"]) * v["speed"]
+        tail_over = max(0, r["end"] - v["end"])          # it ran past its cut before
+        pieces = []
+        for x in by_file.get(v["file"], []):
+            xa, xb = x["in"], x["in"] + (x["end"] - x["start"]) * x["speed"]
+            oa, ob = max(sa, xa), min(sb, xb)
+            if (ob - oa) / x["speed"] < T * 0.15:
+                continue
+            start = x["start"] + (oa - xa) / x["speed"]
+            end = x["start"] + (ob - xa) / x["speed"]
+            if sb > v_end and abs(xb - v_end) < T // 20:  # it may run past this cut again
+                end += tail_over
+            pieces.append((start, end, (oa - sa) / v["speed"]))
+        if not pieces:                             # its shot (or that part) is gone
+            s = take(r["name"], r["start"])
+            if s is not None:
+                gone.append(s)
             continue
-        plan.append((s, int(round(new_start)), int(round(new_end)), int(round(cut_head))))
+        placed = 0
+        for start, end, head in sorted(pieces):
+            s = take(r["name"], start)
+            if s is None:                          # missing, or a second piece of the shot
+                if r["name"] in skip or not r.get("file") or not os.path.exists(r["file"]):
+                    continue
+                tr = group_track.get(0)
+                if tr is None:
+                    continue
+                if tmpl is None:
+                    tmpl, _ = w.template_item(".wav")
+                    if tmpl is None:
+                        continue
+                try:
+                    from ss_core import probe
+                    media = probe(r["file"])["duration"] or 0
+                except Exception:
+                    media = 0
+                item = w.add_clip(tr, tmpl, r["file"], start / T, (end - start) / T, r["name"],
+                                  project_dir=str(Path(out_path).parent), src_in_sec=head / T,
+                                  media_sec=media)
+                s = {"id": item.get("ObjectID"), "track": tr, "tname": SOUND_GROUPS[0][0],
+                     "cti": item.find("ClipTrackItem"), "c": None, "in": int(head),
+                     "start": int(start), "end": int(end), "speed": 1.0, "name": r["name"]}
+                claimed.add(s["id"])
+                nsnd.append(s)
+                if placed:
+                    extra += 1                     # a second piece of the same shot
+                else:
+                    restored += 1                  # it had gone missing
+                placed += 1
+                continue
+            plan.append((s, int(round(start)), int(round(end)), int(round(head))))
+            placed += 1
     # move them
     moved = 0
-    for s, a, b, head in plan:
+    for s, a, b, src_in in plan:
         if abs(a - s["start"]) > T // 100 or abs(b - s["end"]) > T // 100:
             moved += 1
         _set_times(s["cti"], a, b)
-        if head and s["c"].find("InPoint") is not None:
-            Writer.setx(s["c"], "InPoint", s["in"] + head)
-        if s["c"].find("OutPoint") is not None:
-            Writer.setx(s["c"], "OutPoint", s["in"] + head + int((b - a) * s["speed"]))
+        if s["c"] is not None and s["c"].find("InPoint") is not None:
+            Writer.setx(s["c"], "InPoint", int(src_in))
+        if s["c"] is not None and s["c"].find("OutPoint") is not None:
+            Writer.setx(s["c"], "OutPoint", int(src_in) + int((b - a) * s["speed"]))
         s["start"], s["end"] = a, b
     # lay each kind of track out again so no two clips share a moment on one track
     gone_ids = {s["id"] for s in gone}
@@ -1186,9 +1248,10 @@ def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
     w.save(out_path)
     kept = len(nsnd) - len(gone)
     log("lined up sounds", out_path, "moved", moved, "removed", len(gone), "shots moved",
-        moved_shots, "beds moved", beds_moved)
+        moved_shots, "beds moved", beds_moved, "put back", restored, "second pieces", extra)
     return {"project": str(out_path), "moved": moved, "removed": len(gone),
-            "shots_moved": moved_shots, "kept": kept, "beds_moved": beds_moved}
+            "shots_moved": moved_shots, "kept": kept, "beds_moved": beds_moved,
+            "restored": restored, "extra": extra}
 
 
 def write_linked(project_path, seq_uid, out_path):

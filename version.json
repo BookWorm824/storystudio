@@ -1,5 +1,5 @@
 {
-  "version": "1.28.1",
+  "version": "1.28.2",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -36,5 +36,5 @@
     "ss_audit.py",
     "ss_change.py"
   ],
-  "notes": "Line up my sounds again now moves background sounds and music with their scenes too, and every tool that works on your edits reads your project as you last saved it."
+  "notes": "Line up my sounds again now puts back sounds that went missing from shots still on your timeline, gives a shot you used twice (or split) its part of the sound on each piece, and moves background sounds and music with their scenes."
 }

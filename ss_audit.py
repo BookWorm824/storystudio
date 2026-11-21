@@ -829,7 +829,7 @@ def _ref_sounds(data):
     import storysound as E
     return [{"name": c["what"], "start": float(c["place_at"]),
              "end": float(c["place_at"]) + float(c.get("length") or (c["end"] - c["start"])),
-             "bed": c.get("kind") in E.BEDS}
+             "bed": c.get("kind") in E.BEDS, "file": c.get("file", "")}
             for c in data["cues"] if c.get("file") and c.get("keep", True)]
 
 
@@ -844,8 +844,13 @@ def line_up(st, out=None):
                          "Open the project you added sound effects to (or a copy of it).")
     real = Path(st["project"])
     out = out or E.copy_path(real, "sounds lined up")
+    try:                                         # sounds she turned down stay out
+        import ss_change
+        skip = {x["what"] for x in ss_change._dislikes().get(st["seq_uid"], [])}
+    except Exception:
+        skip = set()
     res = W.line_up_sounds(st.get("snapshot") or real, st["seq_uid"], None, out,
-                           groups=[(ref, _ref_sounds(data)) for data, _, ref in src])
+                           groups=[(ref, _ref_sounds(data)) for data, _, ref in src], skip=skip)
     log("lined up sounds from", [Path(p or "").name for _, p, _ in src], res)
     return res
 
