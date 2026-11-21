@@ -146,6 +146,8 @@ def fresh_copy(st):
     as she last SAVED it, not as it was when she opened it in StoryStudio: take a new copy
     when the project has been saved since."""
     import storysound as E
+    if not st or st.get("video") or not st.get("project"):
+        return False
     try:
         p, snap = Path(st["project"]), Path(st.get("snapshot") or "")
         if snap.exists() and p.stat().st_mtime <= snap.stat().st_mtime + 0.5:
@@ -154,6 +156,10 @@ def fresh_copy(st):
         st["snapshot_time"] = time.strftime("%I:%M %p").lstrip("0")
         seq = E._sequence(st)
         st["duration"] = seq["duration"]
+        if st.get("picture") and st.get("picture") != st.get("export"):
+            st.pop("picture", None)              # the preview was of the older timeline
+        if isinstance(st.get("audit"), dict):
+            st["audit"]["shots"] = []            # the story check looks at the timeline again
         log("took a new copy of the project as last saved:", p.name)
         return True
     except StoryError:
@@ -640,8 +646,7 @@ def api(name, a):
     if name == "start_sounds":
         api("save_settings", a)
         st, s = S.st, choices(a)
-        if s.get("only_shots"):
-            fresh_copy(st)
+        fresh_copy(st)
         est = E.estimate(st, s)
 
         def work(progress, cancel, phase):
@@ -653,6 +658,8 @@ def api(name, a):
                                [est["prepare"] + est["plan"], est["sounds"]])}
     if name == "start_fix_audio":
         api("save_settings", {k: v for k, v in a.items() if not k.startswith("fix_")})
+        if not a.get("fix_chosen"):
+            a = dict(a, fix_clean=False, fix_recheck=False)
         st, s = S.st, choices(a)
         fresh_copy(st)
         e = E.estimate(st, s, n_cues=0)
@@ -676,6 +683,8 @@ def api(name, a):
     if name == "start_karaoke":
         import ss_karaoke as K
         st, s = S.st, choices()
+        if st and not st.get("video"):
+            fresh_copy(st)
         text = a.get("lyrics", "")
         if not K.parse_lyrics(text):
             raise StoryError("Please paste the song's lyrics first.")
@@ -889,8 +898,10 @@ def api(name, a):
         if not info and here != RUN_VERSION:     # installed by another launch: just restart
             info = {"version": here, "notes": "It's already downloaded: StoryStudio just needs "
                     "to start again."}
+        busy = (S.job is not None and not S.job.done) or S.asking > 0
         return {"update": {"version": info["version"], "notes": info.get("notes", "")}
-                if info else None, "current": RUN_VERSION}
+                if info else None, "current": RUN_VERSION,
+                "auto": bool(info) and here != RUN_VERSION and not busy}
     if name == "update_now":
         import ss_update
         if (S.job and not S.job.done) or S.asking > 0:
@@ -974,6 +985,7 @@ def api(name, a):
         if use_claude:                              # the shot-by-shot timing look
             est += 20 + n_shots * 0.6 + math.ceil(math.ceil(n_shots / 6) / 3) * 45 + 30
         st["feedback_dirty"] = False
+        fresh_copy(st)
         return {"job": run_job("Checking your timing and pacing" if focus == "timing"
                                else "Watching your edit",
                                lambda p, c, ph: F.feedback(st, s, p, c, kind, use_claude, focus),
@@ -987,6 +999,7 @@ def api(name, a):
         st = S.st
         if not st or st.get("video"):
             raise StoryError("Open your Premiere project first.")
+        fresh_copy(st)
         dur = st["duration"]
         est = (40 + dur * 0.15 + (0 if st.get("picture") or st.get("export") else dur * 0.35)
                + 30 + 90 * math.ceil(math.ceil(dur / 120) / 3) + 150)
@@ -999,6 +1012,8 @@ def api(name, a):
         st = S.st
         if not st or st.get("video"):
             raise StoryError("Open your Premiere project first.")
+
+        fresh_copy(st)
 
         def work(progress, cancel, phase):
             A.prepare(st, progress, cancel)
@@ -1046,7 +1061,7 @@ def api(name, a):
         st = S.st
         if not st or st.get("video"):
             raise StoryError("Open your Premiere project first.")
-        t = CH.parse_time(a.get("time"), st.get("fps") or 24)
+        t = CH.parse_time(a.get("time"), st.get("fps") or 24, st.get("duration"))
         return {"t": t, "time": fmt_time(t), "sounds": CH.sounds_at(st, t)}
     if name == "change_sound":
         import ss_change as CH
@@ -1055,11 +1070,12 @@ def api(name, a):
             raise StoryError("Open your Premiere project first.")
         act, t = a.get("action"), a.get("t")
         args = (a.get("id"), act, t, str(a.get("note") or "").strip())
+        kw = {"name": str(a.get("name") or ""), "start": a.get("start")}
         if act != "remake":
-            return CH.change(st, *args)
+            return CH.change(st, *args, **kw)
         s = choices()
         def work(p, c, ph):
-            st["last_change"] = CH.change(st, *args, settings=s, progress=p, cancel=c)
+            st["last_change"] = CH.change(st, *args, settings=s, progress=p, cancel=c, **kw)
         st.pop("last_change", None)
         return {"job": run_job("Making a better sound", work, "change_sound", [150])}
     if name == "last_change":
@@ -1070,16 +1086,17 @@ def api(name, a):
         if not st or st.get("video"):
             raise StoryError("Open your Premiere project first.")
         fresh_copy(st)
-        return A.line_up(st)
-    if name == "link_sounds":                  # sounds that move with their shot
-        import storysound as E
-        import ss_prwrite as W
-        st = S.st
-        if not st or st.get("video"):
-            raise StoryError("Open your Premiere project first.")
-        real = Path(st["project"])
-        out = E.copy_path(real, "linked")
-        return W.write_linked(st.get("snapshot") or real, st["seq_uid"], out)
+        res = A.line_up(st, restore=a.get("restore") or False)
+        for m in res["missing"] + res["removed_list"]:
+            m["time"] = fmt_time(m["at"])
+        for m in res["moved_list"]:
+            m["from_time"], m["to_time"] = fmt_time(m["from"]), fmt_time(m["to"])
+        return res
+    if name == "forget_missing":               # "I took those out myself": don't list them again
+        import ss_change as CH
+        for n in a.get("names") or []:
+            CH.remember(S.st["seq_uid"], str(n), "", "taken out in Premiere")
+        return {"ok": True}
     if name == "open_previous_audit":
         prev = E.load(S.st["work"], "audit")
         if not (prev.get("audit") or {}).get("shots"):

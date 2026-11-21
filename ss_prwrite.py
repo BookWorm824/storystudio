@@ -17,7 +17,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from ss_core import TICKS, StoryError, log, log_error
+from ss_core import TICKS, StoryError, log, log_error, probe
 import ss_premiere as P
 
 CLIP_TAGS = {"AudioClipTrackItem", "SubClip", "MasterClip", "AudioClip", "AudioMediaSource",
@@ -722,6 +722,11 @@ class Writer:
         with gzip.open(tmp, "wb", compresslevel=6) as f:
             f.write(data.encode("utf8"))
         os.replace(tmp, out_path)
+        try:
+            from ss_core import note_copy
+            note_copy(out_path)
+        except Exception:
+            log_error("note copy")
         return str(out_path)
 
 
@@ -964,15 +969,17 @@ def _all_items(w, seq):
                 if c is None:
                     continue
                 try:
-                    speed = float(c.findtext("PlaybackSpeed") or 1.0) or 1.0
+                    speed = abs(float(c.findtext("PlaybackSpeed") or 1.0)) or 1.0
                 except ValueError:
                     speed = 1.0
+                t0, t1 = _num(cti, "TrackItem/Start"), _num(cti, "TrackItem/End")
+                s_in, s_out = _num(c, "InPoint"), _num(c, "OutPoint")
+                if c.find("OutPoint") is not None and t1 > t0 and s_out > s_in:
+                    speed = (s_out - s_in) / (t1 - t0)       # how it really plays (sped-up shots)
                 out.append({"kind": kind, "track": tr, "tname": _track_name(tr), "ti": ti,
                             "el": el, "cti": cti, "c": c, "id": el.get("ObjectID"),
-                            "start": _num(cti, "TrackItem/Start"),
-                            "end": _num(cti, "TrackItem/End"),
-                            "in": _num(c, "InPoint"), "out": _num(c, "OutPoint"),
-                            "speed": abs(speed), "file": os.path.normcase(_media_file(w, c)),
+                            "start": t0, "end": t1, "in": s_in, "out": s_out,
+                            "speed": speed, "file": os.path.normcase(_media_file(w, c)),
                             "media": _num(w.get(c, "Source"), "OriginalDuration", 0)
                             if w.get(c, "Source") is not None else 0,
                             "name": sub.findtext("Name") or ""})
@@ -991,17 +998,22 @@ def _set_times(cti, start, end):
         e.text = str(int(v))
 
 
-def _anchor(sound, videos):
-    """The shot a sound belongs to: the picture clip it overlaps most in its first 1.5 s."""
+def _anchor(sound, videos, strict=False):
+    """The shot a sound belongs to: the picture clip it overlaps most in its first 1.5 s; of
+    clips stacked on each other, the shortest (the shot, not a long overlay). A sound in a gap
+    belongs to the shot before it, or to none when strict."""
     s, e = sound["start"], sound["end"]
     hi = min(e, s + int(1.5 * TICKS))
     best = None
     for v in videos:
         ov = min(hi, v["end"]) - max(s, v["start"])
-        if ov > 0 and (best is None or (ov, -v["ti"]) > (best[0], -best[1]["ti"])):
-            best = (ov, v)
+        key = (ov, v["start"] - v["end"])
+        if ov > 0 and (best is None or key > best[0]):
+            best = (key, v)
     if best:
         return best[1]
+    if strict:
+        return None
     before = [v for v in videos if v["end"] <= s]
     return max(before, key=lambda v: v["end"]) if before else None
 
@@ -1018,25 +1030,37 @@ def _group_of(tname):
 
 
 def _shot_at(t, videos):
-    """The picture clip playing at time t (lowest video track first)."""
+    """The picture clip playing at time t; of clips stacked on each other, the shortest."""
     best = None
     for v in videos:
-        if v["start"] <= t < v["end"] and (best is None or v["ti"] < best["ti"]):
+        if v["start"] <= t < v["end"] and (best is None or
+                                           v["end"] - v["start"] < best["end"] - best["start"]):
             best = v
     return best
 
 
+EFFECT_SLACK = 0.3            # seconds: an effect this close to its spot is left as she has it
+BED_SLACK = 1.0               # the same for background sounds and music
+
+
 def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
-                   ref_sounds=None, groups=None, skip=()):
-    """After shots were moved, trimmed or deleted in Premiere: put every StoryStudio sound back
-    with its shot. Effects and character sounds keep their exact moment in their shot (a sound
-    whose moment was trimmed away is shortened or goes; a deleted shot's sounds go with it).
-    Background sounds and music (long layers) start where the shot they started on is now and
-    end where the shot they ended on is now, so they follow their scene.
-    ref_path / ref_sounds: the timeline as it was when the sounds were placed, and
-    [{"name", "start", "end", "bed"}] in seconds; groups: [(ref_path, ref_sounds)] when the
-    sounds were made in several runs, each on the timeline as it was then.
-    Returns {"project", "moved", "removed", "shots_moved", "kept", "beds_moved"}."""
+                   ref_sounds=None, groups=None, skip=(), restore=False):
+    """After shots were moved, trimmed, split or deleted in Premiere: put every StoryStudio
+    sound back with its shot.
+
+    - Effects and character sounds keep their exact moment in their shot. A sound whose moment
+      was trimmed away is shortened or goes; a deleted shot's sounds go with it.
+    - Background sounds and music start where the shot they started on is now, and (unless she
+      changed their length herself) end where the shot they ended on is now.
+    - A sound that is already where it belongs (within EFFECT_SLACK / BED_SLACK) is not touched,
+      so her own small nudges and trims stay, and lining up twice changes nothing.
+    - Sounds that belong on a shot but aren't on the timeline are only REPORTED ("missing"),
+      because she may have deleted them herself; restore=True puts them back.
+
+    groups: [(reference project, [{"name", "start", "end", "bed", "file", "g"}])]: the sounds
+    of each run, in seconds, on the timeline as it was when they were placed.
+    Returns {"project", "changed", "moved", "removed", "restored", "beds_moved", "shots_moved",
+    "kept", "missing": [...], "moved_list": [...], "removed_list": [...]}."""
     if groups is None:
         groups = [(ref_path, ref_sounds)]
     w = Writer(project_path)
@@ -1045,190 +1069,283 @@ def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
     T = TICKS
     nvid = [i for i in now if i["kind"] == "video"]
     nsnd = [i for i in now if i["kind"] == "audio" and _group_of(i["tname"]) is not None]
-    by_file = {}
+    by_file, by_base = {}, {}
     for v in nvid:
-        by_file.setdefault(v["file"], []).append(v)
-    pool, moved_shots = {}, 0
+        if v["file"]:                         # titles and mattes have no file: never matched
+            by_file.setdefault(v["file"], []).append(v)
+            by_base.setdefault(os.path.basename(v["file"]), []).append(v)
+
+    def same_clips(f):
+        """The clips on the timeline now that play this clip file (also when its folder was
+        moved or relinked)."""
+        return (by_file.get(f) or by_base.get(os.path.basename(f)) or []) if f else []
+
+    def label(f):
+        try:
+            from ss_place import label_of
+            lab = label_of(os.path.basename(f))
+            return lab[0] if lab else None
+        except Exception:
+            return None
+
+    # ---- where every sound belongs now --------------------------------------------------
+    targets, moved_shots = [], 0
     for g_path, g_sounds in groups:
         rw = Writer(g_path)
         ref = _all_items(rw, rw.sequence(seq_uid))
         rvid = [i for i in ref if i["kind"] == "video"]
         if g_sounds is not None:
-            rsnd = [{"name": x["name"], "start": int(round(x["start"] * TICKS)),
-                     "end": int(round(x["end"] * TICKS)), "bed": bool(x.get("bed")),
-                     "file": x.get("file", "")} for x in g_sounds]
+            rsnd = [{"name": x["name"], "start": int(round(x["start"] * T)),
+                     "end": int(round(x["end"] * T)), "bed": bool(x.get("bed")),
+                     "file": os.path.normcase(x.get("file") or ""),
+                     "g": int(x.get("g") or (1 if x.get("bed") else 0))} for x in g_sounds]
         else:
-            rsnd = [dict(i, bed=SOUND_GROUPS[_group_of(i["tname"])][1]) for i in ref
-                    if i["kind"] == "audio" and _group_of(i["tname"]) is not None]
-        # each shot then -> the same shot now (same clip file; nearest in point if used twice)
-        used, shot_now = set(), {}
+            rsnd = [{"name": i["name"], "start": i["start"], "end": i["end"], "file": i["file"],
+                     "g": _group_of(i["tname"]), "bed": SOUND_GROUPS[_group_of(i["tname"])][1]}
+                    for i in ref if i["kind"] == "audio" and _group_of(i["tname"]) is not None]
+        used, shot_now, remade = set(), {}, set()   # each shot then -> the same shot now
         for v in sorted(rvid, key=lambda v: v["start"]):
-            cands = [x for x in by_file.get(v["file"], []) if x["id"] not in used]
+            cands = [x for x in same_clips(v["file"]) if x["id"] not in used]
             if not cands:
                 continue
             x = min(cands, key=lambda x: (abs(x["in"] - v["in"]), abs(x["start"] - v["start"])))
             used.add(x["id"])
             shot_now[v["id"]] = x
+        ref_files = {os.path.basename(v["file"]) for v in rvid if v["file"]}
+        for v in rvid:                        # a shot she made again under a new file name
+            if v["id"] in shot_now or not v["file"] or not label(v["file"]):
+                continue                      # ("Shot 09.mp4" -> "Shot 09 v2.mp4") keeps its
+            cands = [x for x in nvid if x["id"] not in used and x["file"] and  # sounds
+                     os.path.basename(x["file"]) not in ref_files and
+                     label(x["file"]) == label(v["file"])]
+            if cands:
+                x = min(cands, key=lambda x: abs(x["start"] - v["start"]))
+                used.add(x["id"])
+                shot_now[v["id"]] = x
+                remade.add(x["id"])
+        mapped = {x["id"] for x in shot_now.values()}
+
+        def src_in(x, v):                     # a remade clip counts from the old clip's start
+            return v["in"] if x["id"] in remade else x["in"]
         moved_shots = max(moved_shots, sum(1 for v in rvid if v["id"] in shot_now and
                                            abs(shot_now[v["id"]]["start"] - v["start"]) > T // 50))
+
+        def moment(t):
+            """Where the moment that was at time t on the old timeline is now, or None."""
+            v = _shot_at(t, rvid)
+            x = shot_now.get(v["id"]) if v else None
+            if x is None:
+                return None
+            return x["start"] + (v["in"] + (t - v["start"]) * v["speed"]
+                                 - src_in(x, v)) / x["speed"]
+
         for r in rsnd:
-            pool.setdefault(r["name"], []).append((r, rvid, shot_now))
-    if not pool:
+            if r["bed"]:
+                a = moment(r["start"] + T // 25)
+                b = moment(r["end"] - T // 25)
+                if a is None:
+                    targets.append({"r": r, "places": "leave"})
+                    continue
+                start = max(0, a - T // 25)
+                end = b + T // 25 if b is not None and b > start + T else None
+                targets.append({"r": r, "places": [(start, end, None)]})
+                continue
+            v = _anchor(r, rvid, strict=True)
+            if v is None or not v["file"]:    # in a gap, or over a title: not tied to a shot
+                targets.append({"r": r, "places": "leave"})
+                continue
+            # the sound's stretch of its shot's clip: on the clip that shot is now, and on
+            # any further piece of that clip no old shot accounts for (she split the shot or
+            # used it a second time)
+            sa = v["in"] + (r["start"] - v["start"]) * v["speed"]
+            sb = sa + (r["end"] - r["start"]) * v["speed"]
+            v_end = v["in"] + (v["end"] - v["start"]) * v["speed"]
+            tail_over = max(0, r["end"] - v["end"])           # it ran past its cut before
+            pieces = []
+            first = shot_now.get(v["id"])
+            for x in ([first] if first else []) + [x for x in same_clips(v["file"])
+                                                    if x["id"] not in mapped]:
+                xa = src_in(x, v)
+                xb = xa + (x["end"] - x["start"]) * x["speed"]
+                oa, ob = max(sa, xa), min(sb, xb)
+                if (ob - oa) / x["speed"] < T * 0.15:
+                    continue
+                start = x["start"] + (oa - xa) / x["speed"]
+                end = x["start"] + (ob - xa) / x["speed"]
+                if sb > v_end and abs(xb - v_end) < T // 20:   # it may run past this cut again
+                    end += tail_over
+                pieces.append((int(round(start)), int(round(end)),
+                               int(round((oa - sa) / v["speed"]))))
+            targets.append({"r": r, "places": sorted(pieces) or None,
+                            "shot": Path(v["file"]).stem})
+    if not targets:
         raise StoryError("StoryStudio couldn't find its sounds for this timeline.")
 
-    def moment(t, rvid, shot_now):
-        """Where the moment that was at time t (on the old timeline) is now, or None."""
-        v = _shot_at(t, rvid)
-        x = shot_now.get(v["id"]) if v else None
-        if x is None:
-            return None
-        src = v["in"] + (t - v["start"]) * v["speed"]
-        return x["start"] + (src - x["in"]) / x["speed"], x
+    # ---- which clip on the timeline is which sound: by its sound file first, then by name --
+    claimed = set()
 
-    plan, gone, beds_moved = [], [], 0
-    claimed, restored, extra = set(), 0, 0
-    cur = {}
-    for s in nsnd:
-        cur.setdefault(s["name"], []).append(s)
-    tmpl = None
-    group_track = {}
-    for s in nsnd:
-        group_track.setdefault(_group_of(s["tname"]), s["track"])
-
-    def take(name, near):
-        """Her clip of this sound nearest to a time (each one used once)."""
-        cs = [c for c in cur.get(name, []) if c["id"] not in claimed]
+    def take(r, near, by):
+        cs = [c for c in nsnd if c["id"] not in claimed and
+              (c["file"] == r["file"] and r["file"] if by == "file" else c["name"] == r["name"])]
         if not cs:
             return None
         c = min(cs, key=lambda c: abs(c["start"] - near))
         claimed.add(c["id"])
         return c
 
-    order = sorted(((r, rvid, sn) for lst in pool.values() for r, rvid, sn in lst),
-                   key=lambda e: e[0]["start"])
-    for r, rvid, shot_now in order:
-        if r.get("bed"):
-            s = take(r["name"], r["start"])
-            if s is None:
-                continue
-            # a long layer: its start follows the shot it started on, its end the shot it
-            # ended on; it keeps playing from the same place in its own sound
-            a = moment(r["start"] + T // 25, rvid, shot_now)
-            if a is None:
-                continue                           # its first shot is gone: leave it be
-            b = moment(r["end"] - T // 25, rvid, shot_now)
-            new_start = a[0] - T // 25
-            length = r["end"] - r["start"]
-            new_end = b[0] + T // 25 if b and b[0] > new_start + T else new_start + length
-            room = (s["media"] - s["in"]) / s["speed"] if s.get("media") else length
-            new_end = min(new_end, new_start + max(room, T))
-            new_start = max(0, new_start)
-            if abs(new_start - s["start"]) > T // 10 or abs(new_end - s["end"]) > T // 10:
-                beds_moved += 1
-            plan.append((s, int(round(new_start)), int(round(new_end)), s["in"]))
-            continue
-        v = _anchor(r, rvid)
-        if v is None:
-            s = take(r["name"], r["start"])        # can't tell its shot: leave it be
-            continue
-        # the sound's stretch of its shot's clip, and every piece of that clip on the timeline
-        sa = v["in"] + (r["start"] - v["start"]) * v["speed"]
-        length = r["end"] - r["start"]
-        sb = sa + length * v["speed"]
-        v_end = v["in"] + (v["end"] - v["start"]) * v["speed"]
-        tail_over = max(0, r["end"] - v["end"])          # it ran past its cut before
-        pieces = []
-        for x in by_file.get(v["file"], []):
-            xa, xb = x["in"], x["in"] + (x["end"] - x["start"]) * x["speed"]
-            oa, ob = max(sa, xa), min(sb, xb)
-            if (ob - oa) / x["speed"] < T * 0.15:
-                continue
-            start = x["start"] + (oa - xa) / x["speed"]
-            end = x["start"] + (ob - xa) / x["speed"]
-            if sb > v_end and abs(xb - v_end) < T // 20:  # it may run past this cut again
-                end += tail_over
-            pieces.append((start, end, (oa - sa) / v["speed"]))
-        if not pieces:                             # its shot (or that part) is gone
-            s = take(r["name"], r["start"])
-            if s is not None:
-                gone.append(s)
-            continue
-        placed = 0
-        for start, end, head in sorted(pieces):
-            s = take(r["name"], start)
-            if s is None:                          # missing, or a second piece of the shot
-                if r["name"] in skip or not r.get("file") or not os.path.exists(r["file"]):
-                    continue
-                tr = group_track.get(0)
-                if tr is None:
-                    continue
-                if tmpl is None:
-                    tmpl, _ = w.template_item(".wav")
-                    if tmpl is None:
-                        continue
-                try:
-                    from ss_core import probe
-                    media = probe(r["file"])["duration"] or 0
-                except Exception:
-                    media = 0
-                item = w.add_clip(tr, tmpl, r["file"], start / T, (end - start) / T, r["name"],
-                                  project_dir=str(Path(out_path).parent), src_in_sec=head / T,
-                                  media_sec=media)
-                s = {"id": item.get("ObjectID"), "track": tr, "tname": SOUND_GROUPS[0][0],
-                     "cti": item.find("ClipTrackItem"), "c": None, "in": int(head),
-                     "start": int(start), "end": int(end), "speed": 1.0, "name": r["name"]}
-                claimed.add(s["id"])
-                nsnd.append(s)
-                if placed:
-                    extra += 1                     # a second piece of the same shot
+    needs = sorted(((t, k) for t in targets if isinstance(t["places"], list)
+                    for k in range(len(t["places"]))), key=lambda n: n[0]["places"][n[1]][0])
+    got = {}
+    for by in ("file", "name"):
+        for t, k in needs:
+            if (id(t), k) not in got:
+                c = take(t["r"], t["places"][k][0], by)
+                if c is not None:
+                    got[(id(t), k)] = c
+    files_placed = {t["r"]["file"] for t in targets if isinstance(t["places"], list)}
+    gone = []
+    for by in ("file", "name"):
+        for t in targets:
+            if t["places"] is None and "clip" not in t:
+                if by == "name":                 # never by name alone when another sound that
+                    cs = [c for c in nsnd if c["id"] not in claimed and  # stays has this name
+                          c["name"] == t["r"]["name"] and c["file"] not in files_placed]
+                    c = min(cs, key=lambda c: abs(c["start"] - t["r"]["start"])) if cs else None
+                    if c is not None:
+                        claimed.add(c["id"])
                 else:
-                    restored += 1                  # it had gone missing
-                placed += 1
+                    c = take(t["r"], t["r"]["start"], "file")
+                if c is not None:
+                    t["clip"] = c
+                    gone.append((c, t))
+    n_fx = sum(1 for t in targets if not t["r"]["bed"] and t["places"] != "leave")
+    if len(gone) >= 10 and len(gone) > 0.6 * max(1, n_fx):
+        raise StoryError(
+            f"StoryStudio couldn't find the shots that {len(gone)} of your sounds belong to on "
+            "this timeline, so it changed nothing. If the clip files were moved or renamed, "
+            "relink them in Premiere, save, and try again.")
+    for t in targets:                            # "leave" sounds keep their clip out of play
+        if t["places"] == "leave":
+            take(t["r"], t["r"]["start"], "file") or take(t["r"], t["r"]["start"], "name")
+
+    # ---- what to change ------------------------------------------------------------------
+    plan, missing, moved_list, beds_moved = [], [], [], 0
+    for t, k in needs:
+        r = t["r"]
+        start, end, head = t["places"][k]
+        s = got.get((id(t), k))
+        if r["bed"]:
+            if s is None:
+                if r["name"] not in skip:
+                    missing.append({"t": t, "k": k, "name": r["name"], "at": start / T,
+                                    "bed": True})
                 continue
-            plan.append((s, int(round(start)), int(round(end)), int(round(head))))
-            placed += 1
-    # move them
-    moved = 0
+            if abs(s["start"] - start) <= BED_SLACK * T:
+                continue                              # where it belongs: her trims stay
+            cur_len, ref_len = s["end"] - s["start"], r["end"] - r["start"]
+            if end is not None and abs(cur_len - ref_len) < T // 10:
+                new_end = end                         # full length: follow its closing shot
+            else:
+                new_end = start + cur_len             # she changed its length: keep hers
+            room = (s["media"] - s["in"]) / s["speed"] if s.get("media") else new_end - start
+            new_end = min(new_end, start + max(room, T))
+            plan.append((s, int(start), int(round(new_end)), s["in"]))
+            moved_list.append({"name": r["name"], "from": s["start"] / T, "to": start / T})
+            beds_moved += 1
+            continue
+        if s is None:
+            if r["name"] not in skip:
+                missing.append({"t": t, "k": k, "name": r["name"], "at": start / T,
+                                "bed": False, "shot": t.get("shot", "")})
+            continue
+        if abs(s["start"] - start) <= EFFECT_SLACK * T and \
+                abs(s["in"] - head) <= EFFECT_SLACK * T:
+            continue                                  # already on its moment
+        cur_len = s["end"] - s["start"]
+        if abs(s["in"] - head) <= T // 100 and cur_len < end - start - T // 10:
+            end = start + cur_len                     # she shortened it: it stays short
+        plan.append((s, start, end, head))
+        moved_list.append({"name": r["name"], "from": s["start"] / T, "to": start / T})
+
+    restored = 0
+    if restore and missing:
+        tmpl, _ = w.template_item(".wav")
+        want = None if restore is True else [(str(n), float(a)) for n, a in restore]
+        for m in list(missing):
+            if want is not None and not any(n == m["name"] and abs(a - m["at"]) < 0.5
+                                            for n, a in want):
+                continue
+            r = m["t"]["r"]
+            start, end, head = m["t"]["places"][m["k"]]
+            if tmpl is None or not r["file"] or not os.path.exists(r["file"]):
+                continue
+            try:
+                media = int((probe(r["file"])["duration"] or 0) * T)
+            except Exception:
+                media = 0
+            head = head or 0
+            if end is None:
+                end = start + (r["end"] - r["start"])
+            if media:
+                end = min(end, start + max(T // 4, media - head))
+            g = r["g"]
+            tr = next((s["track"] for s in nsnd if _group_of(s["tname"]) == g), None)
+            if tr is None:
+                tr = w.add_track(seq, f"{SOUND_GROUPS[g][0]} 1")
+            item = w.add_clip(tr, tmpl, r["file"], start / T, (end - start) / T, r["name"],
+                              project_dir=str(Path(out_path).parent), src_in_sec=head / T,
+                              media_sec=media / T if media else None)
+            nsnd.append({"id": item.get("ObjectID"), "track": tr, "tname": SOUND_GROUPS[g][0],
+                         "cti": item.find("ClipTrackItem"), "c": None, "in": int(head),
+                         "start": int(start), "end": int(end), "speed": 1.0, "name": r["name"],
+                         "file": r["file"], "new": True})
+            missing.remove(m)
+            restored += 1
+
+    # ---- make the changes -----------------------------------------------------------------
     for s, a, b, src_in in plan:
-        if abs(a - s["start"]) > T // 100 or abs(b - s["end"]) > T // 100:
-            moved += 1
         _set_times(s["cti"], a, b)
         if s["c"] is not None and s["c"].find("InPoint") is not None:
             Writer.setx(s["c"], "InPoint", int(src_in))
         if s["c"] is not None and s["c"].find("OutPoint") is not None:
             Writer.setx(s["c"], "OutPoint", int(src_in) + int((b - a) * s["speed"]))
         s["start"], s["end"] = a, b
-    # lay each kind of track out again so no two clips share a moment on one track
-    gone_ids = {s["id"] for s in gone}
-    for k, (prefix, _) in enumerate(SOUND_GROUPS):
+    gone_ids = {c["id"] for c, _ in gone}
+    touched = {_group_of(s["tname"]) for s, *_ in plan} | \
+        {_group_of(c["tname"]) for c, _ in gone} | \
+        {_group_of(s["tname"]) for s in nsnd if s.get("new")}
+    for k in sorted(touched):                    # lay those tracks out again: no two clips
+        prefix = SOUND_GROUPS[k][0]              # share a moment on one track
         mine = [s for s in nsnd if _group_of(s["tname"]) == k]
-        if not mine:
-            continue
         tracks = []
         for s in mine:
             if s["track"] not in tracks:
                 tracks.append(s["track"])
         ids = {s["id"] for s in mine}
+        lanes = []
         for tr in tracks:
             lst = tr.find("ClipTrack/ClipItems/TrackItems")
             for ref_el in list(lst):
                 if (ref_el.get("ObjectRef") or ref_el.get("ObjectURef")) in ids:
                     lst.remove(ref_el)
-        lanes = []
-        for tr in tracks:                          # anything else still on a track blocks it
-            rest = [w.objs.get(e.get("ObjectRef") or e.get("ObjectURef"))
-                    for e in tr.find("ClipTrack/ClipItems/TrackItems")]
-            lanes.append({"track": tr, "items": [],
-                          "end": max([_num(r, "ClipTrackItem/TrackItem/End") for r in rest
-                                      if r is not None] or [-1])})
-        for s in sorted([s for s in mine if s["id"] not in gone_ids], key=lambda s: s["start"]):
-            lane = next((l for l in lanes if l["end"] <= s["start"]), None)
+            rest = sorted((_num(o, "ClipTrackItem/TrackItem/Start"),
+                           _num(o, "ClipTrackItem/TrackItem/End"))
+                          for o in (w.objs.get(e.get("ObjectRef") or e.get("ObjectURef"))
+                                    for e in lst) if o is not None)
+            lanes.append({"track": tr, "busy": rest, "items": []})
+
+        def free(lane, s):
+            return all(e <= s["start"] or a >= s["end"] for a, e in lane["busy"])
+        for s in sorted((s for s in mine if s["id"] not in gone_ids), key=lambda s: s["start"]):
+            home = next((l for l in lanes if l["track"] is s["track"]), None)
+            lane = home if home is not None and free(home, s) else \
+                next((l for l in lanes if free(l, s)), None)
             if lane is None:
-                lane = {"track": w.add_track(seq, f"{prefix} {len(lanes) + 1}"), "end": -1,
+                lane = {"track": w.add_track(seq, f"{prefix} {len(lanes) + 1}"), "busy": [],
                         "items": []}
                 lanes.append(lane)
             lane["items"].append(s)
-            lane["end"] = s["end"]
+            lane["busy"].append((s["start"], s["end"]))
         for lane in lanes:
             lst = lane["track"].find("ClipTrack/ClipItems/TrackItems")
             if lst is None:
@@ -1245,13 +1362,21 @@ def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=None,
                 e.set("Index", str(n))
                 lst.append(e)
     _unlink(w, seq, list(gone_ids))
-    w.save(out_path)
-    kept = len(nsnd) - len(gone)
-    log("lined up sounds", out_path, "moved", moved, "removed", len(gone), "shots moved",
-        moved_shots, "beds moved", beds_moved, "put back", restored, "second pieces", extra)
-    return {"project": str(out_path), "moved": moved, "removed": len(gone),
-            "shots_moved": moved_shots, "kept": kept, "beds_moved": beds_moved,
-            "restored": restored, "extra": extra}
+    changed = bool(plan or gone or restored)
+    if changed or str(out_path) == str(project_path):
+        w.save(out_path)
+    res = {"project": str(out_path if changed else project_path), "changed": changed,
+           "moved": len(plan), "removed": len(gone), "restored": restored,
+           "beds_moved": beds_moved, "shots_moved": moved_shots,
+           "kept": len(nsnd) - len(gone),
+           "missing": [{"name": m["name"], "at": round(m["at"], 2), "bed": m["bed"],
+                        "shot": m.get("shot", "")} for m in sorted(missing, key=lambda m: m["at"])],
+           "moved_list": sorted(moved_list, key=lambda m: m["to"]),
+           "removed_list": [{"name": c["name"], "at": round(c["start"] / T, 2),
+                             "shot": t.get("shot", "")} for c, t in gone]}
+    log("lined up sounds", res["project"], {k: (len(v) if isinstance(v, list) else v)
+                                            for k, v in res.items() if k != "project"})
+    return res
 
 
 def write_linked(project_path, seq_uid, out_path):

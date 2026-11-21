@@ -787,21 +787,42 @@ def sound_home(st):
     return None, None
 
 
-def sound_sources(st):
-    """Every run that made StoryStudio sounds for this timeline, oldest first: [(state with
-    "cues", project, the timeline the sounds were placed on)]. Found by the project's name
+def _sounds_on(path, seq_uid):
+    """The sound files playing on a project's timeline (lower-case paths), or None."""
+    import ss_prwrite as W
+    try:
+        w = W.Writer(path)
+        return {i["file"] for i in W._all_items(w, w.sequence(seq_uid))
+                if i["kind"] == "audio" and i["file"]}
+    except Exception:
+        log_error("reading the sounds on the timeline")
+        return None
+
+
+def sound_sources(st, timeline=None):
+    """Every run that made StoryStudio sounds that are on this timeline, oldest first: [(state
+    with "cues", project, the timeline the sounds were placed on)]. Found by the project's name
     first, then by the sequence itself (a project saved under a new name keeps its sequence).
-    A later run is "sounds for my new shots"."""
+    A later run is "sounds for my new shots" or a sound she had remade. A run none of whose
+    sounds are on the timeline (an earlier try she didn't keep) doesn't count; nor does one
+    whose own copy of the timeline is gone, because there is nothing to line its sounds up by."""
     import storysound as E
     seen, out = set(), []
+    on = _sounds_on(timeline or st.get("snapshot") or st["project"], st["seq_uid"])
 
     def add(data, f):
         made = [c for c in data.get("cues") or [] if c.get("file") and c.get("keep", True)]
-        ref = data.get("snapshot") if Path(data.get("snapshot") or "").exists() else             data.get("project")
         key = os.path.normcase(str(Path(f).parent))
-        if made and ref and Path(ref).exists() and key not in seen:
-            seen.add(key)
-            out.append((f.stat().st_mtime, data, data.get("project"), ref))
+        if not made or key in seen:
+            return
+        if on is not None and not any(os.path.normcase(c["file"]) in on for c in made):
+            return
+        ref = data.get("snapshot")
+        if not ref or not Path(ref).exists():
+            log("sound run without its timeline copy, left out:", f)
+            return
+        seen.add(key)
+        out.append((f.stat().st_mtime, data, data.get("project"), ref))
     proj, f = sound_home(st)
     if proj:
         add(json.loads(Path(f).read_text(encoding="utf-8-sig")), Path(f))
@@ -829,11 +850,12 @@ def _ref_sounds(data):
     import storysound as E
     return [{"name": c["what"], "start": float(c["place_at"]),
              "end": float(c["place_at"]) + float(c.get("length") or (c["end"] - c["start"])),
-             "bed": c.get("kind") in E.BEDS, "file": c.get("file", "")}
+             "bed": c.get("kind") in E.BEDS, "file": c.get("file", ""),
+             "g": {"ambience": 1, "music": 2}.get(c.get("kind"), 0)}
             for c in data["cues"] if c.get("file") and c.get("keep", True)]
 
 
-def line_up(st, out=None):
+def line_up(st, out=None, restore=False):
     """After shots were moved, trimmed or deleted in Premiere: a copy of this project with
     every sound effect back on its shot."""
     import storysound as E
@@ -850,8 +872,11 @@ def line_up(st, out=None):
     except Exception:
         skip = set()
     res = W.line_up_sounds(st.get("snapshot") or real, st["seq_uid"], None, out,
-                           groups=[(ref, _ref_sounds(data)) for data, _, ref in src], skip=skip)
-    log("lined up sounds from", [Path(p or "").name for _, p, _ in src], res)
+                           groups=[(ref, _ref_sounds(data)) for data, _, ref in src], skip=skip,
+                           restore=restore)
+    if not res["changed"]:                       # nothing to do: no new copy was written
+        res["project"] = str(real)
+    log("lined up sounds from", [Path(p or "").name for _, p, _ in src])
     return res
 
 
@@ -869,10 +894,11 @@ def new_shots(st, seq, min_len=0.3):
             log_error("new shots: reading " + str(ref))
     if not known:
         return None                                # no sounds yet: everything is new
+    known |= {os.path.basename(f) for f in known}   # the same clip in a moved folder
     out = []
     for a, b, it in P.picture_segments(seq):
         f = os.path.normcase(str((it or {}).get("file") or ""))
-        if not f or f in known or b - a < 0.05:
+        if not f or f in known or os.path.basename(f) in known or b - a < 0.05:
             continue
         if out and out[-1]["file"] == f and abs(out[-1]["end"] - a) < 0.05:
             out[-1]["end"] = b

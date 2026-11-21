@@ -53,6 +53,40 @@ def log_error(where):
     log("ERROR in", where, "\n" + traceback.format_exc())
 
 
+COPIES_FILE = APP_DATA / "copies.json"     # the project copies StoryStudio wrote, and when
+
+
+def _copies():
+    try:
+        return json.loads(COPIES_FILE.read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def note_copy(path):
+    """Remember a project copy as StoryStudio wrote it."""
+    d = _copies()
+    st = os.stat(path)
+    d[os.path.normcase(str(Path(path).resolve()))] = [st.st_mtime, st.st_size]
+    if len(d) > 400:
+        d = dict(sorted(d.items(), key=lambda kv: kv[1][0])[-300:])
+    try:
+        COPIES_FILE.write_text(json.dumps(d), encoding="utf8")
+    except OSError:
+        pass
+
+
+def copy_is_ours(path):
+    """True when this file is a copy StoryStudio wrote and nobody has saved it since, so it
+    may be replaced. A copy the storyteller opened and saved in Premiere is hers."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return True
+    rec = _copies().get(os.path.normcase(str(Path(path).resolve())))
+    return bool(rec) and abs(rec[0] - st.st_mtime) < 2.0 and rec[1] == st.st_size
+
+
 SETTINGS_FILE = APP_DATA / "settings.json"
 DEFAULTS = {
     "use_local": True,

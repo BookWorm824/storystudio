@@ -197,7 +197,14 @@ def snapshot(path, work):
                 raise StoryError("StoryStudio couldn't make its copy of that project (Premiere "
                                  "may be saving it right now). Wait a moment and pick it again.")
             time.sleep(2)
-    old = sorted(snaps.glob("*.prproj"))
+    keep = set()                              # the timelines sounds were placed on are
+    for sf in Path(work).glob("state*.json"):   # needed to line those sounds up later
+        try:
+            keep.add(os.path.normcase(json.loads(sf.read_text(encoding="utf-8-sig"))
+                                      .get("snapshot") or ""))
+        except (OSError, ValueError):
+            pass
+    old = [f for f in sorted(snaps.glob("*.prproj")) if os.path.normcase(str(f)) not in keep]
     for f in old[:-6]:                        # keep the last few
         try:
             f.unlink()
@@ -1137,7 +1144,7 @@ def sounds_dir(st, fresh=False):
     except OSError:
         in_use = False
     if d.exists() and any(d.glob("*.wav")):     # never over an earlier run's (paid) files
-        d = d / time.strftime("run %Y-%m-%d %H%M")
+        d = d / time.strftime("run %Y-%m-%d %H%M%S")
     st["sounds_dir"] = str(d)
     return d
 
@@ -1189,6 +1196,8 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
         st["fal_cost"] = 0.0
     if use_fal:
         st.pop("fal_out", None)
+    had = {c["id"]: (c.get("file"), c.get("source"), c.get("place_at")) for c in cues
+           if ids is not None and c.get("file") and Path(c["file"]).exists()}
     # plan where each sound comes from
     pc_cues, sao_cues = [], []
     for c in cues:
@@ -1366,6 +1375,9 @@ def make_sounds(st, settings, progress=None, cancel=None, ids=None):
             c["source"], c["file"], c["note"] = "adobe", "", "Something went wrong with this one."
         c.pop("_jobs", None)
         c.pop("_fs", None)
+        if not c.get("file") and c["id"] in had:  # the new one failed: the old one stays
+            c["file"], c["source"], c["place_at"] = had[c["id"]]
+            c["note"] = "A new version couldn't be made this time, so the one you had is kept."
     st["stage"] = "sounds"
     if use_fal:
         st["fal_cost"] = round(float(st.get("fal_cost") or 0.0) + spent[0], 2)
@@ -1404,11 +1416,14 @@ def shot_cues(st):
                and c.get("keep", True)]
     beds = [c for c in st["cues"] if c["kind"] in BEDS or c["kind"] == "voice"]
     st["planned_effects"] = effects
+    only = st.get("only_shots")
     spans = []                                   # shots, tiny ones joined to the one before
     for s in st.get("shots") or []:
         a, b = float(s["start"]), float(s["end"])
         if s.get("name") == "black" or b - a < 0.05:
             continue
+        if only and not any(min(b, y) - max(a, x) > 0.5 * (b - a) for x, y in only):
+            continue                             # "sounds for my new shots": only those
         if spans and (b - a < SHOT_MIN or spans[-1][1] - spans[-1][0] < SHOT_MIN) and \
                 abs(spans[-1][1] - a) < 0.05:
             spans[-1][1] = b
@@ -1730,12 +1745,12 @@ def double_check(st, seq, settings, progress=None, cancel=None):
         make_sounds(prev, settings, lambda f, m: progress(0.3 + 0.7 * f, m) if progress
                     else None, cancel, ids=ids)
         for c in prev["cues"]:
-            if c["id"] in ids:
+            if c["id"] in ids and c.get("file") and old.get(c["id"]) and \
+                    c["file"] != old[c["id"]]:
                 at = next((a["start"] for a in audio if os.path.normcase(a.get("file") or "")
-                           == os.path.normcase(old.get(c["id"]) or "")), None)
+                           == os.path.normcase(old[c["id"]])), None)
                 names.append((f"at {fmt_time(at)}: " if at is not None else "") + c["what"])
-                if c.get("file") and old.get(c["id"]) and c["file"] != old[c["id"]]:
-                    remap[old[c["id"]]] = c["file"]
+                remap[old[c["id"]]] = c["file"]
     return names, remap
 
 
@@ -1829,15 +1844,16 @@ def assign_tracks(cues):
 
 
 COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback", "retimed", "story check",
-             "linked", "sounds lined up")
+             "linked", "sounds lined up", "sounds changed")
 
 
 def copy_path(project, tag):
     """Where a StoryStudio copy of this project goes: "<name> (<tags>).prproj". The tags say
     everything done to it, in order, so a copy made from a copy keeps its history:
     "Song (with sound)" + "audio fixed" -> "Song (with sound, audio fixed)". It replaces the
-    earlier copy with the same tags, unless Premiere has that copy open right now (it leaves
-    a .prlock file beside it): then a numbered copy instead."""
+    earlier copy with the same tags only while that copy is still exactly as StoryStudio wrote
+    it. A copy she has saved in Premiere since is hers and is never written over, nor one
+    Premiere has open right now (it leaves a .prlock file beside it): then a numbered copy."""
     real = Path(project)
     stem, tags = real.stem, []
     m = re.search(r" \(([^()]*)\)$", stem)
@@ -1850,8 +1866,10 @@ def copy_path(project, tag):
     label = ", ".join(tags)
     out = real.with_name(f"{stem} ({label}).prproj")
     n = 2
+    from ss_core import copy_is_ours
     while out.with_suffix(".prlock").exists() or \
-            os.path.normcase(str(out)) == os.path.normcase(str(real)):
+            os.path.normcase(str(out)) == os.path.normcase(str(real)) or \
+            (out.exists() and not copy_is_ours(out)):
         out = real.with_name(f"{stem} ({label} {n}).prproj")
         n += 1
     return out

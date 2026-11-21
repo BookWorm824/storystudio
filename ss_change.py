@@ -10,6 +10,7 @@ A remade sound is kept in its own small run (work/changes/<n>/state.json) with a
 timeline it was placed on, so "Line up my sounds again" moves it with its shot later.
 """
 import json
+import os
 import re
 import shutil
 import time
@@ -24,7 +25,7 @@ KIND_NAMES = {"music": "Music", "background": "Background sound", "effect": "Sou
 DISLIKES = APP_DATA / "sound_dislikes.json"
 
 
-def parse_time(text, fps=24.0):
+def parse_time(text, fps=24.0, duration=None):
     """"1:47", "00:01:47:23" (hours:minutes:seconds:frames, as Premiere shows it), "107.9"."""
     t = str(text or "").strip()
     if not t:
@@ -39,6 +40,8 @@ def parse_time(text, fps=24.0):
         return h * 3600 + m * 60 + s + f / (fps or 24.0)
     if len(nums) == 3:
         h, m, s = nums
+        if duration and h * 3600 + m * 60 + s > duration + 5:   # minutes:seconds:frames
+            return h * 60 + m + s / (fps or 24.0)
         return h * 3600 + m * 60 + s
     if len(nums) == 2:
         return nums[0] * 60 + nums[1]
@@ -54,19 +57,137 @@ def kind_of(tname, name=""):
     return None
 
 
-def base_path(st):
-    """What a change starts from: the "(sounds changed)" copy once there is one (from this
-    project), else the project as she last saved it."""
-    c = st.get("change_copy")
-    if c and Path(c).exists() and Path(c).stat().st_mtime >= Path(st["project"]).stat().st_mtime:
-        return c
-    return st["project"]
+# --- the changes she has made so far ---------------------------------------------
+# Every change is written down (work/sound_changes.json). The next change starts from the
+# project as she last saved it and makes the earlier ones again first, so nothing is lost when
+# she saves in Premiere between two changes, or StoryStudio restarts. A change that is already
+# in the project (she carried on in the changed copy) is skipped.
+OPS_FILE = "sound_changes.json"
+OPS_HOURS = 12
+
+
+def _ops(st):
+    try:
+        ops = json.loads((Path(st["work"]) / OPS_FILE).read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return []
+    me = os.path.normcase(str(st["project"]))
+    return [o for o in ops if os.path.normcase(o.get("project", "")) == me and
+            time.time() - o.get("when", 0) < OPS_HOURS * 3600]
+
+
+def _save_ops(st, ops):
+    try:
+        (Path(st["work"]) / OPS_FILE).write_text(json.dumps(ops, indent=1), encoding="utf8")
+    except OSError:
+        log_error("saving sound changes")
+
+
+def _find(items, name, start, slack=1.5):
+    """StoryStudio's clip with this name nearest a time (seconds), or None."""
+    cs = [i for i in items if i["kind"] == "audio" and kind_of(i["tname"], i["name"]) and
+          i["name"] == name]
+    if not cs:
+        return None
+    c = min(cs, key=lambda i: abs(i["start"] / TICKS - start))
+    return c if abs(c["start"] / TICKS - start) <= slack else None
+
+
+def _drop(w, seq, item):
+    import ss_prwrite as W
+    lst = item["track"].find("ClipTrack/ClipItems/TrackItems")
+    for r in list(lst):
+        if (r.get("ObjectRef") or r.get("ObjectURef")) == item["id"]:
+            lst.remove(r)
+    for k, r in enumerate(lst):
+        r.set("Index", str(k))
+    W._unlink(w, seq, [item["id"]])
+
+
+def _stop_at(w, seq, item, at):
+    import ss_prwrite as W
+    if at - item["start"] < TICKS * 0.3:
+        _drop(w, seq, item)
+        return
+    W._set_times(item["cti"], item["start"], at)
+    if item["c"].find("OutPoint") is not None:
+        W.Writer.setx(item["c"], "OutPoint", item["in"] + int((at - item["start"]) *
+                                                              item["speed"]))
+
+
+def _insert(w, seq, items, new, project_dir):
+    """Put a remade sound on a StoryStudio track of its kind where nothing else is playing."""
+    prefix = new["track"]
+    a, b = int(round(new["at"] * TICKS)), int(round((new["at"] + new["dur"]) * TICKS))
+    lanes = {}
+    for i in items:
+        if i["kind"] == "audio" and i["tname"].startswith(prefix):
+            lanes.setdefault(id(i["track"]), (i["track"], []))[1].append((i["start"], i["end"]))
+    free = next((tr for tr, spans in lanes.values()
+                 if all(e2 <= a or s2 >= b for s2, e2 in spans)), None)
+    if free is None:
+        free = w.add_track(seq, f"{prefix} {len(lanes) + 1}")
+    tmpl, _ = w.template_item(".wav")
+    if tmpl is None:
+        tmpl = w.spare_template()
+    if tmpl is None:
+        raise StoryError("This project has no sound clip StoryStudio can copy, so the new "
+                         "sound couldn't go in. It is in the StoryStudio sounds folder.")
+    w.add_clip(free, tmpl, new["file"], new["at"], new["dur"], new["name"],
+               bin_el=w.make_bin("StoryStudio sounds"), project_dir=project_dir)
+
+
+def _apply(w, seq, items, op, project_dir):
+    """Make one change (again). Returns True when it changed something."""
+    it = _find(items, op["name"], op["start"])
+    if op["action"] == "remove":
+        if it is None:
+            return False
+        _drop(w, seq, it)
+        return True
+    if op["action"] == "stop":
+        cut = int(round(op["t"] * TICKS))
+        if it is None or not (it["start"] < cut < it["end"] - TICKS // 50):
+            return False
+        _stop_at(w, seq, it, cut)
+        return True
+    if op["action"] == "remake":
+        new = op["new"]
+        if any(i["kind"] == "audio" and i["name"] == new["name"] and
+               abs(i["start"] / TICKS - new["at"]) < 1.5 for i in items):
+            return False                           # already in
+        if not os.path.exists(new["file"]):
+            return False
+        if it is not None:                         # the old one stops where the new one starts
+            if new["at"] * TICKS > it["start"] + TICKS:
+                _stop_at(w, seq, it, int(round(new["at"] * TICKS)))
+            else:
+                _drop(w, seq, it)
+        _insert(w, seq, [i for i in items if i is not it], new, project_dir)
+        return True
+    return False
+
+
+def opened(st):
+    """The project as she last saved it, with her earlier changes made again:
+    (writer, sequence, every clip)."""
+    import ss_prwrite as W
+    w = W.Writer(st["project"])
+    seq = w.sequence(st["seq_uid"])
+    items = W._all_items(w, seq)
+    for op in _ops(st):
+        try:
+            if _apply(w, seq, items, op, str(Path(st["project"]).parent)):
+                items = W._all_items(w, seq)
+        except StoryError:
+            raise
+        except Exception:
+            log_error("making an earlier sound change again")
+    return w, seq, items
 
 
 def sounds_at(st, t):
-    import ss_prwrite as W
-    w = W.Writer(base_path(st))
-    items = W._all_items(w, w.sequence(st["seq_uid"]))
+    w, seq, items = opened(st)
     out = []
     for i in items:
         if i["kind"] != "audio":
@@ -76,7 +197,8 @@ def sounds_at(st, t):
             continue
         a, b = i["start"] / TICKS, i["end"] / TICKS
         if a - 0.5 <= t <= b + 0.25:
-            out.append({"id": i["id"], "name": re.sub(r"^Music:\s*", "", i["name"]), "kind": k,
+            out.append({"id": i["id"], "raw": i["name"],
+                        "name": re.sub(r"^Music:\s*", "", i["name"]), "kind": k,
                         "kind_name": KIND_NAMES[k], "start": round(a, 2), "end": round(b, 2),
                         "time": fmt_time(a), "until": fmt_time(b),
                         "long": k in ("music", "background")})
@@ -97,7 +219,7 @@ def remember(seq_uid, name, kind, note):
     d = _dislikes()
     lst = d.setdefault(seq_uid, [])
     lst.append({"what": name, "kind": kind, "note": note or "", "when": time.strftime("%Y-%m-%d")})
-    d[seq_uid] = lst[-60:]
+    d[seq_uid] = lst[-500:]
     DISLIKES.write_text(json.dumps(d, indent=1), encoding="utf8")
 
 
@@ -161,53 +283,39 @@ def _picture(st, base, work, progress):
     return str(pic)
 
 
-def change(st, item_id, action, t=None, note="", settings=None, progress=None, cancel=None):
+def change(st, item_id, action, t=None, note="", settings=None, progress=None, cancel=None,
+           name="", start=None):
+    """Remove a sound, stop it at t, or have a better one made. name/start (as the list showed
+    them) make sure it is the clip she picked, whatever Premiere has renumbered since."""
     import storysound as E
-    import ss_prwrite as W
     say = progress or (lambda f, m: None)
-    base = base_path(st)
-    w = W.Writer(base)
-    seq = w.sequence(st["seq_uid"])
-    items = W._all_items(w, seq)
-    it = next((i for i in items if i["id"] == str(item_id)), None)
-    if it is None:
-        raise StoryError("That sound isn't on the timeline any more. Look again.")
-    kind = kind_of(it["tname"], it["name"]) or "effect"
-    out = E.copy_path(Path(st["project"]), "sounds changed")
+    w, seq, items = opened(st)
+    it = next((i for i in items if i["id"] == str(item_id) and i["kind"] == "audio"
+               and (not name or i["name"] == name)), None)
+    if it is None and name and start is not None:
+        it = _find(items, name, float(start))
+    if it is None or not kind_of(it["tname"], it["name"]):
+        raise StoryError("That sound has changed on the timeline since the list was made. "
+                         "Press “Show the sounds there” again.")
+    kind = kind_of(it["tname"], it["name"])
     a, b = it["start"], it["end"]
     frame = int(TICKS / max(1.0, float(st.get("fps") or 24)))
     cut = int(round((t or 0) * TICKS / frame)) * frame if t is not None else None
     reply = ""
-
-    def drop(item):
-        lst = item["track"].find("ClipTrack/ClipItems/TrackItems")
-        for r in list(lst):
-            if (r.get("ObjectRef") or r.get("ObjectURef")) == item["id"]:
-                lst.remove(r)
-        for k, r in enumerate(lst):
-            r.set("Index", str(k))
-        W._unlink(w, seq, [item["id"]])
-
-    def stop_at(item, at):
-        if at - item["start"] < TICKS * 0.3:
-            drop(item)
-            return
-        W._set_times(item["cti"], item["start"], at)
-        if item["c"].find("OutPoint") is not None:
-            W.Writer.setx(item["c"], "OutPoint", item["in"] + int((at - item["start"]) *
-                                                                  item["speed"]))
-
+    op = {"action": action, "name": it["name"], "start": a / TICKS, "note": note,
+          "t": (cut or 0) / TICKS, "when": time.time(), "project": str(st["project"])}
+    project_dir = str(Path(st["project"]).parent)
     if action == "remove":
-        drop(it)
-        remember(st["seq_uid"], it["name"], kind, note)
         msg = f"Took out “{it['name']}”."
+        gone = it["name"]
     elif action == "stop":
         if cut is None or not (a < cut < b):
             raise StoryError("Choose a moment while that sound is playing.")
-        stop_at(it, cut)
-        remember(st["seq_uid"], f"{it['name']} (after {fmt_time(cut / TICKS)})", kind, note)
         msg = f"“{it['name']}” now stops at {fmt_time(cut / TICKS)}."
-    elif action == "remake":
+        gone = f"{it['name']} (after {fmt_time(cut / TICKS)})"
+    elif action != "remake":
+        raise StoryError("StoryStudio doesn't know that change.")
+    if action == "remake":
         import ss_claude as C
         if not C.provider():
             raise StoryError("Making a better sound needs Claude or ChatGPT. Open Settings (the "
@@ -222,8 +330,8 @@ def change(st, item_id, action, t=None, note="", settings=None, progress=None, c
         work = changes / str(n)
         work.mkdir(parents=True)
         snap = work / "timeline.prproj"
-        shutil.copy2(base, snap)
-        pic = _picture(st, base, Path(st["work"]), say)
+        shutil.copy2(st["project"], snap)
+        pic = _picture(st, st["project"], Path(st["work"]), say)
         if cancel and cancel():
             raise StoryError("Stopped.")
         say(0.35, "Working out a sound that fits better…")
@@ -275,41 +383,28 @@ she asked for. Characters never speak: their sounds are wordless. Music must nev
         if not cue.get("file") or not Path(cue["file"]).exists():
             why = cue.get("note") or "The sound couldn't be made this time."
             raise StoryError(f"{why} Nothing was changed.")
-        # the old one stops where the new one starts (or goes), the new one goes in
-        if start > a:
-            stop_at(it, start)
-        else:
-            drop(it)
-        remember(st["seq_uid"], it["name"], kind, note)
-        tmpl, ext = w.template_item(".wav")
         f = cue["file"]
+        _, ext = w.template_item(".wav")
         if ext and ext != ".wav":
             f2 = str(Path(f).with_suffix(ext))
             E.run([E.ffmpeg(), "-y", "-v", "error", "-i", f, "-b:a", "320k", f2])
             f = f2
-        tname = it["tname"]
-        dur = E.probe(f)["duration"] or (s1 - s0)
-        lanes = {}
-        for i in items:
-            if i["kind"] == "audio" and i["tname"].startswith(tname.rsplit(" ", 1)[0]) and \
-                    i["id"] != it["id"]:
-                lanes.setdefault(id(i["track"]), (i["track"], []))[1].append((i["start"], i["end"]))
-        new_a, new_b = int(round(s0 * TICKS)), int(round((s0 + dur) * TICKS))
-        free = next((tr for tr, spans in lanes.values()
-                     if all(e2 <= new_a or s2 >= new_b for s2, e2 in spans)), None)
-        if free is None:
-            free = w.add_track(seq, tname.rsplit(" ", 1)[0] + f" {len(lanes) + 1}")
-        bin_el = w.make_bin("StoryStudio sounds")
-        w.add_clip(free, tmpl, f, s0, dur, cue["what"], bin_el=bin_el,
-                   project_dir=str(out.parent))
+        place = float(cue.get("place_at", s0))       # where the sound maker lined it up
+        op["new"] = {"name": cue["what"], "file": f, "at": place,
+                     "dur": E.probe(f)["duration"] or (s1 - s0),
+                     "track": next(p for p, k in KINDS if it["tname"].startswith(p))}
         E.save(mini)                                    # so the new sound follows its shot later
         reply = res.get("reply", "")
         msg = f"Made “{cue['what']}” in place of “{it['name']}”."
+        gone = it["name"]
         log("change sound: remade", it["name"], "->", cue["what"], "file", f)
-    else:
-        raise StoryError("StoryStudio doesn't know that change.")
+    if not _apply(w, seq, items, op, project_dir):
+        raise StoryError("That change couldn't be made: the sound isn't where the list showed "
+                         "it any more. Press “Show the sounds there” again.")
+    out = E.copy_path(Path(st["project"]), "sounds changed")
     w.save(out)
-    st["change_copy"] = str(out)
+    _save_ops(st, _ops(st) + [op])
+    remember(st["seq_uid"], gone, kind, note)
     log("change sound:", action, it["name"], "->", out)
     return {"project": str(out), "message": msg, "reply": reply}
 
@@ -326,7 +421,7 @@ def prompt_list(st):
     import ss_prwrite as W
     at = {}
     try:
-        w = W.Writer(base_path(st))
+        w = W.Writer(st["project"])
         for i in W._all_items(w, w.sequence(st["seq_uid"])):
             if i["kind"] == "audio":
                 at.setdefault(i["name"], []).append(i["start"] / TICKS)

@@ -1,5 +1,5 @@
 {
-  "version": "1.28.3",
+  "version": "1.29.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -36,5 +36,5 @@
     "ss_audit.py",
     "ss_change.py"
   ],
-  "notes": "Music StoryStudio plans no longer uses glockenspiel, bells, chimes or choir, which made some pieces sound like Christmas carols, and Suno prompts now say \"no bells, not festive\"."
+  "notes": "A big reliability update. Line up my sounds again is rebuilt: it never undoes your own nudges, shows exactly what it moved, and asks before putting a missing sound back. A copy you have saved in Premiere is never written over. Changes to sounds are never lost. The project page is sorted into groups, and StoryStudio restarts by itself after an update."
 }

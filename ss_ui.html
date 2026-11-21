@@ -72,7 +72,8 @@ h2{font:600 18px "Segoe UI Variable Display","Segoe UI",sans-serif;margin:0 0 12
 .field{display:flex;align-items:center;gap:10px;margin-top:12px;color:var(--soft);font-size:14px}
 .field b{color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:520px}
 select{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:6px 10px}
-.tasks{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;margin-top:26px}
+.tasks{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;margin-top:14px}
+.tgroup{margin:26px 0 0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--soft);font-weight:600}
 .task{position:relative;text-align:left;padding:20px;border-radius:16px;background:var(--card);border:1px solid var(--line);transition:.18s;min-height:150px}
 .task:hover:not(.soon){transform:translateY(-2px);border-color:#46506a;box-shadow:var(--shadow)}
 .task .ti{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;margin-bottom:14px}
@@ -429,7 +430,7 @@ function renderHome() {
           ${P.export ? `<span class="chip good">Uses your export: ${esc(P.export)}</span>` : `<span class="chip">Preview made from your shots</span>`}
           ${P.missing.length ? `<span class="chip warn">${P.missing.length} file(s) not found</span>` : ""}
         </div>
-        ${P.snapshot_time ? `<div class="saved">${ICON.shield}<div>StoryStudio saved its own copy of your project at <b>${esc(P.snapshot_time)}</b>. Keep working and saving in Premiere; it won't change this.</div></div>` : ""}
+        ${P.snapshot_time ? `<div class="saved">${ICON.shield}<div>StoryStudio never changes your project: everything it makes goes into a copy. Each tool starts from your project <b>as you last saved it in Premiere</b>, so press Ctrl+S there first.</div></div>` : ""}
         ${seqs}
         <div class="field">Story <b title="${esc(P.story)}">${P.story ? esc(P.story.split(/[\\/]/).pop()) : "No script found (StoryStudio will listen to the narration)"}</b><button class="btn ghost" onclick="pickStory()">Choose…</button></div>
       </div>
@@ -437,22 +438,31 @@ function renderHome() {
     <div class="row" style="justify-content:space-between;margin-top:30px;flex-wrap:wrap;gap:10px"><h2 style="margin:0">What would you like to do with this video?</h2>
       <div class="swrow"><button class="switch ${MULTI?"on":""}" onclick="toggleMulti()" aria-label="Do several at once"></button><span class="sub" style="margin:0">Do several at once</span></div></div>
     ${MULTI ? `<div class="sub" style="margin:8px 0 0">Tick what you'd like. StoryStudio does them in this order, each on the copy the step before made: sound effects, then the audio, then karaoke, then feedback.</div>` : ""}
+    ${MULTI ? "" : `<h3 class="tgroup">Sound</h3>`}
     <div class="tasks">
       ${pickTask("sounds","sound","#3a2a14","var(--accent)","Add sound effects","Plans and makes every sound, lined up with the picture, at the right levels.","NS=null;setupSounds()")}
-      ${pickTask("fix","wave","#13302a","var(--good)","Fix the audio","Cleans and evens out narration, balances music and effects. No new sounds.","setupFix()")}
-      ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
-      ${MULTI ? "" : task("book","#2b2414","#ffd27a","Story check","Does the story make sense to someone seeing it for the first time? Shows where it gets lost, with fixes: sounds, new prompts, new shots.","setupAudit()")}
-      ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Picture problems (glitches, characters that change), timing and colour. A big check: notes sorted into groups.","setupFeedback('all')")}
-      ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Only the timing: what to trim, hold longer or speed up. On cartoons StoryStudio makes the changes for you.","setupFeedback('timing')")}
-      ${MULTI ? "" : task("chat","#22262f","#e6e9ef","Tell StoryStudio what to fix","Pause where you see something you'd like better, say it in your own words, and get the fix.","openNotes()")}
       ${!MULTI && P.with_sound ? task("sound","#3a2a14","var(--accent)","Sounds for my new shots","Added shots since the sounds were made? StoryStudio makes sounds for just those, and keeps all the others.","setupNewShots()") : ""}
-      ${!MULTI && P.with_sound ? task("film","#22262f","var(--soft)","My sound prompts","Every sound effect, character sound, background and music, with its prompts to copy (Fal, Adobe, Suno).","openPrompts()") : ""}
+      ${!MULTI && P.with_sound ? task("link","#3a2a14","var(--accent)","Line up my sounds again","Moved, trimmed or deleted shots in Premiere? StoryStudio puts each sound back with its shot.","lineUpSounds()") : ""}
       ${!MULTI && P.with_sound ? task("wave","#3a1a22","#ff8fa3","Change a sound I don't like","Type the time from Premiere, pick the sound, and take it out, stop it there, or have a better one made.","setupChange()") : ""}
-      ${!MULTI && P.with_sound ? task("link","#3a2a14","var(--accent)","Line up my sounds again","Moved, trimmed or deleted shots in Premiere? StoryStudio puts every sound effect back on its shot.","lineUpSounds()") : ""}
+      ${!MULTI && P.with_sound ? task("film","#22262f","var(--soft)","My sound prompts","Every sound effect, character sound, background and music, with its prompts to copy (Fal, Adobe, Suno).","openPrompts()") : ""}
+      ${pickTask("fix","wave","#13302a","var(--good)","Fix the audio","Evens out the volume of your clips. Nothing else is changed unless you switch it on.","setupFix()")}
       ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","See last time's sounds","The sounds StoryStudio made for this project before.","openPrevious()") : ""}
-      ${!MULTI && P.previous_feedback ? task("eye","#22262f","var(--soft)","See last time's feedback","The notes from the last time it watched this project.","openPreviousFeedback()") : ""}
-      ${!MULTI && P.previous_audit ? task("book","#22262f","var(--soft)","See last time's story check","The story notes, and what you asked, from last time.","openPreviousAudit()") : ""}
+      ${MULTI ? pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()") : ""}
+      ${MULTI ? pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Picture problems (glitches, characters that change), timing and colour. A big check: notes sorted into groups.","setupFeedback('all')") : ""}
     </div>
+    ${MULTI ? "" : `<h3 class="tgroup">Check my movie</h3>
+    <div class="tasks">
+      ${task("book","#2b2414","#ffd27a","Story check","Does the story make sense to someone seeing it for the first time? Shows where it gets lost, with fixes: sounds, new prompts, new shots.","setupAudit()")}
+      ${pickTask("feedback","eye","#142838","#7cc4ff","Edit feedback","Picture problems (glitches, characters that change), timing and colour. A big check: notes sorted into groups.","setupFeedback('all')")}
+      ${task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Only the timing: what to trim, hold longer or speed up. On cartoons StoryStudio makes the changes for you.","setupFeedback('timing')")}
+      ${task("chat","#22262f","#e6e9ef","Tell StoryStudio what to fix","Pause where you see something you'd like better, say it in your own words, and get the fix.","openNotes()")}
+      ${P.previous_feedback ? task("eye","#22262f","var(--soft)","See last time's feedback","The notes from the last time it watched this project.","openPreviousFeedback()") : ""}
+      ${P.previous_audit ? task("book","#22262f","var(--soft)","See last time's story check","The story notes, and what you asked, from last time.","openPreviousAudit()") : ""}
+    </div>
+    <h3 class="tgroup">Lyrics</h3>
+    <div class="tasks">
+      ${pickTask("karaoke","mic","#2a2142","#c9a7ff","Karaoke lyrics","Paste the lyrics; every word lights up as it's sung.","setupKaraoke()")}
+    </div>`}
     <div id="setup"></div>`;
   if (MULTI && PICK.length) renderPlan();
 }
@@ -628,12 +638,12 @@ function setupChange(keep) {
       <button class="btn primary" onclick="chgLook()">Show the sounds there</button></div>
     ${CHG.list ? (CHG.list.length ? `<div class="sub" style="margin:14px 0 8px">Sounds StoryStudio added that play at <b>${esc(CHG.at)}</b>:</div>
       <textarea id="chgnote" rows="2" class="sbin" style="width:100%;margin:0 0 10px" placeholder="Optional, for “Make a better one”: what would fit better? For example: something tense and quiet here, not happy music.">${esc(CHG.note)}</textarea>
-      <div class="list">${CHG.list.map(x => `<div class="note" style="grid-template-columns:1fr"><div class="nb">
+      <div class="list">${CHG.list.map((x, i) => `<div class="note" style="grid-template-columns:1fr"><div class="nb">
         <div class="nh"><span class="pill" style="color:${kc[x.kind]};border-color:${kc[x.kind]}">${esc(x.kind_name)}</span><b>${esc(x.name)}</b><span class="sub" style="margin:0">${x.time} to ${x.until}</span></div>
         <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">
-          <button class="btn small" onclick="chgDo('${x.id}','remove',this)">Remove it</button>
-          ${x.long ? `<button class="btn small" onclick="chgDo('${x.id}','stop',this)">Stop it at ${esc(CHG.at)}</button>` : ""}
-          <button class="btn small primary" onclick="chgDo('${x.id}','remake',this)">Make a better one${x.long ? ` from ${esc(CHG.at)}` : ""}</button></div></div></div>`).join("")}</div>
+          <button class="btn small" onclick="chgDo(${i},'remove',this)">Remove it</button>
+          ${x.long ? `<button class="btn small" onclick="chgDo(${i},'stop',this)">Stop it at ${esc(CHG.at)}</button>` : ""}
+          <button class="btn small primary" onclick="chgDo(${i},'remake',this)">Make a better one${x.long ? ` from ${esc(CHG.at)}` : ""}</button></div></div></div>`).join("")}</div>
       <div class="sub" style="margin:8px 0 0">“Make a better one” looks at the picture there, listens to what you wrote, and makes a new sound${H.has_fal_key ? " with Fal (a few cents)" : ""}. StoryStudio remembers what you turned down, so it won't plan sounds like it again for this movie.</div>`
       : `<div class="sub" style="margin:14px 0 0">No StoryStudio sounds play at ${esc(CHG.at)}. The sound you hear there may be one of your own clips.</div>`) : ""}
     ${CHG.done ? `<div class="how" style="margin:14px 0 0"><span class="ok">✓ ${esc(CHG.done.message)}</span>${CHG.done.reply ? `<br>${esc(CHG.done.reply)}` : ""}</div>
@@ -646,11 +656,12 @@ async function chgLook() {
   try { const j = await api("sounds_at", {time: CHG.time}); CHG.list = j.sounds; CHG.t = j.t; CHG.at = j.time; } catch (e) { return; }
   setupChange(true);
 }
-async function chgDo(id, action, b) {
+async function chgDo(i, action, b) {
+  const x = CHG.list[i];
   CHG.note = $("#chgnote") ? $("#chgnote").value.trim() : "";
   b.disabled = true;
   let j;
-  try { j = await api("change_sound", {id, action, t: CHG.t, note: CHG.note}); }
+  try { j = await api("change_sound", {id: x.id, name: x.raw, start: x.start, action, t: CHG.t, note: CHG.note}); }
   catch (e) { b.disabled = false; return; }
   if (j.job) { CHG.waiting = true; watchJob(j.job); return; }
   CHG.done = j; CHG.list = null; setupChange(true);
@@ -712,7 +723,7 @@ function setupFix(keep) {
     </div>`;
   if (!keep) $("#setup").scrollIntoView({behavior:"smooth"});
 }
-async function startFix() { const j = await api("start_fix_audio", opts); watchJob(j.job); }
+async function startFix() { const j = await api("start_fix_audio", Object.assign({}, opts, {fix_chosen: true})); watchJob(j.job); }
 
 // ---------------------------------------------------------------- setup: karaoke
 function kSeg(key, items, dflt) {
@@ -912,34 +923,41 @@ function setupAudit() {
   $("#setup").scrollIntoView({behavior:"smooth"});
 }
 ICON.link = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
-async function lineUpSounds() {
+let LU = null;
+async function lineUpSounds(restore) {
   const head = `<h2>Line up my sounds again</h2>`;
-  $("#setup").innerHTML = `<div class="card panel">${head}<div class="sub" style="margin:0 0 8px"><b>Save in Premiere first</b> (Ctrl+S): StoryStudio reads your project as you last saved it.</div><div class="pmsg"><span class="spin"></span> Finding where every shot went and moving its sounds, in a copy of your project…</div></div>`;
-  $("#setup").scrollIntoView({behavior:"smooth"});
+  $("#setup").innerHTML = `<div class="card panel">${head}<div class="sub" style="margin:0 0 8px"><b>Save in Premiere first</b> (Ctrl+S): StoryStudio reads your project as you last saved it.</div><div class="pmsg"><span class="spin"></span> Checking every sound against its shot…</div></div>`;
+  if (!restore) $("#setup").scrollIntoView({behavior:"smooth"});
   let j;
-  try { j = await api("line_up_sounds"); }
+  try { j = await api("line_up_sounds", restore ? {restore} : {}); }
   catch (e) { $("#setup").innerHTML = `<div class="card panel">${head}<div class="err">${esc(e.message)}</div></div>`; return; }
-  $("#setup").innerHTML = `<div class="card panel"><h2>✓ Your sounds are lined up again</h2>
-    <p class="sub" style="margin-bottom:10px">${j.shots_moved} shot${j.shots_moved === 1 ? "" : "s"} had moved. StoryStudio moved ${j.moved} sound${j.moved === 1 ? "" : "s"} to match, so each one plays at the same moment of its shot as before.${j.removed ? ` ${j.removed} sound${j.removed === 1 ? " was" : "s were"} left out because ${j.removed === 1 ? "its" : "their"} part of the shot was trimmed off or the shot was deleted.` : ""} It's in a copy ending in “(sounds lined up)”. Your project isn't changed.</p>
-    ${j.restored || j.extra || j.beds_moved ? `<div class="sub" style="margin:0 0 10px">${j.restored ? `Put back ${j.restored} sound${j.restored === 1 ? "" : "s"} that had gone missing from shots that are still on your timeline. ` : ""}${j.extra ? `Gave ${j.extra} piece${j.extra === 1 ? "" : "s"} of a shot you used twice ${j.extra === 1 ? "its" : "their"} part of the sound. ` : ""}${j.beds_moved ? `Moved ${j.beds_moved} background sound${j.beds_moved === 1 ? "" : "s"} and music piece${j.beds_moved === 1 ? "" : "s"} so each starts and ends with its scene.` : ""}</div>` : ""}
-    <div class="how" style="margin:0 0 12px">Sounds you took out with “Change a sound I don't like” stay out. Next time you move shots, save in Premiere and press this button again.</div>
-    <div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn primary" onclick='openFile(${esc(JSON.stringify(j.project))}, this, "Opening in Premiere…")'>Open it in Premiere ${arrow()}</button></div></div>`;
+  LU = j;
+  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  const fx = j.moved - j.beds_moved;
+  const did = [fx ? `moved ${n(fx, "sound effect", "sound effects")} back onto ${fx === 1 ? "its shot" : "their shots"}` : "",
+    j.beds_moved ? `moved ${n(j.beds_moved, "background sound or music piece", "background sounds and music pieces")} to follow ${j.beds_moved === 1 ? "its" : "their"} scene` : "",
+    j.restored ? `put back ${n(j.restored, "sound", "sounds")}` : "",
+    j.removed ? `took out ${n(j.removed, "sound", "sounds")} whose shot isn't on your timeline any more` : ""].filter(Boolean);
+  const list = (title, rows) => rows.length ? `<details style="margin:0 0 8px"><summary class="sub" style="cursor:pointer;margin:0">${title}</summary><div class="how" style="margin-top:6px">${rows.join("<br>")}</div></details>` : "";
+  $("#setup").innerHTML = `<div class="card panel"><h2>${j.changed ? "✓ Your sounds are lined up again" : "✓ Your sounds are already lined up"}</h2>
+    <p class="sub" style="margin-bottom:10px">${j.changed ? `StoryStudio ${did.join(", ")}. Everything else was already in place and wasn't touched. It's in a copy ending in “(sounds lined up)”. Your project isn't changed.` : `StoryStudio checked all ${j.kept} of its sounds against their shots, and each one is where it belongs. Nothing needed changing, so no new copy was made.`}</p>
+    ${list(`See the ${n(j.moved, "sound", "sounds")} that moved`, j.moved_list.map(m => `${esc(m.name)}: ${m.from_time} → <b>${m.to_time}</b>`))}
+    ${list(`See the ${n(j.removed, "sound", "sounds")} taken out`, j.removed_list.map(m => `${m.time} ${esc(m.name)}${m.shot ? ` (was on ${esc(m.shot)})` : ""}`))}
+    ${j.missing.length ? `<div class="how" style="margin:6px 0 12px"><b>${n(j.missing.length, "sound", "sounds")} StoryStudio made ${j.missing.length === 1 ? "isn't" : "aren't"} on your timeline.</b> If you took ${j.missing.length === 1 ? "it" : "them"} out yourself, that's fine. Tick any you want back.
+      <div style="margin-top:8px">${j.missing.map((m, i) => `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;margin:3px 0"><input type="checkbox" class="lumiss" data-i="${i}" style="width:auto;margin:0"><span>${m.time} ${esc(m.name)}${m.shot ? ` <span class="sub" style="margin:0">(${esc(m.shot)})</span>` : ""}</span></label>`).join("")}</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn small primary" onclick="luRestore()">Put the ticked ones back</button><button class="btn small" onclick="luForget()">I took them out on purpose</button></div></div>` : ""}
+    <div class="sub" style="margin:0 0 12px">A sound that's within a third of a second of its spot is left exactly as you have it, so your own small nudges stay. Sounds you took out with “Change a sound I don't like” stay out.</div>
+    ${j.changed ? `<div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn primary" onclick='openFile(${esc(JSON.stringify(j.project))}, this, "Opening in Premiere…")'>Open it in Premiere ${arrow()}</button></div>` : ""}</div>`;
 }
-async function linkSounds() {
-  $("#setup").innerHTML = `<div class="card panel"><h2>Link sounds to their shots</h2><div class="pmsg"><span class="spin"></span> Linking your sounds in a copy of your project…</div></div>`;
-  $("#setup").scrollIntoView({behavior:"smooth"});
-  let j;
-  try { j = await api("link_sounds"); }
-  catch (e) { $("#setup").innerHTML = `<div class="card panel"><h2>Link sounds to their shots</h2><div class="err">${esc(e.message)}</div></div>`; return; }
-  $("#setup").innerHTML = `<div class="card panel"><h2>✓ Your sounds are linked</h2>
-    <p class="sub" style="margin-bottom:10px">${j.sounds} sound effects are now stuck to their ${j.shots} shots, in a copy ending in “(linked)”. Your project isn't changed.</p>
-    <div class="how" style="margin:0 0 12px"><b>In Premiere:</b><br>
-      • <b>Move a shot:</b> drag it, and its sounds come along.<br>
-      • <b>Remove a shot:</b> click it and press Delete (or Shift+Delete to close the gap). Its sounds go too.<br>
-      • <b>Move just one sound:</b> hold <b>Alt</b> while you click or drag it.<br>
-      • Background sounds and music aren't linked, because they play across many shots. After moving shots around, check that they still fit.<br>
-      • To unlink a shot, right-click it and choose <b>Unlink</b>.</div>
-    <div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn primary" onclick='openFile(${esc(JSON.stringify(j.project))}, this, "Opening in Premiere…")'>Open the (linked) copy in Premiere ${arrow()}</button></div></div>`;
+function luRestore() {
+  const pick = [...document.querySelectorAll(".lumiss:checked")].map(b => LU.missing[+b.dataset.i]).map(m => [m.name, m.at]);
+  if (!pick.length) { toast("Tick the sounds you want back first.", true); return; }
+  lineUpSounds(pick);
+}
+async function luForget() {
+  try { await api("forget_missing", {names: LU.missing.map(m => m.name)}); } catch (e) { return; }
+  LU.missing = []; toast("OK, StoryStudio won't mention those again.");
+  document.querySelectorAll(".lumiss").forEach(b => b.closest(".how").remove());
 }
 async function startAudit() { const j = await api("start_audit"); watchJob(j.job); }
 async function openPreviousAudit() { const j = await api("open_previous_audit"); A = j.audit; renderAudit(); $("main").scrollTop = 0; }
@@ -1864,9 +1882,11 @@ async function saveKeys() {
 // ---------------------------------------------------------------- updates
 let UPD = null;
 async function checkUpdate() {
-  try { const j = await api("update_check"); UPD = j.update; } catch (e) { return; }
+  let auto = false;
+  try { const j = await api("update_check"); UPD = j.update; auto = !!j.auto; } catch (e) { return; }
   const bar = $("#updbar");
   if (!UPD) { bar.classList.add("hidden"); return; }
+  if (auto) { bar.classList.remove("hidden"); updateNow(); return; }   // already installed: just restart
   bar.innerHTML = `<span>✨ A new version of StoryStudio (${esc(UPD.version)}) is ready.${UPD.notes ? " " + esc(UPD.notes) : ""}</span><button class="btn small primary" onclick="updateNow()">Update now</button><button class="btn small ghost" onclick="$('#updbar').classList.add('hidden')">Later</button>`;
   bar.classList.remove("hidden");
 }
@@ -1897,7 +1917,7 @@ setTimeout(checkUpdate, 4000);
 setInterval(checkUpdate, 30 * 60 * 1000);
 let UPD_AT = Date.now();                 // brought to the front (a second launch does that,
 window.addEventListener("focus", () => { // perhaps after installing an update): check again
-  if (Date.now() - UPD_AT > 60 * 1000) { UPD_AT = Date.now(); checkUpdate(); }
+  if (Date.now() - UPD_AT > 15 * 1000) { UPD_AT = Date.now(); checkUpdate(); }
 });
 
 startUp();
