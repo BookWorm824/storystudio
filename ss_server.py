@@ -83,6 +83,27 @@ def allowed_media(path):
     return any(str(p).lower().startswith(str(r.resolve()).lower()) for r in roots)
 
 
+_SOUNDS_SEEN = {}
+
+
+def has_sounds(st):
+    """Does this timeline have StoryStudio's sound effects on it?"""
+    p = st.get("snapshot") or st.get("project") or ""
+    try:
+        key = (p, os.path.getmtime(p))
+    except OSError:
+        return False
+    if key not in _SOUNDS_SEEN:
+        try:
+            import ss_premiere as PR
+            x = PR.read_xml(Path(p))
+            _SOUNDS_SEEN[key] = (b"StoryStudio effects" if isinstance(x, bytes)
+                                 else "StoryStudio effects") in x
+        except Exception:
+            _SOUNDS_SEEN[key] = False
+    return _SOUNDS_SEEN[key]
+
+
 def project_view():
     st = S.st
     if not st or st.get("video"):
@@ -104,7 +125,7 @@ def project_view():
              st.get("previous", {}).get("stage") in ("karaoke", "feedback", "planned")),
             "previous_feedback": bool(st.get("previous", {}).get("feedback")),
             "previous_audit": bool(st.get("previous", {}).get("audit")),
-            "with_sound": "(with sound" in Path(st["project"]).stem}
+            "with_sound": has_sounds(st)}
 
 
 def shot_lists():
@@ -903,6 +924,12 @@ def api(name, a):
             return {"project": ""}
         proj, _ = A.sound_home(dict(st, project=a.get("path") or st["project"]))
         return {"project": proj or ""}
+    if name == "line_up_sounds":               # after moving shots in Premiere
+        import ss_audit as A
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        return A.line_up(st)
     if name == "link_sounds":                  # sounds that move with their shot
         import storysound as E
         import ss_prwrite as W

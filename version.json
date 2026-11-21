@@ -1,5 +1,5 @@
 {
-  "version": "1.25.0",
+  "version": "1.25.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -35,5 +35,5 @@
     "ss_audio_template.xml",
     "ss_audit.py"
   ],
-  "notes": "Sound effects now stick to their shots: move or delete a shot in Premiere and its sounds go with it. New sound projects come out linked, and \"Link sounds to their shots\" on the project page links a project you already have."
+  "notes": "Moved, trimmed or deleted shots in Premiere? \"Line up my sounds again\" on the project page puts every sound effect back on its shot, in a copy of your project."
 }

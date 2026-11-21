@@ -787,6 +787,53 @@ def sound_home(st):
     return None, None
 
 
+def sound_source(st):
+    """The StoryStudio sounds this timeline was given and the timeline they were placed on:
+    (state with "cues", project the sounds were made for). Found by name first, then by the
+    sequence itself (a project saved under a new name keeps its sequence)."""
+    import storysound as E
+    proj, f = sound_home(st)
+    if proj:
+        return json.loads(Path(f).read_text(encoding="utf-8-sig")), proj
+    best = None
+    for f in list(E.WORK.glob("*/state.json")) + list(E.WORK.glob("*/state_sounds.json")):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            continue
+        if data.get("seq_uid") != st["seq_uid"] or not data.get("cues"):
+            continue
+        made = [c for c in data["cues"] if c.get("file") and c.get("keep", True)]
+        if made and (best is None or f.stat().st_mtime > best[0]):
+            best = (f.stat().st_mtime, data)
+    return (best[1], best[1]["project"]) if best else (None, None)
+
+
+def line_up(st):
+    """After shots were moved, trimmed or deleted in Premiere: a copy of this project with
+    every sound effect back on its shot."""
+    import storysound as E
+    import ss_prwrite as W
+    data, proj = sound_source(st)
+    if not data:
+        raise StoryError("StoryStudio couldn't find the sound effects it made for this video. "
+                         "Open the project you added sound effects to (or a copy of it).")
+    ref = data.get("snapshot") if Path(data.get("snapshot") or "").exists() else proj
+    if not Path(ref or "").exists():
+        raise StoryError("StoryStudio's copy of the timeline the sounds were made for is gone, "
+                         "so it can't tell where the shots were.")
+    sounds = [{"name": c["what"], "start": float(c["place_at"]),
+               "end": float(c["place_at"]) + float(c.get("length") or (c["end"] - c["start"]))}
+              for c in data["cues"] if c.get("file") and c.get("keep", True) and
+              c.get("kind") not in E.BEDS]
+    real = Path(st["project"])
+    out = E.copy_path(real, "sounds lined up")
+    res = W.line_up_sounds(st.get("snapshot") or real, st["seq_uid"], ref, out,
+                           ref_sounds=sounds)
+    log("lined up sounds from", Path(proj).name, res)
+    return res
+
+
 def add_sound(st, ref, k):
     """Put a sound fix into the movie's sound list (not made yet): it is made with "Make the
     missing" or "Use free sound effects" on the sounds page."""

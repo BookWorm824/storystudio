@@ -892,6 +892,226 @@ def link_sounds(w, seq, prefixes=LINKED_TRACKS):
     return n, len(groups)
 
 
+# ---------------------------------------------------------------------------
+# lining the sounds up again after shots were moved, trimmed or deleted
+# ---------------------------------------------------------------------------
+def _num(e, path, default=0):
+    try:
+        return int(float(e.findtext(path)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _media_file(w, c):
+    src = w.get(c, "Source")
+    if src is None:
+        return ""
+    for r in src.iter():
+        k = r.get("ObjectRef") or r.get("ObjectURef")
+        m = w.objs.get(k) if k else None
+        if m is not None and m.tag == "Media":
+            return m.findtext("FilePath") or m.findtext("ActualMediaFilePath") or ""
+    return ""
+
+
+def _all_items(w, seq):
+    """Every clip on the sequence, Start 0 included (Premiere leaves it out):
+    [{"kind", "track" (element), "tname", "ti", "el", "cti", "c", "id", "start", "end", "in",
+    "out", "speed", "file", "name"}]."""
+    out = []
+    for g in seq.findall("TrackGroups/TrackGroup"):
+        grp = w.get(g, "Second")
+        if grp is None or grp.tag not in ("VideoTrackGroup", "AudioTrackGroup"):
+            continue
+        kind = "video" if grp.tag == "VideoTrackGroup" else "audio"
+        for ti, tr in enumerate(w.refs(grp, "TrackGroup/Tracks/Track")):
+            ct = tr.find("ClipTrack")
+            if ct is None:
+                continue
+            for el in w.refs(ct, "ClipItems/TrackItems/TrackItem"):
+                cti = el.find("ClipTrackItem")
+                if cti is None or cti.find("TrackItem/End") is None:
+                    continue
+                sub = w.get(cti, "SubClip")
+                clip = w.get(sub, "Clip") if sub is not None else None
+                c = clip.find("Clip") if clip is not None else None
+                if c is None:
+                    continue
+                try:
+                    speed = float(c.findtext("PlaybackSpeed") or 1.0) or 1.0
+                except ValueError:
+                    speed = 1.0
+                out.append({"kind": kind, "track": tr, "tname": _track_name(tr), "ti": ti,
+                            "el": el, "cti": cti, "c": c, "id": el.get("ObjectID"),
+                            "start": _num(cti, "TrackItem/Start"),
+                            "end": _num(cti, "TrackItem/End"),
+                            "in": _num(c, "InPoint"), "out": _num(c, "OutPoint"),
+                            "speed": abs(speed), "file": os.path.normcase(_media_file(w, c)),
+                            "name": sub.findtext("Name") or ""})
+    return out
+
+
+def _set_times(cti, start, end):
+    ti = cti.find("TrackItem")
+    for tag, v in (("Start", start), ("End", end)):
+        e = ti.find(tag)
+        if e is None:
+            e = ET.Element(tag)
+            node = ti.find("Node")
+            at = (list(ti).index(node) + 1) if node is not None else 0
+            ti.insert(at if tag == "Start" else list(ti).index(ti.find("Start")) + 1, e)
+        e.text = str(int(v))
+
+
+def _anchor(sound, videos):
+    """The shot a sound belongs to: the picture clip it overlaps most in its first 1.5 s."""
+    s, e = sound["start"], sound["end"]
+    hi = min(e, s + int(1.5 * TICKS))
+    best = None
+    for v in videos:
+        ov = min(hi, v["end"]) - max(s, v["start"])
+        if ov > 0 and (best is None or (ov, -v["ti"]) > (best[0], -best[1]["ti"])):
+            best = (ov, v)
+    if best:
+        return best[1]
+    before = [v for v in videos if v["end"] <= s]
+    return max(before, key=lambda v: v["end"]) if before else None
+
+
+def line_up_sounds(project_path, seq_uid, ref_path, out_path, prefixes=LINKED_TRACKS,
+                   ref_sounds=None):
+    """After shots were moved, trimmed or deleted in Premiere: put every StoryStudio sound
+    effect and character sound back on its own shot. ref_path is the project as it was when
+    the sounds were placed (the "(with sound)" copy). Each sound keeps its exact moment in its
+    shot; a sound whose moment was trimmed away is shortened or goes, and a deleted shot's
+    sounds go with it. Background sounds and music are left where they are.
+    ref_sounds: [{"name", "start", "end"}] in seconds, where StoryStudio placed each sound on
+    ref_path's timeline (when ref_path is the project they were made for, without them).
+    Returns {"project", "moved", "removed", "shots_moved", "kept"}."""
+    rw = Writer(ref_path)
+    rseq = rw.sequence(seq_uid)
+    ref = _all_items(rw, rseq)
+    w = Writer(project_path)
+    seq = w.sequence(seq_uid)
+    now = _all_items(w, seq)
+    T = TICKS
+    rvid = [i for i in ref if i["kind"] == "video"]
+    nvid = [i for i in now if i["kind"] == "video"]
+    if ref_sounds is not None:
+        rsnd = [{"name": x["name"], "start": int(round(x["start"] * TICKS)),
+                 "end": int(round(x["end"] * TICKS))} for x in ref_sounds]
+    else:
+        rsnd = [i for i in ref if i["kind"] == "audio" and
+                i["tname"].startswith(tuple(prefixes))]
+    nsnd = [i for i in now if i["kind"] == "audio" and i["tname"].startswith(tuple(prefixes))]
+    if not rsnd:
+        raise StoryError("The “(with sound)” copy has no StoryStudio sound effects to line up.")
+    # each old shot -> the same shot now (same clip file; the nearest in point if it's used twice)
+    by_file = {}
+    for v in nvid:
+        by_file.setdefault(v["file"], []).append(v)
+    used, shot_now = set(), {}
+    for v in sorted(rvid, key=lambda v: v["start"]):
+        cands = [x for x in by_file.get(v["file"], []) if x["id"] not in used]
+        if not cands:
+            continue
+        x = min(cands, key=lambda x: (abs(x["in"] - v["in"]), abs(x["start"] - v["start"])))
+        used.add(x["id"])
+        shot_now[v["id"]] = x
+    moved_shots = sum(1 for v in rvid if v["id"] in shot_now and
+                      abs(shot_now[v["id"]]["start"] - v["start"]) > T // 50)
+    # each sound now <- the same sound in the reference (same name, nearest old time)
+    pool = {}
+    for s in rsnd:
+        pool.setdefault(s["name"], []).append(s)
+    plan, gone = [], []
+    for s in nsnd:
+        cands = pool.get(s["name"]) or []
+        if not cands:
+            continue                               # a sound she added herself: leave it
+        r = min(cands, key=lambda r: abs(r["start"] - s["start"]))
+        cands.remove(r)
+        v = _anchor(r, rvid)
+        x = shot_now.get(v["id"]) if v else None
+        if v is None:
+            continue
+        if x is None:                              # the shot was deleted
+            gone.append(s)
+            continue
+        src = v["in"] + (r["start"] - v["start"]) * v["speed"]      # its moment in the clip
+        new_start = x["start"] + (src - x["in"]) / x["speed"]
+        length = r["end"] - r["start"]
+        cut_head = max(0, x["start"] - new_start)                   # trimmed off the front
+        tail_over = max(0, r["end"] - v["end"])                     # it ran past its cut before
+        new_end = min(new_start + length, x["end"] + tail_over)
+        new_start = max(new_start, x["start"])
+        if new_end - new_start < T * 0.15:
+            gone.append(s)
+            continue
+        plan.append((s, int(round(new_start)), int(round(new_end)), int(round(cut_head))))
+    # move them, then lay the sound tracks out again so no two clips share a moment on a track
+    moved = 0
+    for s, a, b, head in plan:
+        if abs(a - s["start"]) > T // 100 or abs(b - s["end"]) > T // 100:
+            moved += 1
+        _set_times(s["cti"], a, b)
+        if head and s["c"].find("InPoint") is not None:
+            Writer.setx(s["c"], "InPoint", s["in"] + head)
+        if s["c"].find("OutPoint") is not None:
+            Writer.setx(s["c"], "OutPoint", s["in"] + head + (b - a))
+        s["start"], s["end"] = a, b
+    tracks = []
+    for s in nsnd:
+        if s["track"] not in tracks:
+            tracks.append(s["track"])
+    for tr in tracks:
+        lst = tr.find("ClipTrack/ClipItems/TrackItems")
+        ids = {s["id"] for s in nsnd}
+        for ref_el in list(lst):
+            if (ref_el.get("ObjectRef") or ref_el.get("ObjectURef")) in ids:
+                lst.remove(ref_el)
+    lanes = []
+    for tr in tracks:                              # anything else still on a track blocks it
+        rest = [w.objs.get(e.get("ObjectRef") or e.get("ObjectURef"))
+                for e in tr.find("ClipTrack/ClipItems/TrackItems")]
+        lanes.append({"track": tr, "items": [],
+                      "end": max([_num(r, "ClipTrackItem/TrackItem/End") for r in rest
+                                  if r is not None] or [-1])})
+    keep = [s for s, *_ in plan] + [s for s in nsnd if s not in gone and
+                                    all(s is not p[0] for p in plan)]
+    for s in sorted(keep, key=lambda s: s["start"]):
+        lane = next((l for l in lanes if l["end"] <= s["start"]), None)
+        if lane is None:
+            lane = {"track": w.add_track(seq, f"{prefixes[0]} {len(lanes) + 1}"), "end": -1,
+                    "items": []}
+            lanes.append(lane)
+        lane["items"].append(s)
+        lane["end"] = s["end"]
+    for lane in lanes:
+        lst = lane["track"].find("ClipTrack/ClipItems/TrackItems")
+        if lst is None:
+            ci = lane["track"].find("ClipTrack/ClipItems")
+            lst = ET.Element("TrackItems", {"Version": "1"})
+            ci.insert(0, lst)
+        for k, ref_el in enumerate(list(lst)):
+            ref_el.set("Index", str(k))
+        for s in lane["items"]:
+            ET.SubElement(lst, "TrackItem", {"Index": str(len(list(lst))), "ObjectRef": s["id"]})
+        items = sorted(list(lst), key=lambda e: _num(w.objs[e.get("ObjectRef")],
+                                                     "ClipTrackItem/TrackItem/Start"))
+        for k, e in enumerate(items):
+            lst.remove(e)
+        for k, e in enumerate(items):
+            e.set("Index", str(k))
+            lst.append(e)
+    _unlink(w, seq, [s["id"] for s in gone])
+    w.save(out_path)
+    log("lined up sounds", out_path, "moved", moved, "removed", len(gone), "shots moved",
+        moved_shots)
+    return {"project": str(out_path), "moved": moved, "removed": len(gone),
+            "shots_moved": moved_shots, "kept": len(keep)}
+
+
 def write_linked(project_path, seq_uid, out_path):
     """A copy of the project with every StoryStudio sound effect linked to its shot."""
     w = Writer(project_path)
