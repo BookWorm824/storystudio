@@ -103,7 +103,8 @@ def project_view():
             (st.get("previous", {}).get("cues", 0) > 0 and
              st.get("previous", {}).get("stage") in ("karaoke", "feedback", "planned")),
             "previous_feedback": bool(st.get("previous", {}).get("feedback")),
-            "previous_audit": bool(st.get("previous", {}).get("audit"))}
+            "previous_audit": bool(st.get("previous", {}).get("audit")),
+            "with_sound": "(with sound" in Path(st["project"]).stem}
 
 
 def shot_lists():
@@ -902,6 +903,15 @@ def api(name, a):
             return {"project": ""}
         proj, _ = A.sound_home(dict(st, project=a.get("path") or st["project"]))
         return {"project": proj or ""}
+    if name == "link_sounds":                  # sounds that move with their shot
+        import storysound as E
+        import ss_prwrite as W
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        real = Path(st["project"])
+        out = E.copy_path(real, "linked")
+        return W.write_linked(st.get("snapshot") or real, st["seq_uid"], out)
     if name == "open_previous_audit":
         prev = E.load(S.st["work"], "audit")
         if not (prev.get("audit") or {}).get("shots"):

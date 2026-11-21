@@ -755,6 +755,156 @@ def _seq_tracks(w, seq):
     return tracks, frame or int(TICKS / 24)
 
 
+# ---------------------------------------------------------------------------
+# links: sounds that move with their shot (Premiere's Clip > Link)
+# ---------------------------------------------------------------------------
+LINK_CLASS = "149d4ea5-a7d4-4b34-9bb7-16d783904bf2"
+LINKED_TRACKS = ("StoryStudio effects",)       # ambience and music stay free
+
+
+def _links_el(w, seq, make=False):
+    """The sequence's <Links> list (Sequence/PersistentGroupContainer/LinkContainer/Links)."""
+    pgc = seq.find("PersistentGroupContainer")
+    if pgc is None:
+        if not make:
+            return None
+        pgc = ET.Element("PersistentGroupContainer", {"Version": "1"})
+        tg = seq.find("TrackGroups")
+        seq.insert(list(seq).index(tg) if tg is not None else len(seq), pgc)
+    lc = pgc.find("LinkContainer")
+    if lc is None:
+        if not make:
+            return None
+        lc = ET.SubElement(pgc, "LinkContainer", {"Version": "1"})
+    links = lc.find("Links")
+    if links is None and make:
+        links = ET.SubElement(lc, "Links", {"Version": "1"})
+    return links
+
+
+def _link_members(w, seq):
+    """{track item id: its Link object} for every link in the sequence."""
+    out = {}
+    links = _links_el(w, seq)
+    for link in (w.refs(links, "Link") if links is not None else []):
+        for r in link.findall("TrackItemGroup/TrackItems/TrackItem"):
+            k = r.get("ObjectRef") or r.get("ObjectURef")
+            if k:
+                out[k] = link
+    return out
+
+
+def _unlink(w, seq, ids):
+    """Take track items that left the timeline out of their links; a link left with one
+    clip goes."""
+    ids = set(ids)
+    links = _links_el(w, seq)
+    if not ids or links is None:
+        return
+    for ref in list(links):
+        link = w.objs.get(ref.get("ObjectRef") or ref.get("ObjectURef"))
+        lst = link.find("TrackItemGroup/TrackItems") if link is not None else None
+        if lst is None:
+            continue
+        for r in list(lst):
+            if (r.get("ObjectRef") or r.get("ObjectURef")) in ids:
+                lst.remove(r)
+        for i, r in enumerate(lst):
+            r.set("Index", str(i))
+        if len(lst) < 2:
+            links.remove(ref)
+    for i, r in enumerate(links):
+        r.set("Index", str(i))
+
+
+def _track_name(tr):
+    return tr.findtext("ClipTrack/Track/Node/Properties/TL.SQTrackName") or ""
+
+
+def link_sounds(w, seq, prefixes=LINKED_TRACKS):
+    """Link every StoryStudio sound effect and character sound to the shot it belongs to (the
+    picture clip it overlaps most in its first second and a half), the way Premiere's Clip >
+    Link does. Moving, trimming or deleting a shot in Premiere then takes its sounds along.
+    Background sounds and music stay free. Returns (sounds linked, shots)."""
+    videos, sounds = [], []
+    for g in seq.findall("TrackGroups/TrackGroup"):
+        grp = w.get(g, "Second")
+        if grp is None or grp.tag not in ("VideoTrackGroup", "AudioTrackGroup"):
+            continue
+        for ti, tr in enumerate(w.refs(grp, "TrackGroup/Tracks/Track")):
+            ct = tr.find("ClipTrack")
+            if ct is None:
+                continue
+            name = _track_name(tr)
+            for el in w.refs(ct, "ClipItems/TrackItems/TrackItem"):
+                cti = el.find("ClipTrackItem")
+                key = el.get("ObjectID")
+                if cti is None or not key:
+                    continue
+                try:
+                    s = int(float(cti.findtext("TrackItem/Start") or 0))
+                    e = int(float(cti.findtext("TrackItem/End")))
+                except (TypeError, ValueError):
+                    continue
+                if grp.tag == "VideoTrackGroup" and el.tag == "VideoClipTrackItem":
+                    videos.append((ti, s, e, key))
+                elif grp.tag == "AudioTrackGroup" and el.tag == "AudioClipTrackItem" and \
+                        name.startswith(tuple(prefixes)):
+                    sounds.append((s, e, key))
+    if not videos or not sounds:
+        return 0, 0
+    members = _link_members(w, seq)
+    groups = {}                                    # video item id -> [audio item ids]
+    for s, e, key in sounds:
+        if key in members:                         # already linked (by her or before)
+            continue
+        hi = min(e, s + int(1.5 * TICKS))
+        best, best_ov = None, 0
+        for ti, vs, ve, vkey in videos:
+            ov = min(hi, ve) - max(s, vs)            # lower video tracks win a tie
+            if ov > 0 and (best is None or (ov, -ti) > (best_ov, -best[0])):
+                best, best_ov = (ti, vkey), ov
+        if best is None:                           # in a gap: the nearest shot before it
+            before = [v for v in videos if v[2] <= s]
+            if not before:
+                continue
+            best = (0, max(before, key=lambda v: v[2])[3])
+        groups.setdefault(best[1], []).append(key)
+    if not groups:
+        return 0, 0
+    links = _links_el(w, seq, make=True)
+    n = 0
+    for vkey, keys in groups.items():
+        link = members.get(vkey)
+        if link is None:
+            lid = w.new_key(True)
+            link = ET.Element("Link", {"ObjectID": lid, "ClassID": LINK_CLASS, "Version": "1"})
+            tig = ET.SubElement(link, "TrackItemGroup", {"Version": "1"})
+            lst = ET.SubElement(tig, "TrackItems", {"Version": "1"})
+            ET.SubElement(lst, "TrackItem", {"Index": "0", "ObjectRef": vkey})
+            w.root.append(link)
+            w.objs[lid] = link
+            ET.SubElement(links, "Link", {"Index": str(len(list(links))), "ObjectRef": lid})
+        lst = link.find("TrackItemGroup/TrackItems")
+        for k in keys:
+            ET.SubElement(lst, "TrackItem", {"Index": str(len(list(lst))), "ObjectRef": k})
+            n += 1
+    return n, len(groups)
+
+
+def write_linked(project_path, seq_uid, out_path):
+    """A copy of the project with every StoryStudio sound effect linked to its shot."""
+    w = Writer(project_path)
+    seq = w.sequence(seq_uid)
+    n, shots = link_sounds(w, seq)
+    if not n:
+        raise StoryError("StoryStudio didn't find any of its sound effects on this timeline "
+                         "that aren't linked already. Open the copy ending in “(with sound)”.")
+    w.save(out_path)
+    log("wrote linked project", out_path, n, "sounds on", shots, "shots")
+    return {"project": str(out_path), "sounds": n, "shots": shots}
+
+
 def retime(project_path, seq_uid, edits, out_path):
     """Save a copy of the project with timing changes made on the sequence's video shots and
     every gap they leave closed up (everything later moves earlier, sound included).
@@ -830,9 +980,18 @@ def retime(project_path, seq_uid, edits, out_path):
             else:
                 break
         return t + shift
+    members = _link_members(w, seq)               # sounds linked to a cut shot go with it
+    linked_cut = set()
+    for k, link in members.items():
+        if plans.get(k, {}).get("cut"):
+            linked_cut |= {r.get("ObjectRef") for r in
+                           link.findall("TrackItemGroup/TrackItems/TrackItem")}
     for tr in tracks:
         keep = []
         for it in tr["items"]:
+            if tr["kind"] == "audio" and it["id"] in linked_cut:
+                it["gone"] = True
+                continue
             p = plans.get(it["id"]) if tr["kind"] == "video" else None
             if p is None and tr["kind"] == "audio":       # a shot's own sound follows its shot
                 p = next((q for a, b, q in edited if abs(a - it["start"]) < frame and
@@ -942,6 +1101,7 @@ def retime(project_path, seq_uid, edits, out_path):
                    if not i.get("gone") and "new_end" in i and tr["kind"] == "video"] or [0])
     old_video_end = max([i["end"] for tr in tracks if tr["kind"] == "video"
                          for i in tr["items"]] or [0])
+    _unlink(w, seq, [i["id"] for tr in tracks for i in tr["items"] if i.get("gone")])
     w.save(out_path)
     log("wrote retimed project", out_path, "changed", done, "skipped", len(skipped))
     return {"project": str(out_path), "changed": done, "skipped": skipped,
@@ -1018,7 +1178,7 @@ def write_markers(project_path, seq_uid, markers, out_path):
 
 
 def write_project(project_path, seq_uid, tracks, out_path, sound_dir, repoint=None,
-                  reset=None, detach=None):
+                  reset=None, detach=None, link=False):
     """tracks: [(track_name, [ {file, start, duration, name}, ...]), ...].
     repoint: {original audio file: cleaned copy} for the storyteller's own narration/music.
     Saves a copy of the project with these tracks added to the sequence. Returns out_path."""
@@ -1049,6 +1209,12 @@ def write_project(project_path, seq_uid, tracks, out_path, sound_dir, repoint=No
         for c in clips:
             w.add_clip(tr, tmpl, c["file"], c["start"], c["duration"], c["name"], bin_el=b,
                        project_dir=str(Path(out_path).parent))
+    if link:
+        try:
+            n, shots = link_sounds(w, seq)
+            log("linked", n, "sounds to", shots, "shots")
+        except Exception:
+            log_error("link sounds")
     w.drop_spare()
     w.save(out_path)
     log("wrote project", out_path, "template ext", ext)

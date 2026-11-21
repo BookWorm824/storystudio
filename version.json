@@ -1,5 +1,5 @@
 {
-  "version": "1.24.0",
+  "version": "1.25.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -35,5 +35,5 @@
     "ss_audio_template.xml",
     "ss_audit.py"
   ],
-  "notes": "Edit feedback: press Write the prompts and StoryStudio writes full new prompts for every clip that needs making again, with the characters and props described the same way in each so the clips match, ready to save in your shot list. The notes are sorted into groups with a Start here list."
+  "notes": "Sound effects now stick to their shots: move or delete a shot in Premiere and its sounds go with it. New sound projects come out linked, and \"Link sounds to their shots\" on the project page links a project you already have."
 }

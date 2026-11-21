@@ -1660,7 +1660,8 @@ def assign_tracks(cues):
     return tracks
 
 
-COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback", "retimed", "story check")
+COPY_TAGS = ("with sound", "audio fixed", "karaoke", "feedback", "retimed", "story check",
+             "linked")
 
 
 def copy_path(project, tag):
@@ -1713,7 +1714,7 @@ def write_premiere(st, kept, label="with sound"):
     path, _ = W.write_project(src, st["seq_uid"], tracks, out, out_dir(st),
                               repoint=st.get("audio_map") or None,
                               reset=st.get("reset_items") or None,
-                              detach=st.get("clip_files") or None)
+                              detach=st.get("clip_files") or None, link=True)
     return path
 
 
