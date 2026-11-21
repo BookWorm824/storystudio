@@ -1,5 +1,5 @@
 {
-  "version": "1.26.0",
+  "version": "1.26.1",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -36,5 +36,5 @@
     "ss_audit.py",
     "ss_change.py"
   ],
-  "notes": "New on the project page: \"Sounds for my new shots\" makes sounds only for shots you've added, and keeps all the others. \"Change a sound I don't like\": type the time from Premiere, then remove the sound, stop it there, or have a better one made in your words."
+  "notes": "\"Open in Premiere\" now opens your project in the Premiere you're using (the one that's open, or the one you used last), not the Beta."
 }

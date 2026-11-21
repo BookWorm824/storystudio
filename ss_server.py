@@ -83,6 +83,51 @@ def allowed_media(path):
     return any(str(p).lower().startswith(str(r.resolve()).lower()) for r in roots)
 
 
+PREMIERE_PICK = core.APP_DATA / "premiere.txt"
+
+
+def premiere_exe():
+    """The Premiere to open projects in: the one running now (the one with a project open
+    first), else the one she used last, else the newest installed that isn't a Beta. Windows'
+    own choice for .prproj files can be a Beta or an old version she doesn't use."""
+    running = []
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-Process -Name 'Adobe Premiere Pro*' -ErrorAction SilentlyContinue | "
+             "ForEach-Object { $_.Path + '|' + $_.MainWindowTitle }"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        for line in out.splitlines():
+            path, _, title = line.partition("|")
+            if path.strip() and os.path.exists(path.strip()):
+                running.append((" - " in title, path.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if running:
+        running.sort(key=lambda x: (not x[0], "Beta" in x[1]))
+        exe = running[0][1]
+        try:
+            PREMIERE_PICK.write_text(exe, encoding="utf8")
+        except OSError:
+            pass
+        return exe
+    try:
+        last = PREMIERE_PICK.read_text(encoding="utf8").strip()
+        if last and os.path.exists(last):
+            return last
+    except OSError:
+        pass
+    found = []
+    for root in (os.environ.get("ProgramFiles", r"C:\Program Files"),):
+        for d in Path(root, "Adobe").glob("Adobe Premiere Pro*"):
+            exe = next(iter(d.glob("Adobe Premiere Pro*.exe")), None)
+            if exe and "Beta" not in d.name:
+                m = re.search(r"(\d{4})", d.name)
+                found.append((int(m.group(1)) if m else 0, str(exe)))
+    return max(found)[1] if found else None
+
+
 _SOUNDS_SEEN = {}
 
 
@@ -1136,7 +1181,12 @@ def api(name, a):
         if not p or not os.path.exists(p):
             raise StoryError("That file isn't there any more. It may have been moved, renamed "
                              "or still be syncing.")
-        os.startfile(p)
+        exe = premiere_exe() if p.lower().endswith(".prproj") else None
+        if exe:                                  # the Premiere she works in, not whichever
+            subprocess.Popen([exe, p])           # one Windows opens .prproj files with
+            log("opened in", Path(exe).parent.name, ":", Path(p).name)
+        else:
+            os.startfile(p)
         return {"ok": True}
     if name == "problem_report":
         path = core.problem_report()
