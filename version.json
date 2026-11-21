@@ -1,5 +1,5 @@
 {
-  "version": "1.26.1",
+  "version": "1.27.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -36,5 +36,5 @@
     "ss_audit.py",
     "ss_change.py"
   ],
-  "notes": "\"Open in Premiere\" now opens your project in the Premiere you're using (the one that's open, or the one you used last), not the Beta."
+  "notes": "New: \"My sound prompts\" on the project page shows every sound effect, character sound, background and music StoryStudio made for the video, with its prompts to copy (Fal, Adobe, Suno), where it is on your timeline now, a search box, and Save as a text file."
 }

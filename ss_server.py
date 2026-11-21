@@ -981,6 +981,20 @@ def api(name, a):
         return {"shots": [{"start": round(x["start"], 3), "end": round(x["end"], 3),
                            "name": x["name"], "time": fmt_time(x["start"]),
                            "length": round(x["end"] - x["start"], 1)} for x in shots]}
+    if name == "sound_prompts":                # every sound's prompts, all runs
+        import ss_change as CH
+        st = S.st
+        if not st or st.get("video"):
+            raise StoryError("Open your Premiere project first.")
+        rows = CH.prompt_list(st)
+        if not rows:
+            raise StoryError("StoryStudio hasn't made any sounds for this video yet.")
+        return {"title": st["seq_name"], "rows": rows}
+    if name == "save_prompts":
+        import ss_change as CH
+        path = CH.write_prompt_list(S.st)
+        os.startfile(path)
+        return {"path": path}
     if name == "sounds_at":                    # "change a sound I don't like"
         import ss_change as CH
         st = S.st

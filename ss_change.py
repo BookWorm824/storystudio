@@ -310,3 +310,76 @@ she asked for. Characters never speak: their sounds are wordless."""
     st["change_copy"] = str(out)
     log("change sound:", action, it["name"], "->", out)
     return {"project": str(out), "message": msg, "reply": reply}
+
+
+# --- every sound's prompts, in one place ---------------------------------------------
+KIND_LABEL = {"shot": ("effect", "Sound effects"), "voice": ("character", "Character sound"),
+              "ambience": ("background", "Background sound"), "music": ("music", "Music")}
+
+
+def prompt_list(st):
+    """Every StoryStudio sound made for this movie (all runs) with its prompts, and where it is
+    on the timeline now: [{...}] in timeline order, the ones not on the timeline last."""
+    import ss_audit as A
+    import ss_prwrite as W
+    at = {}
+    try:
+        w = W.Writer(base_path(st))
+        for i in W._all_items(w, w.sequence(st["seq_uid"])):
+            if i["kind"] == "audio":
+                at.setdefault(i["name"], []).append(i["start"] / TICKS)
+    except Exception:
+        log_error("prompt list: reading the timeline")
+    rows = []
+    for data, proj, _ in A.sound_sources(st):
+        run = ("Changed sound" if data.get("stage") == "change" else
+               "New shots" if data.get("only_shots") else "Sound effects run")
+        for c in data.get("cues") or []:
+            if not c.get("keep", True):
+                continue
+            k, label = KIND_LABEL.get(c["kind"], ("effect", "Sound effect"))
+            times = at.get(c["what"]) or []
+            t = times.pop(0) if times else None
+            sp, ap = (c.get("sound_prompt") or "").strip(), (c.get("adobe_prompt") or "").strip()
+            rows.append({"what": re.sub(r"^Music:\s*", "", c["what"]), "kind": k, "label": label,
+                         "run": run, "t": t, "time": fmt_time(t) if t is not None else "",
+                         "made": bool(c.get("file") and Path(c["file"]).exists()),
+                         "file": c.get("file") or "",
+                         "sound": sp, "adobe": ap if ap and ap != sp else "",
+                         "suno": (c.get("suno_prompt") or "").strip(),
+                         "includes": [x for x in (c.get("includes") or []) if isinstance(x, str)],
+                         "replaces": c.get("replaces", ""), "her_note": c.get("her_note", "")})
+    rows.sort(key=lambda r: (r["t"] is None, r["t"] or 0))
+    return rows
+
+
+def write_prompt_list(st, rows=None):
+    import storysound as E
+    rows = rows if rows is not None else prompt_list(st)
+    od = E.out_dir(st)
+    od.mkdir(parents=True, exist_ok=True)
+    path = od / f"{E.safe_name(st['seq_name'])} - all sound prompts.txt"
+    lines = [f"StoryStudio – every sound prompt for \"{st['seq_name']}\"", "=" * 60, "",
+             "Times are where each sound is on your timeline now.", ""]
+    for kind, title in (("effect", "SOUND EFFECTS"), ("character", "CHARACTER SOUNDS"),
+                        ("background", "BACKGROUND SOUNDS"), ("music", "MUSIC")):
+        mine = [r for r in rows if r["kind"] == kind]
+        if not mine:
+            continue
+        lines += [title, "-" * len(title)]
+        for r in mine:
+            lines.append(f"{r['time'] or '(not on the timeline now)'}  {r['what']}")
+            if r["includes"]:
+                lines.append("   In this shot: " + "; ".join(r["includes"]))
+            lines.append("   Sound AI (Fal / ElevenLabs): " + r["sound"])
+            if r["adobe"]:
+                lines.append("   Adobe / sound library: " + r["adobe"])
+            if r["suno"]:
+                lines.append("   Suno: " + r["suno"])
+            if r["replaces"]:
+                lines.append(f"   Made in place of: {r['replaces']}" +
+                             (f" (you said: {r['her_note']})" if r["her_note"] else ""))
+            lines.append("")
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf8")
+    return str(path)

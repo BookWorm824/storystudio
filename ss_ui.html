@@ -446,6 +446,7 @@ function renderHome() {
       ${MULTI ? "" : task("scissors","#3a1a22","#ff8fa3","Timing and pacing","Only the timing: what to trim, hold longer or speed up. On cartoons StoryStudio makes the changes for you.","setupFeedback('timing')")}
       ${MULTI ? "" : task("chat","#22262f","#e6e9ef","Tell StoryStudio what to fix","Pause where you see something you'd like better, say it in your own words, and get the fix.","openNotes()")}
       ${!MULTI && P.with_sound ? task("sound","#3a2a14","var(--accent)","Sounds for my new shots","Added shots since the sounds were made? StoryStudio makes sounds for just those, and keeps all the others.","setupNewShots()") : ""}
+      ${!MULTI && P.with_sound ? task("film","#22262f","var(--soft)","My sound prompts","Every sound effect, character sound, background and music, with its prompts to copy (Fal, Adobe, Suno).","openPrompts()") : ""}
       ${!MULTI && P.with_sound ? task("wave","#3a1a22","#ff8fa3","Change a sound I don't like","Type the time from Premiere, pick the sound, and take it out, stop it there, or have a better one made.","setupChange()") : ""}
       ${!MULTI && P.with_sound ? task("link","#3a2a14","var(--accent)","Line up my sounds again","Moved, trimmed or deleted shots in Premiere? StoryStudio puts every sound effect back on its shot.","lineUpSounds()") : ""}
       ${!MULTI && P.previous ? task("film","#22262f","var(--soft)","See last time's sounds","The sounds StoryStudio made for this project before.","openPrevious()") : ""}
@@ -580,6 +581,42 @@ function seg(key, items) {
 }
 function sw(key) { return `<button class="switch ${opts[key]?"on":""}" onclick="setOpt('${key}',${!opts[key]})" aria-label="${key}"></button>`; }
 function setOpt(k, v) { opts[k] = v; if (MULTI && PICK.length && $("#setup .planstep")) renderPlan(); else setupSounds(true); }
+// ---------------------------------------------------------------- my sound prompts
+let PR = null, prKind = "", prFind = "", PFX = [];
+async function openPrompts() {
+  let j;
+  try { j = await api("sound_prompts"); } catch (e) { return; }
+  PR = j; prKind = ""; prFind = ""; renderPrompts(); $("main").scrollTop = 0;
+}
+function renderPrompts() {
+  PAGE = "prompts"; PFX = [];
+  const KC = {effect: "var(--accent)", character: "#7cc4ff", background: "var(--good)", music: "#c9a7ff"};
+  const NAMES = {effect: "Sound effects", character: "Character sounds", background: "Backgrounds", music: "Music"};
+  const q = prFind.toLowerCase();
+  const shown = PR.rows.filter(r => (!prKind || r.kind === prKind) && (!q || (r.what + " " + r.sound + " " + r.adobe + " " + r.suno + " " + r.includes.join(" ")).toLowerCase().includes(q)));
+  const count = k => PR.rows.filter(r => r.kind === k).length;
+  const box = (label, sub, text) => { const i = PFX.length; PFX.push(text); return `<div class="pbox"><div class="ptitle">${label} <span class="sub">${sub}</span><span style="flex:1"></span><button class="btn small" onclick="prCopy(${i})">Copy</button></div><div class="ptext">${esc(text)}</div></div>`; };
+  $("#view").innerHTML = `
+    <div class="rhead"><div><h1>Sound prompts: “${esc(PR.title)}”</h1><div class="sub" style="margin:0">${PR.rows.length} sounds, from every time StoryStudio made sounds for this video. The times are where each one is on your timeline now.</div></div>
+      <div class="row" style="gap:10px"><button class="btn" onclick="savePrompts()">Save as a text file</button><button class="btn ghost" onclick="goHome()">Home</button></div></div>
+    <div class="filters" style="margin-top:4px">
+      <span class="chip ${!prKind ? "on" : ""}" onclick="prKind='';renderPrompts()">All ${PR.rows.length}</span>
+      ${Object.keys(NAMES).filter(count).map(k => `<span class="chip ${prKind === k ? "on" : ""}" onclick="prKind='${k}';renderPrompts()"><i class="sev" style="background:${KC[k]}"></i>${NAMES[k]} ${count(k)}</span>`).join("")}
+      <input id="prfind" placeholder="Find a sound (like acorn, giggle, bridge)" value="${esc(prFind)}" oninput="prFind=this.value;prKeep()" style="flex:1;min-width:220px;margin:0">
+    </div>
+    <div class="list">${shown.map(r => `<div class="note" style="grid-template-columns:1fr"><div class="nb">
+      <div class="nh">${r.time ? `<span class="pill">${r.time}</span>` : `<span class="pill" title="It was taken out, or the shot was deleted">not on the timeline now</span>`}<span class="pill" style="color:${KC[r.kind]};border-color:${KC[r.kind]}">${esc(r.label)}</span><b>${esc(r.what)}</b>${r.run !== "Sound effects run" ? `<span class="pill new">${esc(r.run)}</span>` : ""}${r.made ? "" : `<span class="pill">not made yet</span>`}</div>
+      ${r.includes.length > 1 ? `<div class="sub" style="margin:2px 0 6px">In this shot: ${esc(r.includes.join(" · "))}</div>` : ""}
+      ${r.replaces ? `<div class="sub" style="margin:2px 0 6px">Made in place of “${esc(r.replaces)}”${r.her_note ? ` (you said: ${esc(r.her_note)})` : ""}</div>` : ""}
+      ${r.sound ? box("Sound AI", "Fal / ElevenLabs", r.sound) : ""}
+      ${r.adobe ? box("Adobe or a sound library", "a fuller description", r.adobe) : ""}
+      ${r.suno ? box("Suno", "for making this music in Suno", r.suno) : ""}
+      ${r.file && r.made ? `<div class="row" style="margin-top:6px"><button class="btn small ghost" onclick='api("reveal",{path:${esc(JSON.stringify(r.file))}}).catch(()=>{})'>${ICON.folder} Show the sound file</button></div>` : ""}
+    </div></div>`).join("") || `<div class="sub">No sounds match.</div>`}</div>`;
+}
+function prKeep() { const y = $("main").scrollTop, pos = $("#prfind").selectionStart; renderPrompts(); $("main").scrollTop = y; const f = $("#prfind"); f.focus(); f.setSelectionRange(pos, pos); }
+async function prCopy(i) { await navigator.clipboard.writeText(PFX[i]); toast("Copied"); }
+async function savePrompts() { try { const j = await api("save_prompts"); toast("Saved: " + j.path.split(/[\\/]/).pop()); } catch (e) {} }
 // ---------------------------------------------------------------- change a sound
 let CHG = {time: "", note: "", list: null, t: null, done: null};
 function setupChange(keep) {
@@ -1023,6 +1060,7 @@ const TOOLS = {
   feedback: ["eye", "#142838", "#7cc4ff", "Edit feedback", "Notes on glitches, characters that change, and pacing, as markers."],
   timing: ["scissors", "#3a1a22", "#ff8fa3", "Timing and pacing", "What to trim, hold longer or speed up, shot by shot."],
   karaoke: ["mic", "#2a2142", "#c9a7ff", "Karaoke lyrics", "Every word lights up as it's sung."],
+  prompts: ["film", "#22262f", "var(--soft)", "My sound prompts", "Every sound with its prompts to copy (Fal, Adobe, Suno)."],
   shotlist: ["film", "#22262f", "var(--soft)", "My shot list", "The prompts, with the shots to make again and the new ones."],
   home: ["folder", "#22262f", "var(--soft)", "All the tools", "This video's page, with everything StoryStudio can do."]};
 let NEXT = null;
@@ -1050,6 +1088,7 @@ async function goTool(id) {
   if (id === "timing") return setupFeedback("timing");
   if (id === "story") return setupAudit();
   if (id === "notes") return openNotes();
+  if (id === "prompts") return openPrompts();
 }
 
 // ---------------------------------------------------------------- script builder
@@ -1736,7 +1775,7 @@ async function renderDone() {
         <div class="footerbar">${audioMode || karaoke ? "<span></span>" : `<button class="btn ghost" onclick="api('review').then(j=>{R=j.review;renderReview()})">Back to the sounds</button>`}<button class="btn ghost" onclick="goHome()">Home</button></div>
       </div>
     </div>
-    ${o.project && !o.video_out && !CHAIN ? nextCard(o.project, o.seq_uid, audioMode ? ["story", "notes", "feedback", "karaoke"] : karaoke ? ["feedback", "story"] : ["fix", "story", "notes", "feedback"], `These open the copy that was just made (${esc(o.project.split(/[\\/]/).pop().replace(/\.prproj$/i, ""))}).`) : ""}`;
+    ${o.project && !o.video_out && !CHAIN ? nextCard(o.project, o.seq_uid, audioMode ? ["story", "notes", "feedback", "karaoke"] : karaoke ? ["feedback", "story"] : ["fix", "story", "prompts", "notes", "feedback"], `These open the copy that was just made (${esc(o.project.split(/[\\/]/).pop().replace(/\.prproj$/i, ""))}).`) : ""}`;
 }
 
 // ---------------------------------------------------------------- settings
