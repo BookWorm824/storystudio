@@ -936,9 +936,41 @@ def _keep_made_run(st):
         pass
 
 
+HOLIDAY_SOUNDS = re.compile(r"\b(glockenspiel|celesta|celeste|sleigh ?bells?|jingle ?bells?|"
+                            r"jingles?|chimes?|tubular bells|church bells?|bells?|choir|choral|"
+                            r"carol(?:ing)?|festive|christmas|holiday|church organ|organ)\b", re.I)
+
+
+def no_holiday(c):
+    """Music never sounds like a Christmas carol (her rule: no holiday feel): bell-like
+    instruments come out of music prompts, and Suno is told so."""
+    for k in ("sound_prompt", "suno_prompt", "adobe_prompt"):
+        t = c.get(k) or ""
+        if not t:
+            continue
+        w = HOLIDAY_SOUNDS.pattern
+        t = re.sub(r",?\s*no bells, no chimes, not festive", "", t)
+        t = re.sub(r"\b(?:no|not|without)\s+" + w, "", t, flags=re.I)
+        t = re.sub(r"\bwith\s+(?:an?\s+)?" + w + r"\s*(?:,|\band\b)?\s*", "with ", t,
+                   flags=re.I)
+        t = re.sub(r"(?:\s*,|\s+and)?\s*(?:\b(?:an?|light|soft|gentle)\s+)?" + w, "", t,
+                   flags=re.I)
+        t = re.sub(r"\s+([,.])", r"\1", t)
+        t = re.sub(r",\s*(?:,\s*)+", ", ", t)
+        t = re.sub(r"\b(?:and|with)\s*(?=[,.]|$)", "", t)
+        t = re.sub(r"\s+([,.])", r"\1", t)
+        t = re.sub(r"\s{2,}", " ", t).strip(" ,")
+        if k == "suno_prompt" and "no bells" not in t:
+            t += ", no bells, no chimes, not festive"
+        c[k] = t
+    return c
+
+
 def tidy_cues(cues, dur, cuts):
     out = []
     for c in cues:
+        if c.get("kind") == "music":
+            no_holiday(c)
         s, e = max(0.0, float(c["start"])), min(dur, float(c["end"]))
         if e - s < 0.15:
             continue

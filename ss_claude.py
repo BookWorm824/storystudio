@@ -378,7 +378,7 @@ def _speech(lines, lo, hi):
     return "\n".join(out) or "(no speech heard)"
 
 
-MUSIC_ON = """BACKGROUND MUSIC is wanted too. Where the timeline has NO music clip already, add kind "music" cues: one per scene or mood (usually 15 to 90 seconds, starting and ending at shot changes), instrumental only, gentle enough to sit under the narration. For each: sound_prompt = short instrumental description for an AI ("soft storybook piano and pizzicato strings, warm and curious, instrumental"); suno_prompt = a Suno style prompt with genre, mood, instruments, tempo and "instrumental", e.g. "gentle storybook orchestral, soft piano, pizzicato strings, light glockenspiel, warm and curious, 90 bpm, instrumental, no vocals"; adobe_prompt = the same idea in a sentence; search_words = 2-4 words; level = background. Never put music where the timeline already has music."""
+MUSIC_ON = """BACKGROUND MUSIC is wanted too. Where the timeline has NO music clip already, add kind "music" cues: one per scene or mood (usually 15 to 90 seconds, starting and ending at shot changes), instrumental only, gentle enough to sit under the narration. For each: sound_prompt = short instrumental description for an AI ("soft storybook piano and pizzicato strings, warm and curious, instrumental"); suno_prompt = a Suno style prompt with genre, mood, instruments, tempo and "instrumental", e.g. "gentle storybook orchestral, soft piano, pizzicato strings, light marimba, warm and curious, 90 bpm, instrumental, no vocals, no bells"; adobe_prompt = the same idea in a sentence; search_words = 2-4 words; level = background. Never put music where the timeline already has music. Music must never sound like holiday music: no glockenspiel, celesta, bells, chimes, sleigh bells, jingles, choir or church organ (with warm strings they sound like a Christmas carol). Use instruments like pizzicato strings, clarinet, flute, bassoon, tuba, xylophone, marimba, ukulele, piano, woodblock and light percussion."""
 MUSIC_OFF = ("No music: the storyteller makes the music separately. Do not plan any \"music\" "
              "cues. Leave suno_prompt as an empty string.")
 
@@ -780,6 +780,6 @@ def describe(user_words, cue):
     prompt = (f"The storyteller wants to change this sound effect.\nCurrent: {cue['what']} — "
               f"prompt: {cue['sound_prompt']} (lasts {cue['end'] - cue['start']:.1f} s)\n"
               f"What they said: {user_words}\nWrite the new prompts" +
-              (" (this is background music, so fill in suno_prompt too)."
+              (" (this is background music, so fill in suno_prompt too). Music must never sound like holiday music: no glockenspiel, celesta, bells, chimes, sleigh bells, jingles, choir or church organ (with warm strings they sound like a Christmas carol). Use instruments like pizzicato strings, clarinet, flute, bassoon, tuba, xylophone, marimba, ukulele, piano, woodblock and light percussion."
                if cue.get("kind") == "music" else " (suno_prompt: empty string)."))
     return ask(prompt, REDO_SCHEMA, system=SYSTEM, timeout=300)

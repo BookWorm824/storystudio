@@ -249,10 +249,12 @@ OTHER SOUNDS AROUND THEN: {', '.join(i['name'] for i in others[:12]) or 'none'}
 {dislikes_text(st['seq_uid'])}
 
 Look at the picture and write the new sound so it fits the story at that moment and what \
-she asked for. Characters never speak: their sounds are wordless."""
+she asked for. Characters never speak: their sounds are wordless. Music must never sound like holiday music: no glockenspiel, celesta, bells, chimes, sleigh bells, jingles, choir or church organ (with warm strings they sound like a Christmas carol). Use instruments like pizzicato strings, clarinet, flute, bassoon, tuba, xylophone, marimba, ukulele, piano, woodblock and light percussion."""
         res = C.ask(prompt, REMAKE, images=images, timeout=600)
         ck = {"music": "music", "background": "ambience", "effect": "action",
               "character": "voice"}[kind]
+        if ck == "music":
+            E.no_holiday(res)
         cue = {"id": "c001", "kind": ck, "start": round(s0, 3), "end": round(s1, 3),
                "place_at": round(s0, 3), "length": round(s1 - s0, 3),
                "what": res["what"].strip()[:120], "sound_prompt": res["sound_prompt"].strip(),
