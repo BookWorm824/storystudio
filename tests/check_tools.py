@@ -581,6 +581,20 @@ def main():
             if look == "elegant":
                 notes.append("spots " + ", ".join(sorted(set(st["karaoke"].get("spots") or []))))
         assert K.names({"karaoke_style": "elegant"})[0] == "lyrics"
+        shown = [w["text"] for l in K.for_screen(src["karaoke"]["lines"]) for w in l["words"]]
+        bad = [t for t in shown if t[-1] in ",.;:" or t[0] in ",.;:" or '"' in t]
+        assert not bad, f"punctuation still shows on screen: {bad[:6]}"
+        cased = K.for_screen(K.fix_case(K.parse_lyrics(
+            "STRENGTH, O LORD, IN MY TIME OF NEED,\n"
+            "leading me closer, lord, unto thee.\n"
+            "Spirit To Guide Me When I Cannot See\n"
+            "i know that jesus walks with me\n"
+            "and the holy spirit fills this place")))
+        got = [l["text"] for l in cased]
+        want = ["Strength O Lord in my time of need", "Leading me closer Lord unto Thee",
+                "Spirit to guide me when I cannot see", "I know that Jesus walks with me",
+                "And the Holy Spirit fills this place"]
+        assert got == want, f"capitals: {got}"
         return "; ".join(notes)
     step("lyrics: karaoke for kids and the elegant lyric video", t_lyrics)
 

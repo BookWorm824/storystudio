@@ -21,6 +21,7 @@ ACCENT = (255, 206, 128)         # soft gold: the picked-out word and the glow
 SIZE = 0.064                     # main lettering, as a share of the picture's short side
 ACCENT_SCALE = 1.8
 STEP = 1.3                       # the second row steps in this many letter-heights, like a poem
+ACCENT_ROOM = 0.9                # extra space (in spaces) each side of the picked-out word
 REVEAL = 0.45                    # seconds a word takes to fade in and rise
 ACCENT_REVEAL = 0.7
 EARLY = 0.12                     # a word starts appearing this much before it is sung
@@ -77,13 +78,15 @@ def _norm(text):
 def cards_of(lines, chars):
     """Each lyric line becomes one card of one or two rows (a long line is split at a natural
     place; a very long one becomes several cards)."""
-    from ss_karaoke import short_lines
+    from ss_karaoke import short_lines, for_screen
     out = []
     for line in lines:
         ws = [w for w in line.get("words") or [] if w.get("text")]
         if not ws:
             continue
-        rows = [r["words"] for r in short_lines([dict(line, words=ws)], chars)]
+        rows = [r["words"] for r in for_screen(short_lines([dict(line, words=ws)], chars))]
+        if not rows:
+            continue
         for k in range(0, len(rows), 2):
             out.append({"rows": rows[k:k + 2]})
     for c in out:
@@ -163,7 +166,11 @@ def build_card(card, W, H, ink, accent, halo=0.0):
                 items.append({"img": img, "origin": origin, "adv": adv, "w": w,
                               "strong": strong, "k": k})
                 k += 1
-            width = sum(i["adv"] for i in items) + space * (len(items) - 1)
+            room = space * ACCENT_ROOM             # the script word's swashes need more room
+            for a, b in zip(items, items[1:]):
+                a["gap"] = space + (room if a["strong"] or b["strong"] else 0)
+            items[-1]["gap"] = 0
+            width = sum(i["adv"] + i["gap"] for i in items)
             up = main.getmetrics()[0]
             for i in items:                        # the picked-out word may stand taller
                 if i["strong"]:
@@ -198,10 +205,9 @@ def place(built, spot, W, H):
         else:
             x = W * ax - r["width"] / 2
         x = min(max(x, W * 0.04), W * 0.96 - r["width"])
-        space = (r["width"] - sum(i["adv"] for i in r["items"])) / max(1, len(r["items"]) - 1)
         for i in r["items"]:
             out.append((i, x, top + r["base"]))
-            x += i["adv"] + space
+            x += i["adv"] + i["gap"]
     return out, (W * ax - (built["w"] if align == "right" else built["w"] / 2
                            if align == "center" else 0), top, built["w"], built["h"])
 

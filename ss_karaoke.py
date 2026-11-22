@@ -100,6 +100,155 @@ def clean_line(raw):
     return s
 
 
+QUOTES = "\"\u201c\u201d\u00ab\u00bb"
+EDGE_PUNCT = ",.;:\u2014\u2013\u2026-()[]"
+
+
+def screen_text(word):
+    """A word as it shows on screen: lyrics don't show commas, full stops, semicolons, colons,
+    dashes or quotation marks (the line breaks show the pauses). Apostrophes ("You're",
+    "singin'") and question and exclamation marks stay. "" for a word that is only punctuation."""
+    t = "".join(ch for ch in str(word) if ch not in QUOTES)
+    while True:
+        u = t.strip(EDGE_PUNCT + " ")
+        u = re.sub(r"[,.;:\u2014\u2013\u2026]+(?=[!?]+$)", "", u)   # "now,?" -> "now?"
+        if u == t:
+            break
+        t = u
+    return t if any(ch.isalnum() for ch in t) else ""
+
+
+def for_screen(lines):
+    """The timed lines with each word as it shows on screen (punctuation-only words dropped);
+    the timing is untouched."""
+    out = []
+    for l in lines:
+        ws = []
+        for w in l.get("words") or []:
+            t = screen_text(w.get("text", ""))
+            if t:
+                ws.append(dict(w, text=t))
+        if ws:
+            out.append(dict(l, words=ws, text=" ".join(w["text"] for w in ws)))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# capitals: consistent, and every word for God or Jesus capitalized
+# ---------------------------------------------------------------------------
+DIVINE = {"god", "god's", "jesus", "jesus'", "jesus's", "christ", "christ's", "lord", "lord's",
+          "savior", "saviour", "savior's", "saviour's", "messiah", "emmanuel", "immanuel",
+          "jehovah", "yahweh", "almighty", "redeemer", "redeemer's"}
+ARCHAIC = {"thee", "thou", "thy", "thine"}          # in a song about God, these mean God
+I_WORDS = {"i", "i'm", "i'll", "i've", "i'd"}
+
+
+def _key(w):
+    return re.sub(r"[^a-z']", "", w.lower().replace("\u2019", "'")).strip("'") or ""
+
+
+def _cap(w):
+    """Capital first letter, the rest as they are ("o'er" -> "O'er", "(ooh" -> "(Ooh")."""
+    for i, ch in enumerate(w):
+        if ch.isalpha():
+            return w[:i] + ch.upper() + w[i + 1:]
+    return w
+
+
+def case_line(tokens, sacred):
+    """One line's words with consistent capitals (rules only)."""
+    letters = [ch for t in tokens for ch in t if ch.isalpha()]
+    shouting = len(letters) >= 4 and all(ch.isupper() for ch in letters)
+    titled = len(tokens) >= 3 and sum(1 for t in tokens[1:] if t[:1].isupper() or
+                                      (t[:1] in "(\"'\u201c" and t[1:2].isupper())) \
+        >= 0.8 * (len(tokens) - 1)
+    out = []
+    for i, t in enumerate(tokens):
+        w = t.lower() if (shouting or titled) else t
+        k = _key(w)
+        prev = _key(tokens[i - 1]) if i else ""
+        if i == 0 or k in I_WORDS or k == "o" or k in DIVINE or (sacred and k in ARCHAIC) or \
+                (prev == "holy" and k in ("spirit", "ghost")):
+            w = _cap(w)
+        if k == "holy" and i + 1 < len(tokens) and _key(tokens[i + 1]) in ("spirit", "ghost"):
+            w = _cap(w)
+        out.append(w)
+    return out
+
+
+CASE_SCHEMA = {"type": "object",
+               "properties": {"lines": {"type": "array", "items": {"type": "string"}}},
+               "required": ["lines"], "additionalProperties": False}
+
+
+def _ai_case(texts):
+    """The lines with capitals fixed by Claude or ChatGPT (it can tell when "He" or "You" means
+    God), or None. Only the capitals may change: any other change and its answer isn't used."""
+    try:
+        import ss_claude as C
+        if not C.provider():
+            return None
+        numbered = "\n".join(texts)
+        res = C.ask(
+            "These are song lyrics, one line per row. Give back exactly the same lines, in the "
+            "same order, with the same words and punctuation, changing ONLY capital letters so "
+            "they are consistent: every line starts with a capital letter; \"I\" is a capital; "
+            "names of people and places have capitals; every word that refers to God or Jesus "
+            "has a capital, and so does \"O\" as in \"O Lord\": names and titles (God, Jesus, Christ, Lord, Savior, Father, King, "
+            "Lamb, Shepherd, Holy Spirit, and Spirit when it means the Holy Spirit) and the "
+            "words He, Him, His, You, Your, Yours, Thee, Thou, Thy and Thine when they mean God "
+            "or Jesus; every other word is in small letters (no ALL CAPS, no Title Case).\n\n"
+            + numbered, CASE_SCHEMA, timeout=180)
+        lines = [str(x) for x in (res or {}).get("lines") or []]
+        return lines if len(lines) == len(texts) else None
+    except Exception:
+        log("capitals: the AI didn't answer; using the rules")
+        return None
+
+
+def fix_case(lines):
+    """Consistent capitals for the lyrics as they show on screen (the timing is untouched)."""
+    if not lines:
+        return lines
+    sacred = any(_key(w["text"]) in DIVINE for l in lines for w in l["words"])
+    uniq, seen = [], {}
+    for l in lines:
+        t = " ".join(w["text"] for w in l["words"])
+        if t not in seen:
+            seen[t] = len(uniq)
+            uniq.append(t)
+    ruled = [" ".join(case_line(t.split(), sacred)) for t in uniq]
+    ai = _ai_case(ruled)
+    final = []
+    for i, t in enumerate(ruled):
+        a = ai[i] if ai else None
+        same = a is not None and a.split() != t.split() and \
+            [x.lower() for x in a.split()] == [x.lower() for x in t.split()]
+        if same:                                   # the AI may only add capitals for God, or
+            fixed = []                             # change pronouns and names: never take one
+            for x, y in zip(t.split(), a.split()):  # away from God or Jesus
+                k = _key(x)
+                if (k in DIVINE or (sacred and k in ARCHAIC)) and not y[:1].isupper():
+                    y = x
+                fixed.append(y)
+            a = " ".join(fixed)
+        final.append(a if same else t)
+    changed = 0
+    for l in lines:
+        toks = final[seen[" ".join(w["text"] for w in l["words"])]].split()
+        k = 0
+        for w in l["words"]:
+            n = len(w["text"].split())
+            new = " ".join(toks[k:k + n])
+            if new and new != w["text"]:
+                w["text"] = new
+                changed += 1
+            k += n
+        l["text"] = " ".join(w["text"] for w in l["words"])
+    log("capitals:", changed, "words changed", "(rules and AI)" if ai else "(rules)")
+    return lines
+
+
 def is_label(s):
     t = _no_symbols(s).strip()
     return bool(SECTION.match(t) or PAREN_LABEL.match(t) or PLAIN_LABEL.match(t))
@@ -619,7 +768,7 @@ def render_overlay(st, out_mov, fps=None, progress=None, cancel=None, settings=N
                                    fps or float(st.get("fps") or 24.0), settings, progress,
                                    cancel)
     W, H, S, n_rows, rows, chars = _layout(st, settings)
-    lines = short_lines(st["karaoke"]["lines"], chars)
+    lines = for_screen(short_lines(st["karaoke"]["lines"], chars))
     st["karaoke"]["shown"] = len(lines)
     fps = fps or float(st.get("fps") or 24.0)
     dur = float(st["duration"])
@@ -811,6 +960,8 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     lines = parse_lyrics(lyrics_text)
     if not lines:
         raise StoryError("Please paste the song's lyrics first.")
+    say(0.005, "Tidying the capitals…")
+    lines = fix_case(lines)
     st["mode"] = "karaoke"
     if st.get("video"):
         return karaoke_video(st, settings, lines, progress, cancel)
