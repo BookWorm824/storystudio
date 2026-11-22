@@ -384,7 +384,8 @@ def claude_notes(st, kind, story, lines, shots, facts, sheets, progress=None,
         lo = grp[0][0] if grp else 0.0
         hi = groups[gi + 1][0][0] if gi + 1 < len(groups) else dur
         if progress:
-            progress(gi / len(groups), f"Claude is watching {fmt_time(lo)} to {fmt_time(hi)}…")
+            progress(gi / len(groups), f"{C.ai_name()} is watching {fmt_time(lo)} to "
+                     f"{fmt_time(hi)}…")
         prompt = f"""This is a {"music video" if kind == "music" else "silent slapstick cartoon (no narration: gags, reactions and sound effects tell it)" if kind == "cartoon" else "story / short movie"}: \
 "{st['seq_name']}", {dur:.1f} seconds long.
 This request covers {lo:.1f}s to {hi:.1f}s{f' (part {gi + 1} of {len(groups)})' if len(groups) > 1 else ''}.
@@ -833,7 +834,7 @@ def feedback(st, settings, progress=None, cancel=None, kind="auto", use_claude=T
             notes += _dedupe(res["notes"], notes)
             summary = {k: res[k] for k in ("overall", "strengths", "top_fixes")}
         except StoryError as ex:
-            log("feedback: Claude skipped", ex)
+            log("feedback: the AI skipped", ex)
             summary["overall"] = (f"{by} couldn't watch the movie this time ({ex}) These "
                                   "notes come from the timeline checks only.")
     stop()

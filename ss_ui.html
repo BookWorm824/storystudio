@@ -427,6 +427,7 @@ function renderHome() {
         <div class="chips">
           <span class="chip">${P.duration} long</span><span class="chip">${P.shots} shots</span>
           ${P.narration ? `<span class="chip">${P.narration} narration clips</span>` : ""}
+          <span class="chip" title="The AI that plans, checks and writes for you">AI: ${esc(aiName())} <a href="#" onclick="openSettings();return false" style="margin-left:4px">change</a></span>
           ${P.export ? `<span class="chip good">Uses your export: ${esc(P.export)}</span>` : `<span class="chip">Preview made from your shots</span>`}
           ${P.missing.length ? `<span class="chip warn">${P.missing.length} file(s) not found</span>` : ""}
         </div>
@@ -1850,7 +1851,7 @@ function drawAi(ai) {
     : '<span class="chip">Not set up</span> <button class="btn" onclick="aiInstall()">Set up ChatGPT</button>';
   const choice = (v, t) => `<button class="${ai.choice===v?"on":""}" onclick="aiChoose('${v}')">${t}</button>`;
   box.innerHTML = `<b>Your AI helper</b>
-    <div class="sub" style="margin:4px 0 12px">Plans sounds and gives edit feedback. StoryStudio works with Claude or ChatGPT, using your own plan (no extra cost).</div>
+    <div class="sub" style="margin:4px 0 12px">Every part of StoryStudio that thinks uses this: shot lists and prompts, planning sounds, edit feedback, the story check, checking clips, lyrics and changing sounds. It works the same with Claude or ChatGPT, using your own plan (no extra cost). <b>Automatic</b> uses Claude, and ChatGPT whenever Claude can't answer.</div>
     <div class="field" style="margin-top:0">Claude ${ai.claude ? '<span class="chip good">On this computer</span>' : '<span class="chip">Not installed</span>'}</div>
     ${ai.claude ? modelPick("claude", ai.claude_models, ai.claude_model, "Opus, always the newest") : ""}
     <div class="field">ChatGPT ${gpt}</div>

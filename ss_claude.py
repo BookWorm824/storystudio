@@ -178,7 +178,8 @@ def ask(prompt, schema, system=None, images=None, timeout=1200):
         import ss_gpt as G
         from ss_core import load_settings
         msg = str(ex)
-        if load_settings().get("ai", "auto") == "auto" and G.find() and                 ("signed in" in msg or "usage limit" in msg):
+        if load_settings().get("ai", "auto") == "auto" and G.find() and                 ("signed in" in msg or "usage limit" in msg or "took too long" in msg
+                 or "couldn't answer" in msg):
             try:
                 ready = G.status() == "ready"
             except Exception:

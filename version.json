@@ -1,5 +1,5 @@
 {
-  "version": "1.30.1",
+  "version": "1.30.2",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -37,5 +37,5 @@
     "ss_change.py",
     "ss_lyricfilm.py"
   ],
-  "notes": "Lyrics on screen (both looks) no longer show commas, full stops or other stray punctuation, and the capitals are tidied: every line starts with a capital, no ALL CAPS, and every word for God or Jesus is capitalized (with Claude or ChatGPT, He, You and Your too when they mean God)."
+  "notes": "Every part of StoryStudio works with ChatGPT as well as Claude (all 44 kinds of question checked with ChatGPT). The project page shows which AI is helping, with a link to change it, and Automatic switches to ChatGPT whenever Claude can't answer."
 }

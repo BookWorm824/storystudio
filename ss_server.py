@@ -262,6 +262,7 @@ def note_view(n):
 
 
 def feedback_view():
+    import ss_claude as C
     st = S.st
     fb = (st or {}).get("feedback")
     if not fb:
@@ -269,7 +270,7 @@ def feedback_view():
     out = st.get("outputs") or {}
     return {"title": st["seq_name"], "kind": fb["kind"], "summary": fb["summary"],
             "focus": fb.get("focus", "all"),
-            "by": fb.get("by", "Claude"),
+            "by": fb.get("by") or C.ai_name(),
             "stats": fb["stats"], "notes": [note_view(n) for n in fb["notes"]],
             "video": media_url(st.get("feedback_preview") or st.get("picture")),
             "project": out.get("project", ""), "project_error": out.get("project_error", ""),
