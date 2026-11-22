@@ -1,5 +1,5 @@
 {
-  "version": "1.29.0",
+  "version": "1.30.0",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -34,7 +34,8 @@
     "storysound.ico",
     "ss_audio_template.xml",
     "ss_audit.py",
-    "ss_change.py"
+    "ss_change.py",
+    "ss_lyricfilm.py"
   ],
-  "notes": "A big reliability update. Line up my sounds again is rebuilt: it never undoes your own nudges, shows exactly what it moved, and asks before putting a missing sound back. A copy you have saved in Premiere is never written over. Changes to sounds are never lost. The project page is sorted into groups, and StoryStudio restarts by itself after an update."
+  "notes": "The Elegant lyrics look is now a pretty lyric video instead of karaoke: each line appears word by word as it's sung, in fine lettering with one word picked out in gold script, placed where the picture is calm, and drifts gently away. Karaoke for kids is unchanged."
 }

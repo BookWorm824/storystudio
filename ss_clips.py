@@ -57,7 +57,8 @@ def find_files(r, folder):
         ext = p.suffix.lower()
         if ext not in PICTURES and ext not in CLIPS:
             continue
-        if "(karaoke)" in p.name.lower() or "storystudio" in p.name.lower():
+        if "(karaoke)" in p.name.lower() or "(lyrics)" in p.name.lower() or \
+                "storystudio" in p.name.lower():
             continue
         stem = p.stem.strip().lower()
         who = next((names[k] for k in names if stem == k or stem.startswith(k + " ") or

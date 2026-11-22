@@ -580,6 +580,9 @@ def sample(st, settings, out):
             bg = None
     if bg is None:
         bg = Image.new("RGBA", (W, H), (38, 52, 84, 255))
+    if is_film(settings):
+        import ss_lyricfilm
+        return ss_lyricfilm.sample(st, settings, out, bg)
     words = "Twinkle twinkle little star how I wonder what you are".split()
     lines = []
     for k, chunk in enumerate((words[:4], words[4:])):
@@ -597,9 +600,24 @@ def sample(st, settings, out):
     return str(out)
 
 
+def is_film(settings):
+    """The "Elegant" look is a pretty lyric video (ss_lyricfilm), not karaoke."""
+    return (settings or {}).get("karaoke_style") == "elegant"
+
+
+def names(settings):
+    """(copy tag, file word) for the outputs: "(karaoke)" or, for the elegant look, "(lyrics)"."""
+    return ("lyrics", "lyrics") if is_film(settings) else ("karaoke", "karaoke lyrics")
+
+
 def render_overlay(st, out_mov, fps=None, progress=None, cancel=None, settings=None):
     """A video the length of the movie with a see-through background and the lyrics."""
     from PIL import Image
+    if is_film(settings):
+        import ss_lyricfilm
+        return ss_lyricfilm.render(st, st["karaoke"]["lines"], out_mov,
+                                   fps or float(st.get("fps") or 24.0), settings, progress,
+                                   cancel)
     W, H, S, n_rows, rows, chars = _layout(st, settings)
     lines = short_lines(st["karaoke"]["lines"], chars)
     st["karaoke"]["shown"] = len(lines)
@@ -706,12 +724,13 @@ def karaoke_video(st, settings, lines, progress=None, cancel=None):
     od = src.parent / "StoryStudio"
     od.mkdir(parents=True, exist_ok=True)
     name = safe_name(src.stem)
-    overlay = od / f"{name} - karaoke lyrics.mov"
+    tag, word = names(settings)
+    overlay = od / f"{name} - {word}.mov"
     render_overlay(st, overlay, st["fps"], lambda f, m: say(0.47 + 0.3 * f, m), cancel,
                    settings)
     if cancel and cancel():
         raise StoryError("Stopped.")
-    final = free_name(src.with_name(f"{src.stem} (karaoke).mp4"))
+    final = free_name(src.with_name(f"{src.stem} ({tag}).mp4"))
     say(0.78, "Putting the lyrics into your video…")
     proc = subprocess.Popen(
         [ffmpeg(), "-y", "-v", "error", "-progress", "pipe:1", "-nostats", "-i", str(src),
@@ -808,11 +827,12 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     time_lyrics(st, lines, lambda f, m: say(0.12 + 0.4 * f, m), cancel)
     od = E.out_dir(st)
     name = safe_name(st["seq_name"])
-    overlay = od / f"{name} - karaoke lyrics.mov"
+    tag, word = names(settings)
+    overlay = od / f"{name} - {word}.mov"
     render_overlay(st, overlay, seq["fps"], lambda f, m: say(0.52 + 0.3 * f, m), cancel,
                    settings)
     say(0.83, "Making the preview…")
-    preview = od / f"{name} - karaoke (preview).mp4"
+    preview = od / f"{name} - {tag} (preview).mp4"
     song = Path(st["work"]) / "karaoke" / "song.wav"
     from ss_core import probe
     pi = probe(st["picture"])
@@ -826,7 +846,7 @@ def karaoke(st, settings, lyrics_text, progress=None, cancel=None):
     import ss_prwrite as W
     real = Path(st["project"])
     import storysound as _E
-    proj = _E.copy_path(real, "karaoke")
+    proj = _E.copy_path(real, tag)
     try:
         out["project"] = W.add_overlay(st.get("snapshot") or st["project"], st["seq_uid"],
                                        overlay, 0.0, st["duration"], st["width"],

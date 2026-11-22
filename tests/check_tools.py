@@ -10,6 +10,7 @@ points at nothing, no two clips share a moment on one track, every sound file ex
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -530,6 +531,58 @@ def main():
         return (f"{len(made)} sounds made ({len(SPENT) - n0} files), remade one to a new file; "
                 f"her saved copy kept, new copy '{second.name}'")
     step("add sound effects, and never overwrite her copy", t_full)
+
+    def t_lyrics():
+        """Both lyric looks drawn over a real music video's timed lyrics (first 40 s): words
+        show while they're sung, nothing shows in the gaps, the sample picture is made."""
+        src = None
+        for f in (REAL_HOME / "work").glob("*/state.json"):
+            try:
+                d = json.loads(f.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                continue
+            k = d.get("karaoke") or {}
+            pic = d.get("video") or d.get("picture") or ""
+            if k.get("lines") and pic and os.path.exists(pic) and d.get("width"):
+                src = d
+                break
+        if src is None:
+            return "no music video with timed lyrics found (skipped)"
+        import numpy as np
+        import ss_karaoke as K
+        from PIL import Image
+        secs = 40.0
+        lines = [l for l in src["karaoke"]["lines"] if l["end"] < secs - 3]
+        assert lines, "no lyrics in the first 40 seconds"
+        notes = []
+        for look in ("kids", "elegant"):
+            st = {"width": src["width"], "height": src["height"], "duration": secs,
+                  "fps": src.get("fps") or 24, "video": src.get("video"),
+                  "picture": src.get("picture"), "work": str(HOME / "lyrics" / look),
+                  "karaoke": {"lines": lines}}
+            Path(st["work"]).mkdir(parents=True, exist_ok=True)
+            mov = Path(st["work"]) / "lyrics.mov"
+            K.render_overlay(st, mov, st["fps"], None, None, {"karaoke_style": look})
+            assert mov.exists() and mov.stat().st_size > 10000, f"{look}: no lyrics video"
+
+            def alpha_at(t):
+                f = Path(st["work"]) / f"a_{t:.1f}.png"
+                subprocess.run([core.ffmpeg(), "-y", "-v", "error", "-ss", f"{t:.2f}", "-i",
+                                str(mov), "-frames:v", "1", str(f)], check=True)
+                return np.asarray(Image.open(f).convert("RGBA"))[:, :, 3].astype(float).mean()
+            sung = (lines[0]["words"][-1]["start"] + lines[0]["words"][-1]["end"]) / 2 + 0.5
+            assert alpha_at(sung) > 0.2, f"{look}: no words showing while the first line is sung"
+            assert alpha_at(0.2) < 0.05 or lines[0]["start"] < 1.5, \
+                f"{look}: words showing before anything is sung"
+            out = Path(st["work"]) / "sample.jpg"
+            K.sample(st, {"karaoke_style": look}, out)
+            assert out.exists(), f"{look}: no sample picture"
+            notes.append(f"{look}: {st['karaoke'].get('shown')} lines")
+            if look == "elegant":
+                notes.append("spots " + ", ".join(sorted(set(st["karaoke"].get("spots") or []))))
+        assert K.names({"karaoke_style": "elegant"})[0] == "lyrics"
+        return "; ".join(notes)
+    step("lyrics: karaoke for kids and the elegant lyric video", t_lyrics)
 
     def t_update():
         import ss_update

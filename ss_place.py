@@ -77,7 +77,8 @@ def look(folder):
                 continue
             if ext not in K.PICTURES and ext not in K.CLIPS:
                 continue
-            if "(karaoke)" in p.name.lower() or "storystudio" in p.name.lower():
+            if "(karaoke)" in p.name.lower() or "(lyrics)" in p.name.lower() or \
+                "storystudio" in p.name.lower():
                 continue
             got = label_of(p.name)
             if not got:
