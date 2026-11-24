@@ -48,7 +48,26 @@ def update_first():
         pass
 
 
+def small_packages():
+    """Small Python packages added after the setup zip was made: installed quietly, in the
+    background, the first time StoryStudio opens without them (StoryStudio works meanwhile)."""
+    import importlib.util
+    import subprocess
+    need = [p for p in ("psutil", "pypdf") if importlib.util.find_spec(p) is None]
+    if not need:
+        return
+    py = Path(sys.executable)
+    if py.name.lower() == "pythonw.exe" and (py.parent / "python.exe").exists():
+        py = py.parent / "python.exe"
+    try:
+        subprocess.Popen([str(py), "-m", "pip", "install", "--quiet", *need],
+                         creationflags=0x08000000 if os.name == "nt" else 0)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     update_first()
+    small_packages()
     import ss_server  # noqa: E402  (imported after the update, so new files are used)
     ss_server.main()

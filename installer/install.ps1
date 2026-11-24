@@ -5,7 +5,8 @@
 # After installing, StoryStudio updates itself from GitHub (see ss_update.py).
 param(
     [switch]$CheckOnly,          # testing: copy the files and find Python, then stop
-    [string]$InstallTo = ""      # testing: install somewhere else
+    [string]$InstallTo = "",     # testing: install somewhere else
+    [switch]$NoShortcuts         # testing: leave the Start Menu and Desktop shortcuts alone
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -100,7 +101,7 @@ if (-not (Test-Path $vpy)) {
 & $vpy -m pip install --upgrade pip --quiet; Check "pip couldn't be updated."
 
 Say "Installing the basics"
-& $vpy -m pip install --quiet numpy pillow soundfile scipy requests sherpa-onnx transformers diffusers accelerate demucs pypdf
+& $vpy -m pip install --quiet numpy pillow soundfile scipy requests sherpa-onnx transformers diffusers accelerate demucs pypdf psutil
 Check "the basic Python packages couldn't be installed."
 
 Say "Installing the sound-making AI (large download, one time; this can take a while)"
@@ -174,6 +175,11 @@ if (-not (Test-Path (Join-Path $mdest "tokens.txt"))) {
 }
 
 # ------------------------------------------------------------------ shortcuts
+if ($NoShortcuts) {
+    Say "StoryStudio $($ver.version) is installed in $Home2 (no shortcuts: test install)."
+    try { Stop-Transcript | Out-Null } catch {}
+    exit 0
+}
 Say "Adding shortcuts"
 $pyw = Join-Path $Venv "Scripts\pythonw.exe"
 $target = Join-Path $AppDir "StoryStudio.pyw"

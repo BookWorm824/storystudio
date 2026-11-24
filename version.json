@@ -1,5 +1,5 @@
 {
-  "version": "1.30.2",
+  "version": "1.30.3",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -37,5 +37,5 @@
     "ss_change.py",
     "ss_lyricfilm.py"
   ],
-  "notes": "Every part of StoryStudio works with ChatGPT as well as Claude (all 44 kinds of question checked with ChatGPT). The project page shows which AI is helping, with a link to change it, and Automatic switches to ChatGPT whenever Claude can't answer."
+  "notes": "StoryStudio downloads everything it needs by itself on a new computer (no CleanView or CleanListen needed), and adds any small missing piece the first time it opens."
 }
