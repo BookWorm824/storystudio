@@ -18,7 +18,7 @@ def update_first():
         return
     try:
         import ss_update
-        info = ss_update.check(timeout=6)
+        info = ss_update.check(timeout=10)
         if not info:
             return
         win = None

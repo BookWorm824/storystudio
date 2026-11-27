@@ -1822,8 +1822,23 @@ async function openSettings() {
     <div class="card" style="padding:16px;margin-top:18px"><b>Something went wrong?</b>
       <div class="sub" style="margin:6px 0 10px">This puts one file on your Desktop with the details of what happened on this computer (no keys or passwords). Send that file to whoever helps you with StoryStudio.</div>
       <button class="btn" id="prbtn" onclick="problemReport()">Save a problem report</button></div>
+    <div class="card" style="padding:16px;margin-top:18px"><b>Version</b>
+      <div class="sub" id="verline" style="margin:6px 0 10px">StoryStudio keeps itself up to date.</div>
+      <button class="btn" id="verbtn" onclick="checkNow()">Check for updates</button></div>
     <div class="footerbar"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveKeys()">Save</button></div>`);
   try { drawAi((await api("ai_status")).ai); } catch (e) {}
+  checkNow(true);
+}
+async function checkNow(quiet) {
+  const line = $("#verline"), b = $("#verbtn");
+  if (!line) return;
+  if (!quiet) { b.disabled = true; line.innerHTML = `<span class="spin"></span> Checking for a new version…`; }
+  let j;
+  try { j = await api("update_check"); } catch (e) { if (b) b.disabled = false; return; }
+  if (b) b.disabled = false;
+  if (j.update) { line.innerHTML = `You have version <b>${esc(j.current)}</b>. Version <b>${esc(j.update.version)}</b> is ready.`; b.textContent = "Update now"; b.onclick = updateNow; return; }
+  if (j.error) { line.innerHTML = `You have version <b>${esc(j.current)}</b>. <span class="err">StoryStudio couldn't check for a new version: ${esc(j.error)}.</span> Check the internet connection, or ask whoever helps you with StoryStudio for the newest setup file.`; return; }
+  line.innerHTML = `You have version <b>${esc(j.current)}</b>, the newest.`;
 }
 let aiOther = {};                     // "Another model…" picked: show the box to type it in
 function modelPick(which, list, current, firstLabel) {

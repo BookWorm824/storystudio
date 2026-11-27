@@ -894,21 +894,24 @@ def api(name, a):
         return {"result": S.sb, "shot_types": SB.type_menu()}
     if name == "update_check":
         import ss_update
-        info = ss_update.check(timeout=8)
+        info = ss_update.check(timeout=10, patient=True)
         here = ss_update.local_version()
         if not info and here != RUN_VERSION:     # installed by another launch: just restart
             info = {"version": here, "notes": "It's already downloaded: StoryStudio just needs "
                     "to start again."}
         busy = (S.job is not None and not S.job.done) or S.asking > 0
         return {"update": {"version": info["version"], "notes": info.get("notes", "")}
-                if info else None, "current": RUN_VERSION,
+                if info else None, "current": RUN_VERSION, "error": ss_update.LAST.get("error", ""),
                 "auto": bool(info) and here != RUN_VERSION and not busy}
     if name == "update_now":
         import ss_update
         if (S.job and not S.job.done) or S.asking > 0:
             raise StoryError("StoryStudio is busy. Update when it has finished.")
-        info = ss_update.check(timeout=10)
+        info = ss_update.check(timeout=15, patient=True)
         installed = ss_update.local_version()
+        if not info and ss_update.LAST.get("error"):
+            raise StoryError("StoryStudio couldn't check for a new version: "
+                             f"{ss_update.LAST['error']}. Try again in a little while.")
         if not info and installed == RUN_VERSION:
             return {"ok": False, "message": "You already have the newest version."}
         if not info:                             # a newer version is installed, not running

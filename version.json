@@ -1,5 +1,5 @@
 {
-  "version": "1.30.3",
+  "version": "1.30.4",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -37,5 +37,5 @@
     "ss_change.py",
     "ss_lyricfilm.py"
   ],
-  "notes": "StoryStudio downloads everything it needs by itself on a new computer (no CleanView or CleanListen needed), and adds any small missing piece the first time it opens."
+  "notes": "Updates are sturdier: StoryStudio tries longer and has a second download address when GitHub can't be reached, and Settings shows your version and why an update couldn't run."
 }
