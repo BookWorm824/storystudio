@@ -564,6 +564,8 @@ def api(name, a):
         import ss_gpt as G
         v = ai_view()
         v["chatgpt"] = G.status()
+        import ss_claude as C
+        v["claude_state"] = C.status()
         v["chatgpt_models"] = G.models()         # asked from the ChatGPT program: always current
         v["model_name"] = ai_view()["model_name"]    # (now that the list has the names)
         return {"ai": v}
@@ -584,6 +586,10 @@ def api(name, a):
         import ss_gpt as G
         return {"job": run_job("Setting up ChatGPT", lambda p, c, ph: G.install(p), "home",
                                [90])}
+    if name == "ai_sign_in_claude":
+        import ss_claude as C
+        C.open_sign_in()
+        return {"ok": True}
     if name == "ai_sign_in_chatgpt":
         import ss_gpt as G
         G.open_sign_in()

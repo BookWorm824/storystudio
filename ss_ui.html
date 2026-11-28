@@ -1868,15 +1868,18 @@ function drawAi(ai) {
   const choice = (v, t) => `<button class="${ai.choice===v?"on":""}" onclick="aiChoose('${v}')">${t}</button>`;
   box.innerHTML = `<b>Your AI helper</b>
     <div class="sub" style="margin:4px 0 12px">Every part of StoryStudio that thinks uses this: shot lists and prompts, planning sounds, edit feedback, the story check, checking clips, lyrics and changing sounds. It works the same with Claude or ChatGPT, using your own plan (no extra cost). <b>Automatic</b> uses Claude, and ChatGPT whenever Claude can't answer.</div>
-    <div class="field" style="margin-top:0">Claude ${ai.claude ? '<span class="chip good">On this computer</span>' : '<span class="chip">Not installed</span>'}</div>
+    <div class="field" style="margin-top:0">Claude ${!ai.claude ? '<span class="chip">Not installed</span>'
+      : ai.claude_state === "signed_out" ? '<span class="chip warn">Not signed in</span> <button class="btn" onclick="aiSignInClaude()">Sign in to Claude</button>'
+      : ai.claude_state === "ready" ? '<span class="chip good">Ready</span>' : '<span class="chip good">On this computer</span>'}</div>
     ${ai.claude ? modelPick("claude", ai.claude_models, ai.claude_model, "Opus, always the newest") : ""}
     <div class="field">ChatGPT ${gpt}</div>
     ${ai.chatgpt === "ready" ? modelPick("chatgpt", ai.chatgpt_models, ai.chatgpt_model, "Your ChatGPT default") : ""}
     <div class="field">Use <div class="seg">${choice("auto","Automatic")}${choice("claude","Claude")}${choice("chatgpt","ChatGPT")}</div></div>
-    <div class="sub" style="margin:10px 0 0">${ai.name ? `Right now StoryStudio is using <b>${ai.name}</b>${ai.model_name ? ` (${esc(ai.model_name)})` : ""}.` : "Neither is set up yet: set up ChatGPT above, or install Claude."}${ai.claude && ai.claude_last ? ` Claude's last answer came from <b>${esc(ai.claude_last)}</b>.` : ""}</div>`;
+    <div class="sub" style="margin:10px 0 0">${ai.name ? `Right now StoryStudio is using <b>${ai.name}</b>${ai.model_name ? ` (${esc(ai.model_name)})` : ""}.${ai.provider === "claude" && ai.claude_state === "signed_out" ? ` <span class="err">Claude needs signing in first${ai.chatgpt === "ready" ? ", or choose ChatGPT" : ""}.</span>` : ""}` : "Neither is set up yet: set up ChatGPT above, or install Claude."}${ai.claude && ai.claude_last ? ` Claude's last answer came from <b>${esc(ai.claude_last)}</b>.` : ""}</div>`;
 }
 async function aiChoose(v) { const j = await api("ai_choose", {choice:v}); drawAi(Object.assign({}, H.ai, j.ai)); }
 async function aiSignIn() { await api("ai_sign_in_chatgpt"); toast("A sign-in window opened. Sign in there, then come back here.", false); setTimeout(async () => drawAi((await api("ai_status")).ai), 20000); }
+async function aiSignInClaude() { await api("ai_sign_in_claude"); toast("A sign-in window opened. Sign in there, then come back here.", false); setTimeout(async () => drawAi((await api("ai_status")).ai), 20000); }
 async function aiInstall() { closeModal(); const j = await api("ai_install_chatgpt"); watchJob(j.job); }
 // the Fal key is saved the moment it is pasted (no need to find the Save button)
 let falTimer = null;

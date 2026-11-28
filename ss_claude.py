@@ -117,6 +117,58 @@ def _env():
     return env
 
 
+# the Claude program being installed doesn't mean it's signed in (signing in to the Claude
+# desktop app doesn't sign in this program). Asked of the program itself; kept for a minute.
+_SIGNED = {"at": 0.0, "value": None}
+
+
+def signed_in(fresh=False):
+    """True / False, or None when the Claude program can't say (an old version)."""
+    if not fresh and time.time() - _SIGNED["at"] < 60:
+        return _SIGNED["value"]
+    exe = find_claude()
+    value = False
+    if exe:
+        try:
+            r = subprocess.run([exe, "auth", "status", "--json"], capture_output=True, text=True,
+                               encoding="utf8", errors="replace", timeout=30, env=_env(),
+                               **NOWIN)
+            out = (r.stdout or "").strip()
+            try:
+                value = bool(json.loads(out[out.index("{"):]).get("loggedIn"))
+            except ValueError:
+                low = (out + (r.stderr or "")).lower()
+                value = None if ("unknown" in low or "error" in low) else r.returncode == 0
+        except Exception as ex:
+            log("claude sign-in check failed:", type(ex).__name__, ex)
+            value = None
+    _SIGNED.update(at=time.time(), value=value)
+    return value
+
+
+def status():
+    """"missing" | "ready" | "signed_out" (for Settings)."""
+    if not find_claude():
+        return "missing"
+    return "signed_out" if signed_in(fresh=True) is False else "ready"
+
+
+def open_sign_in():
+    """A small window where the Claude program opens the Claude sign-in page in the browser."""
+    exe = find_claude()
+    if not exe:
+        raise StoryError("Claude isn't installed on this computer.")
+    _SIGNED.update(at=0.0)
+    if os.name == "nt":
+        subprocess.Popen("cmd /c \"title Sign in to Claude & echo Sign in with your Claude "
+                         "account in the web page that opens. & echo When it says you are "
+                         "signed in, close this window and go back to StoryStudio. & echo."
+                         f" & \"{exe}\" auth login & pause\"", env=_env(),
+                         creationflags=0x00000010)
+    else:
+        subprocess.Popen([exe, "auth", "login"], env=_env())
+
+
 def _fail(text):
     low = (text or "").lower()
     if "selected model" in low or ("model" in low and any(
@@ -126,8 +178,14 @@ def _fail(text):
         raise StoryError(f"Claude couldn't use the model chosen in Settings "
                          f"({model_label()}). It may not be part of your plan. Open Settings "
                          "(the gear at the top) and pick another model.")
-    if any(k in low for k in ("not logged in", "/login", "authenticat", "401")):
-        raise StoryError("Claude isn't signed in. Open Claude, sign in, then try again.")
+    if any(k in low for k in ("not logged in", "/login", "authenticat", "invalid api key",
+                              "oauth", "401")):
+        log("claude says:", (text or "")[-600:])
+        if signed_in(fresh=True) is not True:
+            raise StoryError("Claude isn't signed in on this computer. Open Settings (the gear "
+                             "at the top) and click \"Sign in to Claude\", or choose ChatGPT "
+                             "there.")
+        log("claude is signed in, so this wasn't a sign-in problem")
     if any(k in low for k in ("usage limit", "rate limit", "limit reached", "quota")):
         raise StoryError("You've reached your Claude usage limit for now. It resets after a "
                          "few hours.")
@@ -146,6 +204,8 @@ def provider():
         return "chatgpt"
     if want == "claude" and has_claude:
         return "claude"
+    if has_claude and has_gpt and want != "claude" and signed_in() is False:
+        return "chatgpt"
     if has_claude and not (has_gpt and time.time() < _CLAUDE_DOWN[0]):
         return "claude"
     if has_gpt:
@@ -227,7 +287,12 @@ def ask_claude(prompt, schema, system=None, images=None, timeout=1200):
             result = ev
     _answered_by(result)
     if result.get("is_error") or "structured_output" not in result:
-        _fail(str(result.get("result") or r.stderr or r.stdout))
+        if not result:
+            log("claude gave no answer; exit", r.returncode, (r.stderr or "")[-800:],
+                (r.stdout or "")[-800:])
+        _fail(str(result.get("result") or r.stderr or
+                  "\n".join(ln for ln in (r.stdout or "").splitlines()
+                            if not ln.lstrip().startswith("{"))))
     return result["structured_output"]
 
 

@@ -1,5 +1,5 @@
 {
-  "version": "1.30.6",
+  "version": "1.30.7",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -37,5 +37,5 @@
     "ss_change.py",
     "ss_lyricfilm.py"
   ],
-  "notes": "Fixes \"Check for updates\" in Settings showing \"Something went wrong\" the first time StoryStudio opens after an update."
+  "notes": "Settings now shows whether Claude is really signed in on this computer, with a \"Sign in to Claude\" button. Automatic uses ChatGPT while Claude is signed out."
 }
