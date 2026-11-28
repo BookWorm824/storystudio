@@ -1,5 +1,5 @@
 {
-  "version": "1.30.5",
+  "version": "1.30.6",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -37,5 +37,5 @@
     "ss_change.py",
     "ss_lyricfilm.py"
   ],
-  "notes": "Pasting a Fal key: StoryStudio tidies what was pasted, checks the key with Fal right away (free), and says plainly whether Fal accepted it."
+  "notes": "Fixes \"Check for updates\" in Settings showing \"Something went wrong\" the first time StoryStudio opens after an update."
 }

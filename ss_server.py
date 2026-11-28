@@ -18,6 +18,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
+import sys as _sys
+# The starter (StoryStudio.pyw) loads the updater, installs a new version, and only then loads
+# this file. Python would keep using the OLD updater (and anything it loaded) for the rest of the
+# run, so the new version's update button crashed on its first run. Forget them: the next import
+# reads the new files.
+for _m in ("ss_update", "ss_core"):
+    _sys.modules.pop(_m, None)
+
 import ss_core as core
 from ss_core import APP_DATA, APP_DIR, StoryError, fmt_time, log, log_error
 
