@@ -11,6 +11,7 @@ finished, then the result (a link to the sound) is fetched and downloaded. A cli
 movie has to be on Fal's own file store before a sound maker can watch it.
 """
 import json
+import re
 import os
 import subprocess
 import threading
@@ -55,6 +56,50 @@ def _plain(status, body):
         return ("Fal didn't accept your key. Open Settings (the gear at the top) and paste "
                 "your Fal key again.")
     return None
+
+
+KEY_SHAPE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{16,}",
+                       re.I)
+
+
+def clean_key(text):
+    """The Fal key out of whatever was pasted: spaces, line breaks, quote marks, "FAL_KEY=",
+    "Key ", or a whole line of text around it."""
+    t = "".join(str(text or "").split())                   # no spaces or line breaks inside
+    m = KEY_SHAPE.search(t)
+    if m:
+        return m.group(0)
+    t = t.strip("\"'\u201c\u201d\u2018\u2019`<>")
+    t = re.sub(r"^(?:fal_key|falkey|key|bearer|apikey|api_key)[:=]?", "", t, flags=re.I)
+    return t.strip("\"'\u201c\u201d\u2018\u2019`<>")
+
+
+def check_key(key):
+    """Does Fal accept this key? ("ok" | "bad" | "offline", plain message). Costs nothing: it
+    only asks Fal for a short-lived file-store pass, which needs a valid key."""
+    if not key:
+        return "bad", "Nothing was pasted."
+    req = urllib.request.Request(f"{REST}/storage/auth/token?storage_type=fal-cdn-v3",
+                                 data=b"{}", method="POST",
+                                 headers={"Authorization": f"Key {key}", "User-Agent": "StoryStudio",
+                                          "Content-Type": "application/json",
+                                          "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            r.read()
+        return "ok", "Fal accepted your key."
+    except urllib.error.HTTPError as ex:
+        body = ex.read().decode("utf8", "replace")
+        if ex.code in (401, 403):
+            return "bad", ("Fal says this key isn't valid. Copy it again from fal.ai (Dashboard, "
+                           "then Keys): the whole key, which looks like two parts joined by a "
+                           "colon, for example 1a2b3c4d-....:9f8e7d....")
+        if ex.code == 402 or "balance" in body.lower():
+            return "ok", "Fal accepted your key, but your Fal account has no credit yet."
+        return "offline", f"Fal couldn't check the key just now ({ex.code}). It's saved; try making sounds later."
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return "offline", ("StoryStudio couldn't reach Fal to check the key (no internet, or a "
+                           "security program blocked it). It's saved anyway.")
 
 
 class Fal:

@@ -1,5 +1,5 @@
 {
-  "version": "1.30.4",
+  "version": "1.30.5",
   "files": [
     "StoryStudio.pyw",
     "storysound.py",
@@ -37,5 +37,5 @@
     "ss_change.py",
     "ss_lyricfilm.py"
   ],
-  "notes": "Updates are sturdier: StoryStudio tries longer and has a second download address when GitHub can't be reached, and Settings shows your version and why an update couldn't run."
+  "notes": "Pasting a Fal key: StoryStudio tidies what was pasted, checks the key with Fal right away (free), and says plainly whether Fal accepted it."
 }

@@ -639,11 +639,27 @@ def api(name, a):
                 S.settings["fal_limit"] = max(0.0, round(float(a["fal_limit"] or 0), 2))
             except (TypeError, ValueError):
                 S.settings["fal_limit"] = 0.0
-        for k in ("freesound_key", "hf_key", "fal_key"):
+        fal = None
+        if a.get("fal_key"):                       # cleaned up, and tried with Fal first
+            import ss_fal
+            key = ss_fal.clean_key(a["fal_key"])
+            state, msg = ss_fal.check_key(key)
+            fal = {"state": state, "message": msg}
+            log("fal key check:", state)
+            if state != "bad":
+                S.settings["fal_key"] = key
+        for k in ("freesound_key", "hf_key"):
             if a.get(k) is not None and a.get(k) != "":
                 S.settings[k] = a[k].strip()
         core.save_settings(S.settings)
-        return {"ok": True}
+        try:                                       # really written to the settings file?
+            if fal and fal["state"] != "bad" and \
+                    core.load_settings().get("fal_key") != S.settings.get("fal_key"):
+                fal = {"state": "bad", "message": "StoryStudio couldn't save the key on this "
+                       "computer (its settings file couldn't be written)."}
+        except Exception:
+            pass
+        return {"ok": True, "fal": fal}
     if name == "start_sounds":
         api("save_settings", a)
         st, s = S.st, choices(a)

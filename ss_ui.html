@@ -1813,6 +1813,7 @@ async function openSettings() {
     <p class="sub">Keys are kept on this computer only.</p>
     <label>Fal key, for better sound effects ${H.has_fal_key ? '<span class="chip good">saved</span>' : ""}</label>
     <input type="password" id="falk" autocomplete="off" placeholder="${H.has_fal_key ? "Leave empty to keep the saved key" : "Paste your Fal key"}" oninput="saveFalKey()" onchange="saveFalKey(true)">
+    <div class="sub" id="falmsg" style="margin:4px 0 0"></div>
     <div class="sub" style="margin-top:-8px;margin-bottom:16px">With this, sound effects are made by Fal instead of the sound AI on this PC: clearer, and made by watching each clip so they land in step with the picture. Fal charges your own Fal account, a few dollars for a story with lots of sounds. To get a key: sign in at fal.ai, open Keys, press “Add key” and copy it.</div>
     <label>Hugging Face key, for Stable Audio Open backgrounds ${H.has_hf_key ? '<span class="chip good">saved</span>' : ""}</label>
     <input type="text" id="hfk" placeholder="${H.has_hf_key ? "Leave empty to keep the saved key" : "Paste your key"}">
@@ -1884,15 +1885,24 @@ function saveFalKey(now) {
   falTimer = setTimeout(async () => {
     const box = $("#falk"); if (!box) return;
     const fal = box.value.trim(); if (fal.length < 8) return;
-    await api("save_settings", {fal_key: fal});
+    if (box.dataset.busy === fal) return;
+    box.dataset.busy = fal;
+    const msg = $("#falmsg"); if (msg) msg.innerHTML = `<span class="spin"></span> Checking the key with Fal…`;
+    let j;
+    try { j = await api("save_settings", {fal_key: fal}); } catch (e) { box.dataset.busy = ""; if (msg) msg.textContent = ""; return; }
+    box.dataset.busy = "";
+    const r = j.fal || {state: "ok", message: "Saved."};
+    if (r.state === "bad") { if (msg) msg.innerHTML = `<span class="err">${esc(r.message)}</span>`; return; }
     H.has_fal_key = true; box.value = ""; box.placeholder = "Saved. Paste a different key to replace it";
     const lab = box.previousElementSibling; if (lab && !lab.querySelector(".chip")) lab.insertAdjacentHTML("beforeend", '<span class="chip good">saved</span>');
-    toast("Your Fal key is saved. Sound effects will be made by Fal.");
+    if (msg) msg.innerHTML = r.state === "ok" ? `<span class="ok">✓ ${esc(r.message)} Sound effects will be made by Fal.</span>` : `<span class="err">${esc(r.message)}</span>`;
+    toast(r.state === "ok" ? "Your Fal key is saved. Sound effects will be made by Fal." : "Your Fal key is saved.");
   }, now ? 0 : 900);
 }
 async function saveKeys() {
   const hf = $("#hfk").value.trim(), fs = $("#fsk").value.trim(), fal = $("#falk").value.trim();
-  await api("save_settings", {hf_key:hf, freesound_key:fs, fal_key:fal, use_freesound: fs ? true : undefined});
+  const j = await api("save_settings", {hf_key:hf, freesound_key:fs, fal_key:fal, use_freesound: fs ? true : undefined});
+  if (j.fal && j.fal.state === "bad") { const m = $("#falmsg"); if (m) m.innerHTML = `<span class="err">${esc(j.fal.message)}</span>`; return; }
   closeModal(); toast("Saved"); H = await api("hello");
 }
 
